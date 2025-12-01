@@ -26,7 +26,7 @@ class Config:
     # If False, requires manual review before applying
     AUTO_APPLY_ENABLED = os.getenv('AUTO_APPLY_ENABLED', 'false').lower() == 'true'
     
-    # Job search parameters - focused on tech/fintech internships
+    # Job search parameters - focused on tech/fintech internships (English + Turkish)
     JOB_TITLES = os.getenv('JOB_TITLES', 
         'Software Engineering Intern,'
         'Software Developer Intern,'
@@ -41,10 +41,23 @@ class Config:
         'Finance Technology Intern,'
         'Quantitative Analyst Intern,'
         'Summer Intern Software,'
-        'Summer Intern Technology'
+        'Summer Intern Technology,'
+        'Yazılım Stajyeri,'
+        'Yazılım Geliştirici Stajyeri,'
+        'Veri Bilimi Stajyeri,'
+        'Veri Analisti Stajyeri,'
+        'Fintech Stajyeri,'
+        'Teknoloji Stajyeri,'
+        'Bilgisayar Bilimleri Stajyeri,'
+        'Backend Stajyeri,'
+        'Frontend Stajyeri,'
+        'Full Stack Stajyeri,'
+        'Stajyer Yazılım Mühendisi,'
+        'Stajyer Yazılım Geliştirici'
     ).split(',')
     
     # Locations: Canada (GTA) and Turkey (Istanbul, Ankara)
+    # Both English and Turkish location names included
     LOCATIONS = os.getenv('LOCATIONS', 
         'Remote,'
         'Toronto, ON,'
@@ -57,8 +70,13 @@ class Config:
         'Burlington, ON,'
         'Ontario, Canada,'
         'Istanbul, Turkey,'
+        'Istanbul, Türkiye,'
         'Ankara, Turkey,'
-        'Turkey'
+        'Ankara, Türkiye,'
+        'Turkey,'
+        'Türkiye,'
+        'İstanbul,'
+        'Ankara'
     ).split(',')
     
     EXPERIENCE_LEVELS = ['Internship', 'Entry Level', 'Student']

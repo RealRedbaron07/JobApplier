@@ -69,7 +69,18 @@ class CoverLetterGenerator:
                         edu_summary += f" from {institution}"
                     edu_summary += "\n"
             
-            prompt = f"""Write a professional, concise cover letter for a job application. 
+            # Detect if job description is in Turkish
+            job_desc = job.get('description', '')
+            job_title = job.get('title', '')
+            is_turkish = any(word in (job_desc + job_title).lower() for word in [
+                'stajyer', 'staj', 'yazılım', 'geliştirici', 'mühendis',
+                'türkçe', 'türkiye', 'istanbul', 'ankara', 'şirket',
+                'pozisyon', 'iş', 'başvuru', 'deneyim', 'beceri'
+            ])
+            
+            language_note = "Write the cover letter in Turkish." if is_turkish else "Write the cover letter in English."
+            
+            prompt = f"""Write a professional, concise cover letter for a job application. {language_note}
 
 Job Details:
 - Position: {job.get('title', 'N/A')}
@@ -95,6 +106,7 @@ Requirements:
 - Show enthusiasm for the company/role
 - Professional but personable tone
 - End with a call to action
+- {language_note}
 
 Write the cover letter:"""
 

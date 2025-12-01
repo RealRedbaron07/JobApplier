@@ -5,23 +5,35 @@ class JobMatcher:
     def __init__(self, user_profile: Dict):
         self.user_profile = user_profile
         
-        # Define keywords for tech/fintech internships
+        # Define keywords for tech/fintech internships (English + Turkish)
         self.tech_keywords = [
+            # English
             'python', 'java', 'javascript', 'react', 'node', 'sql', 'git',
             'aws', 'docker', 'api', 'software', 'developer', 'engineer',
             'data', 'machine learning', 'ai', 'web development', 'backend',
-            'frontend', 'full stack', 'mobile', 'android', 'ios'
+            'frontend', 'full stack', 'mobile', 'android', 'ios',
+            # Turkish
+            'yazılım', 'geliştirici', 'mühendis', 'programlama', 'kodlama',
+            'veri', 'web', 'uygulama', 'sistem', 'teknoloji', 'bilgisayar'
         ]
         
         self.fintech_keywords = [
+            # English
             'fintech', 'finance', 'trading', 'banking', 'payment', 'blockchain',
             'cryptocurrency', 'financial', 'investment', 'portfolio', 'risk',
-            'quantitative', 'analytics', 'economics', 'market', 'capital'
+            'quantitative', 'analytics', 'economics', 'market', 'capital',
+            # Turkish
+            'finans', 'banka', 'yatırım', 'ekonomi', 'ticaret', 'pazar',
+            'finansal', 'kripto', 'blokzincir'
         ]
         
         self.internship_keywords = [
+            # English
             'intern', 'internship', 'co-op', 'summer', 'undergraduate',
-            'student', 'entry level', 'junior', 'trainee', 'associate'
+            'student', 'entry level', 'junior', 'trainee', 'associate',
+            # Turkish
+            'stajyer', 'staj', 'stajyerlik', 'öğrenci', 'yaz stajı',
+            'kış stajı', 'staj programı', 'stajyerlik programı'
         ]
         
         self.red_flags = [
@@ -74,9 +86,9 @@ class JobMatcher:
             score += min(15, skill_matches * 4)
         
         # 5. Location bonus (10 points)
-        if 'remote' in job_location or 'hybrid' in job_location:
+        if 'remote' in job_location or 'hybrid' in job_location or 'uzaktan' in job_location:
             score += 10
-        elif any(city in job_location for city in ['san francisco', 'new york', 'boston', 'seattle']):
+        elif any(city in job_location for city in ['san francisco', 'new york', 'boston', 'seattle', 'istanbul', 'ankara', 'turkey', 'türkiye']):
             score += 5
         
         # 6. Red flags (deductions)
