@@ -12,6 +12,7 @@ from scrapers.workday_scraper import WorkdayScraper
 from selenium.webdriver.common.by import By
 from config import Config
 from datetime import datetime, timezone, timedelta
+from sqlalchemy import or_, and_
 import json
 from cover_letter_generator import CoverLetterGenerator
 from resume_tailor import ResumeTailor
@@ -46,24 +47,52 @@ def apply_to_jobs():
         print("\n⚠️  No default resume in profile. You'll need to provide one for each job.")
     
     # Get jobs to apply to
-    # For now, we'll apply to jobs with high match scores that haven't been applied to
-    # In a full implementation, you'd filter by approved status
-    jobs_to_apply = session.query(Job).filter_by(
+    # Filter by: not applied, match score, date (MAX_JOB_AGE_DAYS), and remove duplicates
+    cutoff_date = datetime.now(timezone.utc) - timedelta(days=Config.MAX_JOB_AGE_DAYS)
+    
+    # Query jobs with date filtering (use posted_date if available, otherwise discovered_date)
+    jobs_query = session.query(Job).filter_by(
         applied=False
     ).filter(
         Job.match_score >= Config.MIN_MATCH_SCORE
-    ).order_by(Job.match_score.desc()).limit(10).all()
+    ).filter(
+        # Filter by date: use posted_date if available, otherwise discovered_date
+        or_(
+            and_(Job.posted_date.isnot(None), Job.posted_date >= cutoff_date),
+            and_(Job.posted_date.is_(None), Job.discovered_date >= cutoff_date)
+        )
+    )
+    
+    # Get all candidates first
+    all_candidates = jobs_query.order_by(Job.match_score.desc()).all()
+    
+    # Remove duplicates (same title+company, case-insensitive)
+    seen_jobs = {}
+    jobs_to_apply = []
+    for job in all_candidates:
+        # Create a unique key from title and company (case-insensitive)
+        job_key = (job.title.strip().lower(), job.company.strip().lower())
+        
+        # If we haven't seen this title+company combination, add it
+        if job_key not in seen_jobs:
+            seen_jobs[job_key] = job
+            jobs_to_apply.append(job)
+    
+    # Limit to top 10 after deduplication
+    jobs_to_apply = jobs_to_apply[:10]
     
     if not jobs_to_apply:
         print("\nNo jobs to apply to.")
         print("Jobs need to have:")
         print(f"  - Match score >= {Config.MIN_MATCH_SCORE}")
         print("  - Not already applied")
+        print(f"  - Posted/discovered within last {Config.MAX_JOB_AGE_DAYS} days")
+        print("  - Unique (no duplicate title+company)")
         print("\nRun 'python3 main.py' to find more jobs, or 'python3 review_ui.py' to review existing ones.")
         session.close()
         return
     
-    print(f"\nFound {len(jobs_to_apply)} jobs to apply to")
+    print(f"\nFound {len(jobs_to_apply)} jobs to apply to (after filtering by date and removing duplicates)")
     
     # Ask for resume ONCE at the beginning
     print("\n" + "=" * 70)

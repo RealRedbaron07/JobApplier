@@ -54,87 +54,23 @@ class GlassdoorScraper(BaseScraper):
             self.driver.get(search_url)
             self.random_delay(2, 4)
             
-            # Try multiple selectors for job cards
-            job_cards = []
-            card_selectors = [
-                "li[data-test='jobListing']",
-                "li.jobListing",
-                "div[data-test='job-listing']",
-            ]
-            
-            for selector in card_selectors:
-                try:
-                    job_cards = self.driver.find_elements(By.CSS_SELECTOR, selector)
-                    if job_cards:
-                        break
-                except:
-                    continue
+            job_cards = self.driver.find_elements(By.CSS_SELECTOR, "li[data-test='jobListing']")
             
             for card in job_cards[:50]:
                 try:
-                    # Try multiple selectors for each field
-                    title = None
-                    title_selectors = [
-                        "a[data-test='job-link']",
-                        "a.jobLink",
-                    ]
-                    for sel in title_selectors:
-                        try:
-                            title_elem = card.find_element(By.CSS_SELECTOR, sel)
-                            title = title_elem.text
-                            if title:
-                                break
-                        except:
-                            continue
+                    title = card.find_element(By.CSS_SELECTOR, "a[data-test='job-link']").text
+                    company = card.find_element(By.CSS_SELECTOR, "div[data-test='employer-name']").text
+                    location_elem = card.find_element(By.CSS_SELECTOR, "div[data-test='emp-location']")
+                    job_location = location_elem.text
+                    job_link = card.find_element(By.CSS_SELECTOR, "a[data-test='job-link']").get_attribute("href")
                     
-                    if not title:
-                        continue
-                    
-                    company = None
-                    company_selectors = [
-                        "div[data-test='employer-name']",
-                        "span.employerName",
-                    ]
-                    for sel in company_selectors:
-                        try:
-                            company_elem = card.find_element(By.CSS_SELECTOR, sel)
-                            company = company_elem.text
-                            if company:
-                                break
-                        except:
-                            continue
-                    
-                    job_location = None
-                    location_selectors = [
-                        "div[data-test='emp-location']",
-                        "div.location",
-                    ]
-                    for sel in location_selectors:
-                        try:
-                            loc_elem = card.find_element(By.CSS_SELECTOR, sel)
-                            job_location = loc_elem.text
-                            if job_location:
-                                break
-                        except:
-                            continue
-                    
-                    job_link = None
-                    try:
-                        link_elem = card.find_element(By.CSS_SELECTOR, "a[data-test='job-link']")
-                        job_link = link_elem.get_attribute("href")
-                        if job_link and not job_link.startswith('http'):
-                            job_link = f"{self.base_url}{job_link}"
-                    except:
-                        pass
-                    
-                    if title and company and job_link:
-                        jobs.append({
-                            'title': title,
-                            'company': company,
-                            'location': job_location or location,
-                            'url': job_link,
-                            'platform': 'glassdoor'
-                        })
+                    jobs.append({
+                        'title': title,
+                        'company': company,
+                        'location': job_location,
+                        'url': job_link,
+                        'platform': 'glassdoor'
+                    })
                 except Exception as e:
                     continue
         except Exception as e:
@@ -153,28 +89,8 @@ class GlassdoorScraper(BaseScraper):
             self.driver.get(job_url)
             self.random_delay(2, 3)
             
-            # Try multiple selectors for job description
-            description = None
-            desc_selectors = [
-                (By.CLASS_NAME, "jobDescriptionContent"),
-                (By.CSS_SELECTOR, "div.jobDescriptionContent"),
-                (By.CSS_SELECTOR, "div[data-test='jobDescriptionText']"),
-                (By.CSS_SELECTOR, "div.jobDescription"),
-            ]
-            
-            for by, selector in desc_selectors:
-                try:
-                    desc_elem = self.driver.find_element(by, selector)
-                    description = desc_elem.text
-                    if description and len(description) > 50:
-                        break
-                except:
-                    continue
-            
-            if description:
-                details['description'] = description
-            else:
-                details['description'] = "Description not available"
+            description = self.driver.find_element(By.CLASS_NAME, "jobDescriptionContent").text
+            details['description'] = description
         except Exception as e:
             print(f"Error getting Glassdoor job details: {e}")
         

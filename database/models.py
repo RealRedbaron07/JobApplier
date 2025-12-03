@@ -26,11 +26,6 @@ class Job(Base):
     applied_date = Column(DateTime)
     application_status = Column(String(50))  # applied, rejected, interview, etc.
     cover_letter = Column(Text)
-    cover_letter_path = Column(String(500))  # Path to generated cover letter file
-    original_resume_path = Column(String(500))  # Path to original resume used for this application
-    tailored_resume_path = Column(String(500))  # Path to tailored resume file
-    application_method = Column(String(50))  # linkedin_easy_apply, manual, external_site
-    application_notes = Column(Text)  # Detailed notes about the application
     notes = Column(Text)
     external_site = Column(Boolean, default=False)
     external_url = Column(Text)
@@ -39,39 +34,14 @@ class UserProfile(Base):
     __tablename__ = 'user_profile'
     
     id = Column(Integer, primary_key=True)
-    resume_path = Column(String(500))  # Optional: default resume path (can be overridden per application)
+    resume_path = Column(String(500))
     skills = Column(Text)  # JSON string
     experience = Column(Text)
     education = Column(Text)
     preferred_titles = Column(Text)  # JSON string
     preferred_locations = Column(Text)  # JSON string
     min_salary = Column(Integer)
-    # Contact information for auto-filling forms
-    email = Column(String(255))
-    phone = Column(String(50))
-    first_name = Column(String(100))
-    last_name = Column(String(100))
     updated_date = Column(DateTime, default=datetime.utcnow)
-
-class ApplicationRecord(Base):
-    """Detailed record of each application for tracking and safety."""
-    __tablename__ = 'application_records'
-    
-    id = Column(Integer, primary_key=True)
-    job_id = Column(Integer)  # Reference to Job
-    application_date = Column(DateTime, default=datetime.utcnow)
-    resume_used = Column(String(500))  # Path to resume used
-    cover_letter_used = Column(String(500))  # Path to cover letter used
-    tailored_resume_used = Column(String(500))  # Path to tailored resume used
-    application_method = Column(String(50))  # How application was submitted
-    application_status = Column(String(50))  # submitted, pending, rejected, interview, offer
-    follow_up_date = Column(DateTime)  # When to follow up
-    response_received = Column(Boolean, default=False)
-    response_date = Column(DateTime)
-    response_notes = Column(Text)
-    interview_date = Column(DateTime)
-    offer_details = Column(Text)
-    notes = Column(Text)
 
 # Database setup
 try:

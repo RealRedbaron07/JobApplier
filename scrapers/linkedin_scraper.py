@@ -45,102 +45,29 @@ class LinkedInScraper(BaseScraper):
         # Use public job search URL
         search_url = f"{self.base_url}/jobs/search/?keywords={keywords.replace(' ', '%20')}&location={location.replace(' ', '%20')}"
         
+        self.driver.get(search_url)
+        self.random_delay(2, 4)
+        
         try:
-            self.driver.get(search_url)
-            self.random_delay(2, 4)
-            
-            # Try multiple selectors for job cards (LinkedIn changes HTML)
-            job_cards = []
-            card_selectors = [
-                "div.base-card",
-                "div.job-search-card",
-                "li.jobs-search-results__list-item",
-                "div[data-job-id]",
-            ]
-            
-            for selector in card_selectors:
-                try:
-                    job_cards = self.driver.find_elements(By.CSS_SELECTOR, selector)
-                    if job_cards:
-                        break
-                except:
-                    continue
+            # Updated selector for job cards
+            job_cards = self.driver.find_elements(By.CSS_SELECTOR, "div.base-card")
             
             for card in job_cards[:50]:
                 try:
-                    # Try multiple selectors for title
-                    title = None
-                    title_selectors = [
-                        "h3.base-search-card__title",
-                        "h3.job-search-card__title",
-                        "a.job-search-card__link",
-                    ]
-                    for sel in title_selectors:
-                        try:
-                            title_elem = card.find_element(By.CSS_SELECTOR, sel)
-                            title = title_elem.text
-                            if title:
-                                break
-                        except:
-                            continue
+                    title_elem = card.find_element(By.CSS_SELECTOR, "h3.base-search-card__title")
+                    title = title_elem.text
+                    company = card.find_element(By.CSS_SELECTOR, "h4.base-search-card__subtitle").text
+                    location_elem = card.find_element(By.CSS_SELECTOR, "span.job-search-card__location")
+                    job_location = location_elem.text
+                    job_link = card.find_element(By.CSS_SELECTOR, "a.base-card__full-link").get_attribute("href")
                     
-                    if not title:
-                        continue
-                    
-                    # Try multiple selectors for company
-                    company = None
-                    company_selectors = [
-                        "h4.base-search-card__subtitle",
-                        "h4.job-search-card__subtitle",
-                        "a.job-search-card__subtitle-link",
-                    ]
-                    for sel in company_selectors:
-                        try:
-                            company_elem = card.find_element(By.CSS_SELECTOR, sel)
-                            company = company_elem.text
-                            if company:
-                                break
-                        except:
-                            continue
-                    
-                    # Try multiple selectors for location
-                    job_location = None
-                    location_selectors = [
-                        "span.job-search-card__location",
-                        "span.base-search-card__metadata",
-                    ]
-                    for sel in location_selectors:
-                        try:
-                            loc_elem = card.find_element(By.CSS_SELECTOR, sel)
-                            job_location = loc_elem.text
-                            if job_location:
-                                break
-                        except:
-                            continue
-                    
-                    # Get job link
-                    job_link = None
-                    link_selectors = [
-                        "a.base-card__full-link",
-                        "a.job-search-card__link",
-                    ]
-                    for sel in link_selectors:
-                        try:
-                            link_elem = card.find_element(By.CSS_SELECTOR, sel)
-                            job_link = link_elem.get_attribute("href")
-                            if job_link:
-                                break
-                        except:
-                            continue
-                    
-                    if title and company and job_link:
-                        jobs.append({
-                            'title': title,
-                            'company': company,
-                            'location': job_location or location,
-                            'url': job_link,
-                            'platform': 'linkedin'
-                        })
+                    jobs.append({
+                        'title': title,
+                        'company': company,
+                        'location': job_location,
+                        'url': job_link,
+                        'platform': 'linkedin'
+                    })
                 except Exception:
                     continue
         except Exception as e:
@@ -150,54 +77,22 @@ class LinkedInScraper(BaseScraper):
     
     def get_job_details(self, job_url: str) -> Dict:
         """Get detailed job information."""
+        self.driver.get(job_url)
+        self.random_delay(2, 3)
+        
         details = {
             'description': '',
             'external_site': True # Assume external unless Easy Apply is found
         }
-        
         try:
-            self.driver.get(job_url)
-            self.random_delay(2, 3)
-            
-            # Try multiple selectors for job description
-            description = None
-            desc_selectors = [
-                "div.show-more-less-html__markup",
-                "div.jobs-description-content__text",
-                "div[data-test-id='job-description']",
-                "section.jobs-description",
-            ]
-            
-            for selector in desc_selectors:
-                try:
-                    desc_elem = self.driver.find_element(By.CSS_SELECTOR, selector)
-                    description = desc_elem.text
-                    if description and len(description) > 50:
-                        break
-                except:
-                    continue
-            
-            if description:
-                details['description'] = description
-            else:
-                details['description'] = "Description not available"
+            description = self.driver.find_element(By.CSS_SELECTOR, "div.show-more-less-html__markup").text
+            details['description'] = description
             
             # Check for Easy Apply button
             if self.logged_in:
-                easy_apply_selectors = [
-                    "button.jobs-apply-button--easy-apply",
-                    "button[data-control-name='jobdetails_topcard_inapply']",
-                    "button[aria-label*='Easy Apply']",
-                ]
-                for selector in easy_apply_selectors:
-                    try:
-                        if self.driver.find_elements(By.CSS_SELECTOR, selector):
-                            details['external_site'] = False
-                            break
-                    except:
-                        continue
-        except Exception as e:
-            print(f"Error getting LinkedIn job details: {e}")
+                if self.driver.find_elements(By.CSS_SELECTOR, "button.jobs-apply-button--easy-apply"):
+                    details['external_site'] = False
+        except Exception:
             details['description'] = "Could not load description."
         
         return details

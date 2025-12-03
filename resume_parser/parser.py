@@ -184,75 +184,26 @@ class ResumeParser:
         return list(set(certifications))
     
     def extract_contact_info(self, text: str) -> Dict:
-        """Extract contact information with improved patterns."""
+        """Extract contact information."""
         contact = {}
         
-        # Email - improved pattern with multiple attempts
-        email_patterns = [
-            r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b',  # Standard email
-            r'\b[\w\.-]+@[\w\.-]+\.\w+\b',  # More flexible
-        ]
-        for pattern in email_patterns:
-            email_matches = re.findall(pattern, text)
-            for email in email_matches:
-                email_lower = email.lower()
-                # Filter out common false positives
-                if not any(x in email_lower for x in ['example.com', 'test.com', 'domain.com', 'your-email']):
-                    contact['email'] = email_lower
-                    break
-            if contact.get('email'):
-                break
+        # Extract email
+        email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+        email_match = re.search(email_pattern, text)
+        if email_match:
+            contact['email'] = email_match.group(0)
         
-        # Phone - improved patterns
-        phone_patterns = [
-            r'\+?\d{1,3}[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}',  # International
-            r'\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}',  # US format
-            r'\d{3}[-.\s]?\d{3}[-.\s]?\d{4}',
-            r'\+?\d{10,15}',  # Long number format
-        ]
-        for pattern in phone_patterns:
-            phone_matches = re.findall(pattern, text)
-            for phone in phone_matches:
-                phone_clean = phone.strip()
-                # Filter out dates and other numbers (should be 10+ digits)
-                digits_only = re.sub(r'[^\d]', '', phone_clean)
-                if len(digits_only) >= 10 and len(digits_only) <= 15:
-                    contact['phone'] = phone_clean
-                    break
-            if contact.get('phone'):
-                break
+        # Extract phone
+        phone_pattern = r'\b\d{3}[-.]?\d{3}[-.]?\d{4}\b'
+        phone_match = re.search(phone_pattern, text)
+        if phone_match:
+            contact['phone'] = phone_match.group(0)
         
-        # Name extraction (first few lines usually contain name)
-        lines = text.split('\n')[:10]  # Check first 10 lines
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-            # Look for name-like patterns (2-3 words, capitalized, not too long)
-            if re.match(r'^[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2}$', line) and 5 <= len(line) <= 50:
-                # Filter out common non-name words
-                if not any(word.lower() in ['email', 'phone', 'linkedin', 'resume', 'cv', 'address', 'contact', 'objective', 'summary'] for word in line.split()):
-                    name_parts = line.split()
-                    if len(name_parts) >= 2:
-                        contact['first_name'] = name_parts[0]
-                        contact['last_name'] = ' '.join(name_parts[1:])
-                        break
-        
-        # LinkedIn - improved patterns
-        linkedin_patterns = [
-            r'linkedin\.com/in/[\w-]+',
-            r'www\.linkedin\.com/in/[\w-]+',
-            r'https?://linkedin\.com/in/[\w-]+',
-            r'https?://www\.linkedin\.com/in/[\w-]+',
-        ]
-        for pattern in linkedin_patterns:
-            linkedin_match = re.search(pattern, text, re.IGNORECASE)
-            if linkedin_match:
-                linkedin_url = linkedin_match.group(0)
-                if not linkedin_url.startswith('http'):
-                    linkedin_url = 'https://' + linkedin_url
-                contact['linkedin'] = linkedin_url
-                break
+        # Extract LinkedIn
+        linkedin_pattern = r'linkedin\.com/in/[\w-]+'
+        linkedin_match = re.search(linkedin_pattern, text, re.IGNORECASE)
+        if linkedin_match:
+            contact['linkedin'] = linkedin_match.group(0)
         
         return contact
     
