@@ -80,3 +80,7 @@ class Config:
     ).split(',')
     
     EXPERIENCE_LEVELS = ['Internship', 'Entry Level', 'Student']
+    
+    # Search limits to prevent infinite scraping
+    MAX_SEARCH_TIME_MINUTES = int(os.getenv('MAX_SEARCH_TIME_MINUTES', 10))  # Stop after 10 minutes
+    MAX_NEW_JOBS_TO_FIND = int(os.getenv('MAX_NEW_JOBS_TO_FIND', 50))  # Stop after finding 50 new jobs
