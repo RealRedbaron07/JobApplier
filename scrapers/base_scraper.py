@@ -8,31 +8,46 @@ import time
 import random
 import ssl
 import certifi
+import os
 
 class BaseScraper(ABC):
     def __init__(self):
         self.driver = None
     
-    def init_driver(self):
-        """Initialize undetected Chrome driver with SSL fix."""
+    def init_driver(self, use_profile: bool = False):
+        """Initialize undetected Chrome driver with SSL fix.
+        
+        Args:
+            use_profile: If True, uses your existing Chrome profile (with cookies/logins).
+                        Requires Chrome to be closed. Default: False (fresh session).
+        """
         try:
             # Fix SSL certificate issues
-            import os
             os.environ['SSL_CERT_FILE'] = certifi.where()
             
             options = uc.ChromeOptions()
-            # Remove headless mode to see what's happening
-            # options.add_argument('--headless=new')
             options.add_argument('--no-sandbox')
             options.add_argument('--disable-dev-shm-usage')
             options.add_argument('--disable-blink-features=AutomationControlled')
             options.add_argument('--ignore-certificate-errors')
             options.add_argument('--ignore-ssl-errors')
             
+            # Use existing Chrome profile only if explicitly requested
+            if use_profile:
+                chrome_profile_path = os.path.expanduser("~/Library/Application Support/Google/Chrome")
+                if os.path.exists(chrome_profile_path):
+                    options.add_argument(f"--user-data-dir={chrome_profile_path}")
+                    options.add_argument("--profile-directory=Default")
+                    print("Using existing Chrome profile (with saved logins)")
+            
             self.driver = uc.Chrome(options=options, use_subprocess=False)
         except Exception as e:
+            if "user data directory is already in use" in str(e).lower():
+                print("⚠️  Chrome is already running. Close Chrome and try again,")
+                print("   OR run without USE_CHROME_PROFILE=true")
             print(f"Error initializing driver: {e}")
             raise
+
     
     def close_driver(self):
         """Close the browser."""

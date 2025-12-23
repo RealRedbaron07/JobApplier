@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Job Applier Dashboard</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <h1 class="logo">🚀 Job Applier</h1>
+                <div class="header-actions">
+                    <button class="btn btn-secondary" onclick="exportJobs('csv')">📥 Export CSV</button>
+                    <button class="btn btn-secondary" onclick="exportJobs('json')">📥 Export JSON</button>
+                    <button class="btn btn-primary" onclick="window.location.reload()">🔄 Refresh</button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Stats Cards -->
+        <section class="stats-section">
+            <div class="stats-grid">
+                <div class="stat-card" id="stat-total">
+                    <div class="stat-value">-</div>
+                    <div class="stat-label">Total Jobs</div>
+                </div>
+                <div class="stat-card stat-success" id="stat-applied">
+                    <div class="stat-value">-</div>
+                    <div class="stat-label">Applied</div>
+                </div>
+                <div class="stat-card stat-warning" id="stat-pending">
+                    <div class="stat-value">-</div>
+                    <div class="stat-label">Pending</div>
+                </div>
+                <div class="stat-card stat-info" id="stat-saved">
+                    <div class="stat-value">-</div>
+                    <div class="stat-label">Saved Links</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Filters -->
+        <section class="filters-section">
+            <div class="filters-row">
+                <div class="filter-group">
+                    <label>Status</label>
+                    <select id="filter-status" onchange="loadJobs()">
+                        <option value="all">All Jobs</option>
+                        <option value="pending">Pending</option>
+                        <option value="applied">Applied</option>
+                        <option value="rejected">Rejected</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label>Min Score</label>
+                    <select id="filter-score" onchange="loadJobs()">
+                        <option value="0">Any</option>
+                        <option value="40">40+</option>
+                        <option value="60" selected>60+</option>
+                        <option value="80">80+</option>
+                    </select>
+                </div>
+                <div class="filter-group search-group">
+                    <label>Search</label>
+                    <input type="text" id="filter-search" placeholder="Company, title, location..." onkeyup="debounceSearch()">
+                </div>
+                <div class="filter-group">
+                    <label>&nbsp;</label>
+                    <button class="btn btn-secondary" onclick="showSavedOnly()">⭐ Saved Only</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Jobs Table -->
+        <section class="jobs-section">
+            <div class="table-container">
+                <table class="jobs-table">
+                    <thead>
+                        <tr>
+                            <th class="sortable" data-sort="match_score" onclick="sortBy('match_score')">Score ▼</th>
+                            <th class="sortable" data-sort="title" onclick="sortBy('title')">Title</th>
+                            <th class="sortable" data-sort="company" onclick="sortBy('company')">Company</th>
+                            <th>Location</th>
+                            <th>Platform</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="jobs-tbody">
+                        <tr><td colspan="7" class="loading">Loading jobs...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Job Details Modal -->
+        <div class="modal" id="job-modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2 id="modal-title">Job Details</h2>
+                    <button class="modal-close" onclick="closeModal()">&times;</button>
+                </div>
+                <div class="modal-body" id="modal-body">
+                    <!-- Populated by JavaScript -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/main.js"></script>
+</body>
+</html>

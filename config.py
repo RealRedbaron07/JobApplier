@@ -20,11 +20,19 @@ class Config:
     DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///job_applications.db')
     SCRAPE_INTERVAL_MINUTES = int(os.getenv('SCRAPE_INTERVAL_MINUTES', 30))
     MIN_MATCH_SCORE = int(os.getenv('MIN_MATCH_SCORE', 60))  # Lower for internships
+    MAX_JOB_AGE_DAYS = int(os.getenv('MAX_JOB_AGE_DAYS', 30))  # Filter out old jobs
     
-    # AUTO-APPLY SETTINGS
-    # If True, automatically applies to jobs above MIN_MATCH_SCORE without review
-    # If False, requires manual review before applying
+    # FULL AUTOMATION MODE
+    # If True, runs completely hands-free: scrape → match → generate materials → apply
+    # No user prompts or confirmations required
+    AUTO_MODE = os.getenv('AUTO_MODE', 'false').lower() == 'true'
+    
+    # Legacy setting (kept for compatibility)
     AUTO_APPLY_ENABLED = os.getenv('AUTO_APPLY_ENABLED', 'false').lower() == 'true'
+    
+    # Dashboard settings
+    DASHBOARD_PORT = int(os.getenv('DASHBOARD_PORT', 5000))
+    DASHBOARD_HOST = os.getenv('DASHBOARD_HOST', '127.0.0.1')
     
     # Job search parameters - focused on tech/fintech internships
     JOB_TITLES = os.getenv('JOB_TITLES', 
