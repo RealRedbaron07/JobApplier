@@ -381,11 +381,23 @@ def apply_to_jobs():
                     application_method = f'{job.platform}_manual'
             
             elif job.platform == 'linkedin' and linkedin_scraper:
-                # Use tailored resume if available, otherwise original
-                resume_for_application = job.tailored_resume_path or resume_to_use
-                success = apply_linkedin_job(linkedin_scraper, job, resume_for_application)
-                if success:
-                    application_method = 'linkedin_easy_apply'
+                # GUEST MODE CHECK: Skip Easy Apply if not logged in
+                if not linkedin_scraper.logged_in:
+                    print("  ⚠️  Skipping Easy Apply (Guest Mode active)")
+                    print("  ℹ️  LinkedIn credentials not configured or login failed")
+                    print(f"  → Apply manually at: {job.job_url}")
+                    if job.cover_letter_path:
+                        print(f"  → Cover letter: {job.cover_letter_path}")
+                    if job.tailored_resume_path:
+                        print(f"  → Tailored resume: {job.tailored_resume_path}")
+                    success = False
+                    application_method = 'manual'
+                else:
+                    # Use tailored resume if available, otherwise original
+                    resume_for_application = job.tailored_resume_path or resume_to_use
+                    success = apply_linkedin_job(linkedin_scraper, job, resume_for_application)
+                    if success:
+                        application_method = 'linkedin_easy_apply'
             else:
                 # For other platforms or if LinkedIn scraper not available
                 # Just mark as ready for manual application
