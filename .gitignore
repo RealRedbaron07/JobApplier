@@ -68,3 +68,6 @@ chromedriver.exe
 temp/
 tmp/
 
+
+# Cursor IDE
+.cursor/
