@@ -92,7 +92,7 @@ class LinkedInScraper(BaseScraper):
             print("  Continuing with public job search only.")
     
     def search_jobs(self, keywords: str, location: str) -> List[Dict]:
-        """Search for jobs on LinkedIn."""
+        """Search for jobs on LinkedIn with fallback scraping strategies."""
         jobs = []
         
         # Use logged-in job search URL (works better when authenticated)
@@ -112,34 +112,140 @@ class LinkedInScraper(BaseScraper):
             pass
         
         try:
-            # Try multiple selectors for job cards (LinkedIn changes these frequently)
+            # STRATEGY 1: Try specific CSS selectors first
             selectors = [
                 "div.job-card-container",  # Logged-in view
                 "li.jobs-search-results__list-item",  # Alternative logged-in
                 "div.base-card",  # Public view
                 "div.base-search-card",  # Alternative public
                 "ul.jobs-search__results-list li",  # Another variation
+                "div[data-job-id]",  # Data attribute pattern
+                "li[data-occludable-job-id]",  # Occlusion pattern
             ]
             
             job_cards = []
+            used_strategy = None
+            
             for selector in selectors:
                 job_cards = self.driver.find_elements(By.CSS_SELECTOR, selector)
                 if job_cards:
-                    print(f"  Found {len(job_cards)} jobs using selector: {selector}")
+                    print(f"  Found {len(job_cards)} jobs using CSS selector: {selector}")
+                    used_strategy = 'css'
                     break
             
+            # STRATEGY 2: Fallback to generic XPath patterns
             if not job_cards:
-                # Try getting page source and print for debugging
-                print(f"  Warning: No job cards found. Page title: {self.driver.title}")
+                print("  CSS selectors failed, trying XPath fallback...")
+                xpath_patterns = [
+                    # Find anchor tags with job-related href patterns
+                    "//a[contains(@href, '/jobs/view/')]/..",
+                    "//a[contains(@href, '/jobs/collections/')]/..",
+                    # Find list items containing job links
+                    "//li[.//a[contains(@href, '/jobs/')]]",
+                    # Find divs with job-related classes (partial match)
+                    "//div[contains(@class, 'job')]",
+                    # Find cards by semantic structure
+                    "//article[.//a[contains(@href, 'jobs')]]",
+                ]
+                
+                for xpath in xpath_patterns:
+                    try:
+                        job_cards = self.driver.find_elements(By.XPATH, xpath)
+                        if len(job_cards) >= 3:  # Need at least 3 to be valid
+                            print(f"  Found {len(job_cards)} jobs using XPath: {xpath}")
+                            used_strategy = 'xpath'
+                            break
+                    except:
+                        continue
+            
+            # STRATEGY 3: Semantic HTML fallback - find all job links and extract context
+            if not job_cards:
+                print("  XPath fallback failed, trying semantic extraction...")
+                try:
+                    job_links = self.driver.find_elements(By.XPATH, 
+                        "//a[contains(@href, '/jobs/view/') or contains(@href, '/jobs/collections/')]")
+                    
+                    if job_links:
+                        print(f"  Found {len(job_links)} job links via semantic extraction")
+                        used_strategy = 'semantic'
+                        
+                        seen_urls = set()
+                        for link in job_links[:50]:
+                            try:
+                                job_url = link.get_attribute("href")
+                                if not job_url or job_url in seen_urls:
+                                    continue
+                                seen_urls.add(job_url)
+                                
+                                # Get title from link text or parent
+                                title = link.text.strip()
+                                if not title:
+                                    try:
+                                        title = link.find_element(By.XPATH, ".//span | .//strong | .//h3").text.strip()
+                                    except:
+                                        pass
+                                if not title:
+                                    continue
+                                
+                                # Try to find company and location from nearby elements
+                                parent = link
+                                company = "Unknown Company"
+                                job_location = location
+                                
+                                for _ in range(5):  # Walk up to 5 parent levels
+                                    try:
+                                        parent = parent.find_element(By.XPATH, "./..")
+                                        parent_text = parent.text
+                                        
+                                        # Parse company from parent text (usually second line after title)
+                                        lines = [l.strip() for l in parent_text.split('\n') if l.strip()]
+                                        if len(lines) >= 2 and lines[0] == title:
+                                            company = lines[1] if len(lines) > 1 else company
+                                            job_location = lines[2] if len(lines) > 2 else job_location
+                                            break
+                                    except:
+                                        break
+                                
+                                jobs.append({
+                                    'title': title,
+                                    'company': company,
+                                    'location': job_location,
+                                    'url': job_url,
+                                    'platform': 'linkedin'
+                                })
+                            except:
+                                continue
+                        
+                        if jobs:
+                            print(f"  Extracted {len(jobs)} jobs via semantic fallback")
+                            return jobs
+                except Exception as e:
+                    print(f"  Semantic extraction failed: {e}")
+            
+            if not job_cards:
+                print(f"  Warning: All scraping strategies failed. Page title: {self.driver.title}")
                 return jobs
             
+            # Parse job cards (for CSS/XPath strategies)
             for card in job_cards[:30]:
                 try:
                     # Try multiple title selectors
                     title = None
-                    for title_sel in ["a.job-card-list__title", "h3.base-search-card__title", "a.job-card-container__link", "strong"]:
+                    title_selectors = [
+                        "a.job-card-list__title", 
+                        "h3.base-search-card__title", 
+                        "a.job-card-container__link", 
+                        "strong",
+                        ".//h3",
+                        ".//a[contains(@href, '/jobs/')]",
+                    ]
+                    
+                    for title_sel in title_selectors:
                         try:
-                            title_elem = card.find_element(By.CSS_SELECTOR, title_sel)
+                            if title_sel.startswith(".//"):
+                                title_elem = card.find_element(By.XPATH, title_sel)
+                            else:
+                                title_elem = card.find_element(By.CSS_SELECTOR, title_sel)
                             title = title_elem.text.strip()
                             if title:
                                 break
@@ -147,11 +253,28 @@ class LinkedInScraper(BaseScraper):
                             continue
                     
                     if not title:
+                        # Last resort: get first meaningful text from card
+                        try:
+                            card_text = card.text.strip()
+                            if card_text:
+                                title = card_text.split('\n')[0].strip()
+                        except:
+                            pass
+                    
+                    if not title:
                         continue
                     
                     # Try multiple company selectors
                     company = "Unknown Company"
-                    for comp_sel in ["span.job-card-container__primary-description", "h4.base-search-card__subtitle", "a.job-card-container__company-name", ".artdeco-entity-lockup__subtitle"]:
+                    company_selectors = [
+                        "span.job-card-container__primary-description", 
+                        "h4.base-search-card__subtitle", 
+                        "a.job-card-container__company-name", 
+                        ".artdeco-entity-lockup__subtitle",
+                        "[data-tracking-control-name*='company']",
+                    ]
+                    
+                    for comp_sel in company_selectors:
                         try:
                             comp_elem = card.find_element(By.CSS_SELECTOR, comp_sel)
                             company = comp_elem.text.strip()
@@ -160,9 +283,25 @@ class LinkedInScraper(BaseScraper):
                         except:
                             continue
                     
+                    # Fallback: parse company from card text
+                    if company == "Unknown Company":
+                        try:
+                            lines = [l.strip() for l in card.text.split('\n') if l.strip()]
+                            if len(lines) >= 2:
+                                company = lines[1]
+                        except:
+                            pass
+                    
                     # Try multiple location selectors
                     job_location = location  # Default to search location
-                    for loc_sel in ["span.job-card-container__metadata-item", "span.job-search-card__location", ".artdeco-entity-lockup__caption"]:
+                    location_selectors = [
+                        "span.job-card-container__metadata-item", 
+                        "span.job-search-card__location", 
+                        ".artdeco-entity-lockup__caption",
+                        "[class*='location']",
+                    ]
+                    
+                    for loc_sel in location_selectors:
                         try:
                             loc_elem = card.find_element(By.CSS_SELECTOR, loc_sel)
                             job_location = loc_elem.text.strip()
@@ -173,7 +312,16 @@ class LinkedInScraper(BaseScraper):
                     
                     # Get job link
                     job_link = None
-                    for link_sel in ["a.job-card-list__title", "a.job-card-container__link", "a.base-card__full-link", "a"]:
+                    link_selectors = [
+                        "a.job-card-list__title", 
+                        "a.job-card-container__link", 
+                        "a.base-card__full-link", 
+                        "a[href*='/jobs/view/']",
+                        "a[href*='/jobs/']",
+                        "a"
+                    ]
+                    
+                    for link_sel in link_selectors:
                         try:
                             link_elem = card.find_element(By.CSS_SELECTOR, link_sel)
                             job_link = link_elem.get_attribute("href")

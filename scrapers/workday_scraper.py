@@ -206,6 +206,10 @@ class WorkdayScraper(BaseScraper):
                         except:
                             pass
             
+            # Handle custom questions (sponsorship, disability, gender, etc.)
+            print("  📋 Checking for custom questions...")
+            self.handle_custom_questions(driver)
+            
             # Handle multi-step forms
             # Look for "Next" or "Continue" buttons
             try:
@@ -289,6 +293,198 @@ class WorkdayScraper(BaseScraper):
             pass
         
         return fields
+    
+    def handle_custom_questions(self, driver):
+        """Handle common custom questions on Workday forms with default answers."""
+        
+        # Default answers for common questions
+        # Pattern: (keyword_in_label, default_answer_to_select)
+        DEFAULT_ANSWERS = {
+            # Sponsorship questions - typically answer "No" (don't require sponsorship)
+            'sponsorship': 'no',
+            'visa': 'no',
+            'work authorization': 'yes',  # Are you authorized to work?
+            'authorized to work': 'yes',
+            'legally authorized': 'yes',
+            'employment eligibility': 'yes',
+            'require sponsorship': 'no',
+            'need sponsorship': 'no',
+            
+            # Disability questions - decline to identify
+            'disability': 'decline',
+            'disabled': 'decline',
+            'handicap': 'decline',
+            
+            # Gender questions - decline to identify  
+            'gender': 'decline',
+            'sex': 'decline',
+            
+            # Veteran status - decline to identify
+            'veteran': 'decline',
+            'military': 'decline',
+            'protected veteran': 'decline',
+            
+            # Race/ethnicity - decline to identify
+            'race': 'decline',
+            'ethnicity': 'decline',
+            'ethnic': 'decline',
+            'hispanic': 'decline',
+            'latino': 'decline',
+            
+            # Age-related
+            'age': 'yes',  # Are you 18+?
+            '18 years': 'yes',
+            'over 18': 'yes',
+            
+            # Background check
+            'background check': 'yes',
+            'consent to': 'yes',
+            
+            # Relocation
+            'relocate': 'yes',
+            'willing to relocate': 'yes',
+            
+            # Remote work
+            'remote': 'yes',
+            'work remotely': 'yes',
+            'hybrid': 'yes',
+        }
+        
+        answered_count = 0
+        
+        try:
+            # Find all question containers - Workday uses various structures
+            question_containers = driver.find_elements(By.XPATH, 
+                "//div[contains(@class, 'question') or contains(@data-automation-id, 'question')]"
+                " | //fieldset | //div[.//label and (.//input[@type='radio'] or .//select)]")
+            
+            # Also find standalone questions by looking for radio groups or selects with labels
+            radio_groups = driver.find_elements(By.XPATH, 
+                "//div[.//input[@type='radio'] and .//label]")
+            select_groups = driver.find_elements(By.XPATH, 
+                "//div[.//select and .//label]")
+            
+            all_question_elements = list(set(question_containers + radio_groups + select_groups))
+            
+            for container in all_question_elements:
+                try:
+                    # Get the question text/label
+                    question_text = ""
+                    try:
+                        label = container.find_element(By.XPATH, ".//label | .//legend | .//span[contains(@class, 'label')]")
+                        question_text = label.text.lower().strip()
+                    except:
+                        # Try to get any text from the container
+                        question_text = container.text.lower().strip()[:200]  # Limit length
+                    
+                    if not question_text:
+                        continue
+                    
+                    # Check if this question matches any of our default answers
+                    matched_answer = None
+                    for keyword, answer in DEFAULT_ANSWERS.items():
+                        if keyword in question_text:
+                            matched_answer = answer
+                            break
+                    
+                    if not matched_answer:
+                        continue
+                    
+                    # Try to select the appropriate answer
+                    answered = False
+                    
+                    # Strategy 1: Radio buttons
+                    try:
+                        radio_buttons = container.find_elements(By.XPATH, ".//input[@type='radio']")
+                        for radio in radio_buttons:
+                            try:
+                                # Get radio label
+                                radio_id = radio.get_attribute('id')
+                                radio_label = ""
+                                
+                                if radio_id:
+                                    try:
+                                        label_elem = container.find_element(By.XPATH, f".//label[@for='{radio_id}']")
+                                        radio_label = label_elem.text.lower().strip()
+                                    except:
+                                        pass
+                                
+                                if not radio_label:
+                                    # Try next sibling or parent
+                                    try:
+                                        radio_label = radio.find_element(By.XPATH, "./following-sibling::*[1] | ./..").text.lower().strip()
+                                    except:
+                                        pass
+                                
+                                # Check if this radio matches our answer
+                                if matched_answer in radio_label or radio_label.startswith(matched_answer):
+                                    if radio.is_displayed() and radio.is_enabled() and not radio.is_selected():
+                                        driver.execute_script("arguments[0].click();", radio)
+                                        answered = True
+                                        print(f"    ✓ Answered: '{question_text[:50]}...' -> '{radio_label}'")
+                                        break
+                            except:
+                                continue
+                    except:
+                        pass
+                    
+                    # Strategy 2: Select dropdowns
+                    if not answered:
+                        try:
+                            selects = container.find_elements(By.XPATH, ".//select")
+                            for select in selects:
+                                try:
+                                    if not select.is_displayed() or not select.is_enabled():
+                                        continue
+                                    
+                                    options = select.find_elements(By.XPATH, ".//option")
+                                    for option in options:
+                                        option_text = option.text.lower().strip()
+                                        
+                                        # Check if option matches our answer
+                                        if matched_answer in option_text or option_text.startswith(matched_answer):
+                                            option.click()
+                                            answered = True
+                                            print(f"    ✓ Selected: '{question_text[:50]}...' -> '{option_text}'")
+                                            break
+                                    
+                                    if answered:
+                                        break
+                                except:
+                                    continue
+                        except:
+                            pass
+                    
+                    # Strategy 3: Checkboxes (for consent-type questions)
+                    if not answered and matched_answer == 'yes':
+                        try:
+                            checkboxes = container.find_elements(By.XPATH, ".//input[@type='checkbox']")
+                            for checkbox in checkboxes:
+                                try:
+                                    if checkbox.is_displayed() and checkbox.is_enabled() and not checkbox.is_selected():
+                                        driver.execute_script("arguments[0].click();", checkbox)
+                                        answered = True
+                                        print(f"    ✓ Checked: '{question_text[:50]}...'")
+                                        break
+                                except:
+                                    continue
+                        except:
+                            pass
+                    
+                    if answered:
+                        answered_count += 1
+                        self.random_delay(0.5, 1)
+                        
+                except Exception as e:
+                    continue
+                    
+        except Exception as e:
+            print(f"    ⚠️  Error handling custom questions: {e}")
+        
+        if answered_count > 0:
+            print(f"    📝 Answered {answered_count} custom question(s)")
+        
+        return answered_count
     
     def apply_to_job(self, job_url: str, user_info: Dict, resume_path: str, cover_letter_path: str = None) -> bool:
         """Apply to a Workday job."""

@@ -37,14 +37,20 @@ def apply_to_jobs():
         session.close()
         return
     
-    # Get default resume path (optional - can be overridden per job)
+    # Get default resume path from database - auto-use for unattended operation
     default_resume_path = None
+    resume_to_use = None
+    
     if user_profile_db.resume_path and os.path.exists(user_profile_db.resume_path):
         default_resume_path = user_profile_db.resume_path
-        print(f"\n📄 Default resume found: {default_resume_path}")
-        print("   (You can use a different resume for each job)")
+        resume_to_use = default_resume_path  # Auto-use database resume
+        print(f"\n📄 Using resume from profile: {default_resume_path}")
     else:
-        print("\n⚠️  No default resume in profile. You'll need to provide one for each job.")
+        print("\n⚠️  No valid resume in profile database.")
+        print("   Please add your resume path using: python3 setup_profile.py")
+        print("   Or set resume_path in the UserProfile table.")
+        session.close()
+        return
     
     # Get jobs to apply to
     # Filter by: not applied, match score, date (MAX_JOB_AGE_DAYS), and remove duplicates
@@ -94,19 +100,8 @@ def apply_to_jobs():
     
     print(f"\nFound {len(jobs_to_apply)} jobs to apply to (after filtering by date and removing duplicates)")
     
-    # Ask for resume ONCE at the beginning
-    print("\n" + "=" * 70)
-    print("Resume Selection")
-    print("=" * 70)
-    resume_to_use = get_resume_path(default_resume_path)
-    
-    if not resume_to_use or not os.path.exists(resume_to_use):
-        print(f"\n❌ Resume not found: {resume_to_use}")
-        print("Cannot proceed without a valid resume.")
-        session.close()
-        return
-    
-    print(f"\n✓ Using resume: {resume_to_use}")
+    # Resume already auto-selected from database above
+    print(f"\n✓ Resume ready: {resume_to_use}")
     print("\n" + "=" * 70)
     print("Preparing Application Materials (Automatic)")
     print("=" * 70)
@@ -520,8 +515,8 @@ def get_resume_path(default_path: str = None) -> str:
         
         return resume_path
 
-def apply_linkedin_job(scraper: LinkedInScraper, job: Job, resume_path: str) -> bool:
-    """Attempt to apply to a LinkedIn job using Easy Apply."""
+def apply_linkedin_job(scraper: LinkedInScraper, job: Job, resume_path: str, max_steps: int = 10) -> bool:
+    """Attempt to apply to a LinkedIn job using Easy Apply with recursive form navigation."""
     try:
         scraper.login()
         
@@ -531,23 +526,203 @@ def apply_linkedin_job(scraper: LinkedInScraper, job: Job, resume_path: str) -> 
         
         # Look for Easy Apply button
         try:
-            easy_apply_button = scraper.driver.find_element(By.XPATH, 
-                "//button[contains(., 'Easy Apply') or contains(., 'Apply')]")
-            easy_apply_button.click()
+            easy_apply_button = None
+            easy_apply_selectors = [
+                "//button[contains(@class, 'jobs-apply-button')]",
+                "//button[contains(., 'Easy Apply')]",
+                "//button[contains(@aria-label, 'Easy Apply')]",
+                "//button[contains(., 'Apply')]//span[contains(., 'Easy')]/..",
+            ]
+            
+            for selector in easy_apply_selectors:
+                try:
+                    buttons = scraper.driver.find_elements(By.XPATH, selector)
+                    for btn in buttons:
+                        if btn.is_displayed() and 'easy' in btn.text.lower():
+                            easy_apply_button = btn
+                            break
+                    if easy_apply_button:
+                        break
+                except:
+                    continue
+            
+            if not easy_apply_button:
+                print("  ⚠️  Easy Apply button not found - may require external application")
+                return False
+            
+            scraper.driver.execute_script("arguments[0].click();", easy_apply_button)
             scraper.random_delay(2, 3)
             
-            # This is a simplified version - full implementation would:
-            # 1. Fill out application form fields
-            # 2. Upload resume
-            # 3. Answer questions if any
-            # 4. Submit application
+            # Now navigate through the multi-step application form
+            step = 0
+            while step < max_steps:
+                step += 1
+                print(f"  📝 Processing Easy Apply step {step}...")
+                
+                # Wait for modal to load
+                scraper.random_delay(1, 2)
+                
+                # Try to upload resume if file input is present
+                try:
+                    file_inputs = scraper.driver.find_elements(By.XPATH, 
+                        "//input[@type='file']")
+                    for file_input in file_inputs:
+                        try:
+                            if os.path.exists(resume_path):
+                                file_input.send_keys(resume_path)
+                                print(f"    ✓ Resume uploaded")
+                                scraper.random_delay(2, 3)
+                                break
+                        except:
+                            continue
+                except:
+                    pass
+                
+                # Try to fill common form fields
+                try:
+                    # Phone number
+                    phone_inputs = scraper.driver.find_elements(By.XPATH, 
+                        "//input[contains(@name, 'phone') or contains(@id, 'phone') or contains(@aria-label, 'Phone')]")
+                    for phone_input in phone_inputs:
+                        try:
+                            if phone_input.is_displayed() and not phone_input.get_attribute('value'):
+                                # Skip if already filled
+                                pass
+                        except:
+                            continue
+                except:
+                    pass
+                
+                # Handle common questions with radio buttons
+                try:
+                    # Find Yes/No questions and select appropriate answers
+                    question_containers = scraper.driver.find_elements(By.XPATH, 
+                        "//fieldset | //div[.//input[@type='radio']]")
+                    
+                    for container in question_containers:
+                        try:
+                            question_text = container.text.lower()
+                            
+                            # Default answers based on common patterns
+                            answer_to_select = None
+                            if 'sponsor' in question_text or 'visa' in question_text:
+                                answer_to_select = 'no'
+                            elif 'authorized' in question_text or 'eligible' in question_text:
+                                answer_to_select = 'yes'
+                            elif 'relocate' in question_text:
+                                answer_to_select = 'yes'
+                            elif 'experience' in question_text:
+                                # For experience questions, try to enter a number if text input
+                                try:
+                                    exp_input = container.find_element(By.XPATH, ".//input[@type='text' or @type='number']")
+                                    if exp_input.is_displayed() and not exp_input.get_attribute('value'):
+                                        exp_input.send_keys("3")  # Default years of experience
+                                except:
+                                    pass
+                                continue
+                            
+                            if answer_to_select:
+                                radios = container.find_elements(By.XPATH, ".//input[@type='radio']")
+                                for radio in radios:
+                                    try:
+                                        radio_id = radio.get_attribute('id')
+                                        if radio_id:
+                                            label = scraper.driver.find_element(By.XPATH, f"//label[@for='{radio_id}']")
+                                            if answer_to_select in label.text.lower():
+                                                if not radio.is_selected():
+                                                    scraper.driver.execute_script("arguments[0].click();", radio)
+                                                    scraper.random_delay(0.3, 0.5)
+                                                break
+                                    except:
+                                        continue
+                        except:
+                            continue
+                except:
+                    pass
+                
+                # Look for Next/Review/Submit button
+                action_button = None
+                button_selectors = [
+                    # Submit buttons (highest priority)
+                    "//button[contains(@aria-label, 'Submit')]",
+                    "//button[contains(., 'Submit application')]",
+                    "//button[contains(., 'Submit')]",
+                    # Review button
+                    "//button[contains(., 'Review')]",
+                    # Next button
+                    "//button[contains(@aria-label, 'Continue')]",
+                    "//button[contains(., 'Next')]",
+                    "//button[contains(., 'Continue')]",
+                ]
+                
+                is_submit = False
+                for selector in button_selectors:
+                    try:
+                        buttons = scraper.driver.find_elements(By.XPATH, selector)
+                        for btn in buttons:
+                            if btn.is_displayed() and btn.is_enabled():
+                                action_button = btn
+                                is_submit = 'submit' in btn.text.lower()
+                                break
+                        if action_button:
+                            break
+                    except:
+                        continue
+                
+                if not action_button:
+                    # Check if we're done (modal closed or success message)
+                    try:
+                        success_indicators = scraper.driver.find_elements(By.XPATH, 
+                            "//*[contains(., 'Application submitted') or contains(., 'Your application was sent')]")
+                        if success_indicators:
+                            print("  ✅ Application submitted successfully!")
+                            return True
+                    except:
+                        pass
+                    
+                    # No button found - may be done
+                    print("  ⚠️  No more action buttons found")
+                    break
+                
+                # Click the button
+                try:
+                    scraper.driver.execute_script("arguments[0].scrollIntoView(true);", action_button)
+                    scraper.random_delay(0.5, 1)
+                    scraper.driver.execute_script("arguments[0].click();", action_button)
+                    scraper.random_delay(2, 3)
+                    
+                    if is_submit:
+                        # Check for success
+                        scraper.random_delay(2, 3)
+                        try:
+                            success = scraper.driver.find_elements(By.XPATH, 
+                                "//*[contains(., 'Application submitted') or contains(., 'Your application was sent') or contains(., 'successfully')]")
+                            if success:
+                                print("  ✅ Application submitted successfully!")
+                                return True
+                        except:
+                            pass
+                        
+                        # Check if modal is closed (another success indicator)
+                        try:
+                            modal = scraper.driver.find_elements(By.XPATH, 
+                                "//div[contains(@class, 'jobs-easy-apply-modal')]")
+                            if not modal or not any(m.is_displayed() for m in modal):
+                                print("  ✅ Application appears submitted (modal closed)")
+                                return True
+                        except:
+                            pass
+                except Exception as e:
+                    print(f"    ⚠️  Error clicking button: {e}")
+                    break
             
-            print("  ⚠️  LinkedIn Easy Apply detected but full automation not implemented")
-            print("  → Please complete application manually")
+            # If we got here, we went through steps but couldn't confirm submission
+            print("  ⚠️  Completed form navigation but submission status unclear")
+            print("  → Please verify application status manually")
             return False
             
         except Exception as e:
-            print(f"  ⚠️  Easy Apply button not found: {e}")
+            print(f"  ⚠️  Easy Apply error: {e}")
             return False
             
     except Exception as e:
