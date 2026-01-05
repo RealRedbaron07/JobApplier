@@ -47,21 +47,16 @@ def apply_to_jobs():
         resume_to_use = default_resume_path
         print(f"\n📄 Auto-using resume from profile: {default_resume_path}")
     else:
-        # Fallback to manual input ONLY if no valid resume in database
-        print("\n⚠️  No valid resume found in profile database.")
-        print("   Falling back to manual input...")
-        resume_to_use = get_resume_path(None)
-        
-        if not resume_to_use or not os.path.exists(resume_to_use):
-            print("\n❌ Cannot proceed without a valid resume.")
-            print("   Tip: Add resume_path to your profile using: python3 setup_profile.py")
-            session.close()
-            return
-        
-        # Optionally save to profile for future runs
-        print(f"\n💾 Saving resume path to profile for future automated runs...")
-        user_profile_db.resume_path = resume_to_use
-        session.commit()
+        # GUEST MODE: Exit gracefully if no resume in database - DO NOT ask for input
+        print("\n❌ ERROR: No valid resume found in profile database.")
+        print("   The bot cannot run in unattended mode without a resume.")
+        print("")
+        print("   To fix this, run: python3 setup_profile.py")
+        print("   And provide the path to your resume file (PDF or DOCX)")
+        print("")
+        print("   Exiting to prevent hanging on user input...")
+        session.close()
+        return
     
     # Get jobs to apply to
     # Filter by: not applied, match score, date (MAX_JOB_AGE_DAYS), and remove duplicates
@@ -527,9 +522,30 @@ def get_resume_path(default_path: str = None) -> str:
         return resume_path
 
 def apply_linkedin_job(scraper: LinkedInScraper, job: Job, resume_path: str, max_steps: int = 10) -> bool:
-    """Attempt to apply to a LinkedIn job using Easy Apply with recursive form navigation."""
+    """Attempt to apply to a LinkedIn job using Easy Apply with recursive form navigation.
+    
+    GUEST MODE: If credentials are not configured, this will skip Easy Apply
+    and mark the job for manual application to avoid getting stuck on login popup.
+    """
+    # GUEST MODE CHECK: Skip Easy Apply if no credentials configured
+    guest_mode = not (Config.LINKEDIN_EMAIL and Config.LINKEDIN_PASSWORD and 
+                      Config.LINKEDIN_EMAIL != 'your-email@example.com')
+    
+    if guest_mode:
+        print("  ⚠️  GUEST MODE: LinkedIn credentials not configured.")
+        print("     Skipping Easy Apply - marking for manual application.")
+        print(f"     → Apply manually at: {job.job_url}")
+        return False  # Return False to trigger manual application fallback
+    
     try:
         scraper.login()
+        
+        # Check if login actually succeeded
+        if not scraper.logged_in:
+            print("  ⚠️  LinkedIn login failed or was skipped.")
+            print("     Marking for manual application.")
+            print(f"     → Apply manually at: {job.job_url}")
+            return False
         
         # Navigate to job page
         scraper.driver.get(job.job_url)

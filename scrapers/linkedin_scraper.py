@@ -92,16 +92,36 @@ class LinkedInScraper(BaseScraper):
             print("  Continuing with public job search only.")
     
     def search_jobs(self, keywords: str, location: str) -> List[Dict]:
-        """Search for jobs on LinkedIn with fallback scraping strategies."""
+        """Search for jobs on LinkedIn with fallback scraping strategies.
+        
+        GUEST MODE SUPPORT: Works without login using public job search.
+        When logged_in=False, uses public LinkedIn job search which has 
+        limited results but doesn't require authentication.
+        """
         jobs = []
         
+        # Ensure driver is initialized (for guest mode)
+        if not self.driver:
+            try:
+                self.init_driver()
+            except Exception as e:
+                print(f"  ⚠️  Failed to initialize driver: {e}")
+                return []
+        
         # Use logged-in job search URL (works better when authenticated)
+        # GUEST MODE: Public search URL works without login
         if self.logged_in:
             search_url = f"{self.base_url}/jobs/search/?keywords={keywords.replace(' ', '%20')}&location={location.replace(' ', '%20')}&f_TPR=r604800"  # Last week
         else:
+            # Guest mode: Use public search (may have limited results)
             search_url = f"{self.base_url}/jobs/search/?keywords={keywords.replace(' ', '%20')}&location={location.replace(' ', '%20')}"
+            print(f"  📢 Guest Mode: Using public LinkedIn search (limited results)")
         
-        self.driver.get(search_url)
+        try:
+            self.driver.get(search_url)
+        except Exception as e:
+            print(f"  ⚠️  Failed to load search page: {e}")
+            return []
         time.sleep(5)  # Wait for jobs to load
         
         # Scroll down to load more jobs

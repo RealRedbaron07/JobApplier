@@ -46,8 +46,22 @@ class GlassdoorScraper(BaseScraper):
             print(f"Glassdoor login error: {e}")
     
     def search_jobs(self, keywords: str, location: str) -> List[Dict]:
-        """Search for jobs on Glassdoor."""
+        """Search for jobs on Glassdoor.
+        
+        GUEST MODE SUPPORT: Works without login using public job search.
+        Glassdoor allows public job browsing with limited functionality.
+        """
         jobs = []
+        
+        # Ensure driver is initialized (for guest mode)
+        if not self.driver:
+            try:
+                self.init_driver()
+                print(f"  📢 Guest Mode: Using public Glassdoor search")
+            except Exception as e:
+                print(f"  ⚠️  Failed to initialize driver: {e}")
+                return []
+        
         search_url = f"{self.base_url}/Job/jobs.htm?sc.keyword={keywords.replace(' ', '%20')}&locT=C&locId={location.replace(' ', '%20')}"
         
         try:

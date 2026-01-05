@@ -70,3 +70,10 @@ class Config:
     ).split(',')
     
     EXPERIENCE_LEVELS = ['Internship', 'Entry Level', 'Student']
+    
+    # Search limits to prevent infinite scraping
+    MAX_SEARCH_TIME_MINUTES = int(os.getenv('MAX_SEARCH_TIME_MINUTES', 10))  # Stop after 10 minutes
+    MAX_NEW_JOBS_TO_FIND = int(os.getenv('MAX_NEW_JOBS_TO_FIND', 50))  # Stop after finding 50 new jobs
+    
+    # Job freshness filter - only apply to jobs posted within this many days
+    MAX_JOB_AGE_DAYS = int(os.getenv('MAX_JOB_AGE_DAYS', 30))  # Only apply to jobs posted in last 30 days
