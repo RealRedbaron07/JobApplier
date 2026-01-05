@@ -112,7 +112,75 @@ class LinkedInScraper(BaseScraper):
             pass
         
         try:
-            # STRATEGY 1: Try specific CSS selectors first
+            job_cards = []
+            used_strategy = None
+            
+            # STRATEGY 1 (PRIORITY): Semantic Scraping - find job links by href pattern
+            # This is most resilient to DOM changes since href patterns are stable
+            print("  🔍 Trying semantic scraping (href patterns)...")
+            try:
+                job_links = self.driver.find_elements(By.XPATH, 
+                    "//a[contains(@href, '/jobs/view/') or contains(@href, '/jobs/collections/')]")
+                
+                if job_links and len(job_links) >= 3:
+                    print(f"  Found {len(job_links)} job links via semantic extraction")
+                    used_strategy = 'semantic'
+                    
+                    seen_urls = set()
+                    for link in job_links[:50]:
+                        try:
+                            job_url = link.get_attribute("href")
+                            if not job_url or job_url in seen_urls:
+                                continue
+                            seen_urls.add(job_url)
+                            
+                            # Get title from link text or parent
+                            title = link.text.strip()
+                            if not title:
+                                try:
+                                    title = link.find_element(By.XPATH, ".//span | .//strong | .//h3").text.strip()
+                                except:
+                                    pass
+                            if not title:
+                                continue
+                            
+                            # Try to find company and location from nearby elements
+                            parent = link
+                            company = "Unknown Company"
+                            job_location = location
+                            
+                            for _ in range(5):  # Walk up to 5 parent levels
+                                try:
+                                    parent = parent.find_element(By.XPATH, "./..")
+                                    parent_text = parent.text
+                                    
+                                    # Parse company from parent text (usually second line after title)
+                                    lines = [l.strip() for l in parent_text.split('\n') if l.strip()]
+                                    if len(lines) >= 2 and lines[0] == title:
+                                        company = lines[1] if len(lines) > 1 else company
+                                        job_location = lines[2] if len(lines) > 2 else job_location
+                                        break
+                                except:
+                                    break
+                            
+                            jobs.append({
+                                'title': title,
+                                'company': company,
+                                'location': job_location,
+                                'url': job_url,
+                                'platform': 'linkedin'
+                            })
+                        except:
+                            continue
+                    
+                    if jobs:
+                        print(f"  ✓ Extracted {len(jobs)} jobs via semantic scraping")
+                        return jobs
+            except Exception as e:
+                print(f"  Semantic extraction error: {e}")
+            
+            # STRATEGY 2: CSS Selectors (fallback - more prone to breakage)
+            print("  🔍 Trying CSS selectors...")
             selectors = [
                 "div.job-card-container",  # Logged-in view
                 "li.jobs-search-results__list-item",  # Alternative logged-in
@@ -122,9 +190,6 @@ class LinkedInScraper(BaseScraper):
                 "div[data-job-id]",  # Data attribute pattern
                 "li[data-occludable-job-id]",  # Occlusion pattern
             ]
-            
-            job_cards = []
-            used_strategy = None
             
             for selector in selectors:
                 job_cards = self.driver.find_elements(By.CSS_SELECTOR, selector)
@@ -224,6 +289,19 @@ class LinkedInScraper(BaseScraper):
             
             if not job_cards:
                 print(f"  Warning: All scraping strategies failed. Page title: {self.driver.title}")
+                
+                # DEBUG MODE: Save page source for inspection
+                try:
+                    from datetime import datetime
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    debug_filename = f"debug_scrape_linkedin_{timestamp}.html"
+                    with open(debug_filename, 'w', encoding='utf-8') as f:
+                        f.write(self.driver.page_source)
+                    print(f"  📁 DEBUG: Page HTML saved to {debug_filename}")
+                    print(f"     Inspect this file to see the actual DOM structure")
+                except Exception as e:
+                    print(f"  Could not save debug file: {e}")
+                
                 return jobs
             
             # Parse job cards (for CSS/XPath strategies)

@@ -23,16 +23,87 @@ class IndeedScraper(BaseScraper):
             self.driver.get(search_url)
             self.random_delay(2, 4)
             
-            # STRATEGY 1: Try specific CSS selectors first
+            job_cards = []
+            used_strategy = None
+            
+            # STRATEGY 1 (PRIORITY): Semantic Scraping - find job links by href pattern
+            # This is most resilient to DOM changes
+            print("  🔍 Trying semantic scraping (href patterns)...")
+            try:
+                job_links = self.driver.find_elements(By.XPATH, 
+                    "//a[contains(@href, '/rc/clk') or contains(@href, '/viewjob') or contains(@href, '/pagead/')]")
+                
+                if job_links and len(job_links) >= 3:
+                    print(f"  Found {len(job_links)} job links via semantic extraction")
+                    used_strategy = 'semantic'
+                    
+                    seen_urls = set()
+                    for link in job_links[:50]:
+                        try:
+                            job_url = link.get_attribute("href")
+                            if not job_url or job_url in seen_urls:
+                                continue
+                            seen_urls.add(job_url)
+                            
+                            # Get title from link text or nested element
+                            title = link.text.strip()
+                            if not title:
+                                try:
+                                    title = link.find_element(By.XPATH, ".//span | .//h2 | .//strong").text.strip()
+                                except:
+                                    pass
+                            if not title or len(title) < 3:
+                                continue
+                            
+                            # Try to find company and location from nearby elements
+                            parent = link
+                            company = "Unknown Company"
+                            job_location = location
+                            
+                            for _ in range(5):
+                                try:
+                                    parent = parent.find_element(By.XPATH, "./..")
+                                    try:
+                                        comp_elem = parent.find_element(By.CSS_SELECTOR, 
+                                            "[data-testid='company-name'], .companyName, .company")
+                                        company = comp_elem.text.strip()
+                                    except:
+                                        pass
+                                    try:
+                                        loc_elem = parent.find_element(By.CSS_SELECTOR, 
+                                            "[data-testid='text-location'], .companyLocation, .location")
+                                        job_location = loc_elem.text.strip()
+                                    except:
+                                        pass
+                                    if company != "Unknown Company":
+                                        break
+                                except:
+                                    break
+                            
+                            jobs.append({
+                                'title': title,
+                                'company': company,
+                                'location': job_location,
+                                'url': job_url,
+                                'platform': 'indeed'
+                            })
+                        except:
+                            continue
+                    
+                    if jobs:
+                        print(f"  ✓ Extracted {len(jobs)} jobs via semantic scraping")
+                        return jobs
+            except Exception as e:
+                print(f"  Semantic extraction error: {e}")
+            
+            # STRATEGY 2: CSS Selectors (fallback)
+            print("  🔍 Trying CSS selectors...")
             selectors = [
                 "job_seen_beacon",  # Current primary class
                 "jobsearch-ResultsList",  # Results container items
                 "result",  # Legacy class
                 "jobCard_mainContent",  # Alternative structure
             ]
-            
-            job_cards = []
-            used_strategy = None
             
             for selector in selectors:
                 job_cards = self.driver.find_elements(By.CLASS_NAME, selector)
@@ -61,9 +132,9 @@ class IndeedScraper(BaseScraper):
                     except:
                         continue
             
-            # STRATEGY 2: Fallback to generic XPath patterns
+            # STRATEGY 3: XPath patterns (additional fallback)
             if not job_cards:
-                print("  CSS selectors failed, trying XPath fallback...")
+                print("  🔍 Trying XPath patterns...")
                 xpath_patterns = [
                     # Find elements with job ID data attribute
                     "//div[@data-jk]",
@@ -87,9 +158,9 @@ class IndeedScraper(BaseScraper):
                     except:
                         continue
             
-            # STRATEGY 3: Semantic HTML fallback - find all job links and extract context
+            # STRATEGY 4: Additional semantic fallback (if primary semantic failed)
             if not job_cards:
-                print("  XPath fallback failed, trying semantic extraction...")
+                print("  🔍 Trying additional semantic patterns...")
                 try:
                     # Find all links that look like job postings
                     job_links = self.driver.find_elements(By.XPATH, 
@@ -167,6 +238,19 @@ class IndeedScraper(BaseScraper):
             
             if not job_cards:
                 print(f"  Warning: All scraping strategies failed. Page title: {self.driver.title}")
+                
+                # DEBUG MODE: Save page source for inspection
+                try:
+                    from datetime import datetime
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    debug_filename = f"debug_scrape_indeed_{timestamp}.html"
+                    with open(debug_filename, 'w', encoding='utf-8') as f:
+                        f.write(self.driver.page_source)
+                    print(f"  📁 DEBUG: Page HTML saved to {debug_filename}")
+                    print(f"     Inspect this file to see the actual DOM structure")
+                except Exception as e:
+                    print(f"  Could not save debug file: {e}")
+                
                 return jobs
             
             # Parse job cards (for class/CSS/XPath strategies)

@@ -217,8 +217,12 @@ class WorkdayScraper(BaseScraper):
                     "//button[contains(., 'Next')]",
                     "//button[contains(., 'Continue')]",
                     "//button[contains(., 'next')]",
+                    "//button[contains(., 'Review')]",
                     "//button[contains(@aria-label, 'Next')]",
+                    "//button[contains(@aria-label, 'Review')]",
+                    "//button[@type='submit']",
                     "//a[contains(., 'Next')]",
+                    "//a[contains(., 'Continue')]",
                 ]
                 
                 next_button = None
@@ -300,15 +304,31 @@ class WorkdayScraper(BaseScraper):
         # Default answers for common questions
         # Pattern: (keyword_in_label, default_answer_to_select)
         DEFAULT_ANSWERS = {
-            # Sponsorship questions - typically answer "No" (don't require sponsorship)
+            # Sponsorship / Work Authorization
             'sponsorship': 'no',
             'visa': 'no',
-            'work authorization': 'yes',  # Are you authorized to work?
+            'future sponsorship': 'no',
+            'will you require': 'no',
+            'require sponsorship': 'no',
+            'need sponsorship': 'no',
+            'work authorization': 'yes',
             'authorized to work': 'yes',
             'legally authorized': 'yes',
             'employment eligibility': 'yes',
-            'require sponsorship': 'no',
-            'need sponsorship': 'no',
+            'right to work': 'yes',
+            
+            # Citizenship
+            'citizenship': 'yes',
+            'citizen': 'yes',
+            'u.s. citizen': 'yes',
+            'us citizen': 'yes',
+            
+            # Criminal History (Usually "No" for clean record)
+            'criminal': 'no',
+            'convicted': 'no',
+            'felony': 'no',
+            'misdemeanor': 'no',
+            'crime': 'no',
             
             # Disability questions - decline to identify
             'disability': 'decline',

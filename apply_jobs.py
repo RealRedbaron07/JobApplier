@@ -42,15 +42,26 @@ def apply_to_jobs():
     resume_to_use = None
     
     if user_profile_db.resume_path and os.path.exists(user_profile_db.resume_path):
+        # Auto-use database resume - fully automated mode
         default_resume_path = user_profile_db.resume_path
-        resume_to_use = default_resume_path  # Auto-use database resume
-        print(f"\n📄 Using resume from profile: {default_resume_path}")
+        resume_to_use = default_resume_path
+        print(f"\n📄 Auto-using resume from profile: {default_resume_path}")
     else:
-        print("\n⚠️  No valid resume in profile database.")
-        print("   Please add your resume path using: python3 setup_profile.py")
-        print("   Or set resume_path in the UserProfile table.")
-        session.close()
-        return
+        # Fallback to manual input ONLY if no valid resume in database
+        print("\n⚠️  No valid resume found in profile database.")
+        print("   Falling back to manual input...")
+        resume_to_use = get_resume_path(None)
+        
+        if not resume_to_use or not os.path.exists(resume_to_use):
+            print("\n❌ Cannot proceed without a valid resume.")
+            print("   Tip: Add resume_path to your profile using: python3 setup_profile.py")
+            session.close()
+            return
+        
+        # Optionally save to profile for future runs
+        print(f"\n💾 Saving resume path to profile for future automated runs...")
+        user_profile_db.resume_path = resume_to_use
+        session.commit()
     
     # Get jobs to apply to
     # Filter by: not applied, match score, date (MAX_JOB_AGE_DAYS), and remove duplicates
