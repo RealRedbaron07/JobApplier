@@ -26,7 +26,7 @@ class LinkedInScraper(BaseScraper):
         
         # Check if already logged in (from Chrome profile)
         if "feed" in self.driver.current_url or "mynetwork" in self.driver.current_url:
-            print("✓ Already logged into LinkedIn (from saved session)")
+            self.logger.info("Already logged into LinkedIn (from saved session)")
             self.logged_in = True
             return
         
@@ -40,12 +40,12 @@ class LinkedInScraper(BaseScraper):
             print("3. DO NOT close the browser window!")
             print("4. Come back here and press ENTER when logged in")
             print("=" * 60)
+            self.logger.info("MANUAL LOGIN MODE - Log in via the browser window")
             input("\n>>> Press ENTER when you're logged in... ")
-            print("\n⏳ Waiting 30 seconds for page to stabilize...")
-            print("   (DO NOT close the browser!)")
+            self.logger.info("Waiting 30 seconds for page to stabilize...")
             time.sleep(30)
             self.logged_in = True
-            print("✓ Ready to scrape!")
+            self.logger.info("Ready to scrape!")
             return
         
         # Option 2: Auto login with credentials
@@ -65,31 +65,30 @@ class LinkedInScraper(BaseScraper):
                 # Check if login succeeded
                 if "feed" in self.driver.current_url or "mynetwork" in self.driver.current_url:
                     self.logged_in = True
-                    print("✓ LinkedIn login successful")
+                    self.logger.info("LinkedIn login successful")
                 elif "challenge" in self.driver.current_url or "checkpoint" in self.driver.current_url:
                     # 2FA required - wait for manual completion
-                    print("⚠️  2FA/Security check required")
+                    self.logger.warning("2FA/Security check required")
                     print("   Complete verification in the browser")
                     input(">>> Press ENTER when done... ")
-                    print("⏳ Waiting 30 seconds...")
+                    self.logger.info("Waiting 30 seconds...")
                     time.sleep(30)
                     self.logged_in = True
                 else:
-                    print("⚠️  Login status unclear, continuing...")
+                    self.logger.warning("Login status unclear, continuing...")
                     self.logged_in = True
                     
             except Exception as e:
-                print(f"✗ LinkedIn auto-login failed: {e}")
-                print("  Falling back to manual login...")
+                self.logger.error(f"LinkedIn auto-login failed: {e}")
+                self.logger.info("Falling back to manual login...")
                 input(">>> Please log in manually, then press ENTER... ")
                 print("⏳ Waiting 30 seconds...")
                 time.sleep(30)
                 self.logged_in = True
         else:
-            print("⚠️  LinkedIn credentials not provided.")
-            print("  Set WAIT_FOR_LOGIN=true in .env for manual login mode,")
-            print("  or add LINKEDIN_EMAIL and LINKEDIN_PASSWORD.")
-            print("  Continuing with public job search only.")
+            self.logger.warning("LinkedIn credentials not provided.")
+            self.logger.info("Set WAIT_FOR_LOGIN=true in .env for manual login mode.")
+            self.logger.info("Continuing with public job search only.")
     
     def search_jobs(self, keywords: str, location: str) -> List[Dict]:
         """Search for jobs on LinkedIn with fallback scraping strategies.

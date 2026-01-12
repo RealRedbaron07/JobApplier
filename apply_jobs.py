@@ -6,6 +6,7 @@ This script will attempt to apply to jobs that have been approved for applicatio
 
 import sys
 import os
+import traceback
 from database.models import Session, Job, UserProfile, ApplicationRecord
 from scrapers.linkedin_scraper import LinkedInScraper
 from scrapers.workday_scraper import WorkdayScraper
@@ -16,6 +17,10 @@ from sqlalchemy import or_, and_
 import json
 from cover_letter_generator import CoverLetterGenerator
 from resume_tailor import ResumeTailor
+from logger import get_logger
+
+# Initialize logger
+logger = get_logger("apply_jobs")
 
 def apply_to_jobs():
     """Apply to approved jobs."""

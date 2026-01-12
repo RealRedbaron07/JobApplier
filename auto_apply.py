@@ -8,6 +8,7 @@ No user interaction required when AUTO_MODE=true.
 import sys
 import os
 import json
+import traceback
 from datetime import datetime, timezone, timedelta
 
 from database.models import Session, Job, UserProfile, ApplicationRecord
@@ -20,14 +21,25 @@ from matcher.job_matcher import JobMatcher
 from cover_letter_generator import CoverLetterGenerator
 from resume_tailor import ResumeTailor
 from config import Config
+from logger import get_logger, LogContext
+from utils import validate_job_data, clean_job_data, format_job_summary
 from sqlalchemy import or_, and_
+
+# Initialize logger
+logger = get_logger("auto_apply")
 
 
 def log(message: str, level: str = "INFO"):
-    """Structured logging with timestamps."""
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    prefix = {"INFO": "ℹ️", "SUCCESS": "✅", "WARNING": "⚠️", "ERROR": "❌", "STEP": "🔄"}.get(level, "•")
-    print(f"[{timestamp}] {prefix} {message}")
+    """Compatibility wrapper for old log calls - routes to new logger."""
+    level_map = {
+        "INFO": logger.info,
+        "SUCCESS": logger.info,
+        "WARNING": logger.warning,
+        "ERROR": logger.error,
+        "STEP": logger.info,
+    }
+    log_func = level_map.get(level, logger.info)
+    log_func(message)
 
 
 def scrape_jobs(session, user_profile: dict) -> int:

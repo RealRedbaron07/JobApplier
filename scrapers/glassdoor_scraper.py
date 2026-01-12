@@ -14,14 +14,14 @@ class GlassdoorScraper(BaseScraper):
     def login(self):
         """Try to browse Glassdoor without login."""
         self.init_driver()
-        print("Glassdoor scraper initialized (attempting without login)")
+        self.logger.info("Glassdoor scraper initialized (attempting without login)")
         
         # Only attempt login if credentials are provided
         if Config.GLASSDOOR_EMAIL != 'your-email@example.com' and Config.GLASSDOOR_PASSWORD != 'your-password-here':
             try:
                 self._attempt_login()
             except Exception as e:
-                print(f"Glassdoor login skipped or failed: {e}")
+                self.logger.debug(f"Glassdoor login skipped or failed: {e}")
     
     def _attempt_login(self):
         """Attempt login if credentials are available."""
@@ -41,9 +41,9 @@ class GlassdoorScraper(BaseScraper):
             password_field.send_keys(Keys.RETURN)
             
             time.sleep(5)
-            print("Glassdoor login successful")
+            self.logger.info("Glassdoor login successful")
         except Exception as e:
-            print(f"Glassdoor login error: {e}")
+            self.logger.warning(f"Glassdoor login error: {e}")
     
     def search_jobs(self, keywords: str, location: str) -> List[Dict]:
         """Search for jobs on Glassdoor.
@@ -57,9 +57,9 @@ class GlassdoorScraper(BaseScraper):
         if not self.driver:
             try:
                 self.init_driver()
-                print(f"  📢 Guest Mode: Using public Glassdoor search")
+                self.logger.info("Guest Mode: Using public Glassdoor search")
             except Exception as e:
-                print(f"  ⚠️  Failed to initialize driver: {e}")
+                self.logger.warning(f"Failed to initialize driver: {e}")
                 return []
         
         search_url = f"{self.base_url}/Job/jobs.htm?sc.keyword={keywords.replace(' ', '%20')}&locT=C&locId={location.replace(' ', '%20')}"
@@ -88,7 +88,7 @@ class GlassdoorScraper(BaseScraper):
                 except Exception as e:
                     continue
         except Exception as e:
-            print(f"Error searching Glassdoor jobs: {e}")
+            self.logger.error(f"Error searching Glassdoor jobs: {e}")
         
         return jobs
     
@@ -106,6 +106,6 @@ class GlassdoorScraper(BaseScraper):
             description = self.driver.find_element(By.CLASS_NAME, "jobDescriptionContent").text
             details['description'] = description
         except Exception as e:
-            print(f"Error getting Glassdoor job details: {e}")
+            self.logger.debug(f"Error getting Glassdoor job details: {e}")
         
         return details

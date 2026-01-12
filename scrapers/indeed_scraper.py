@@ -12,7 +12,7 @@ class IndeedScraper(BaseScraper):
     def login(self):
         """Indeed doesn't require login for browsing."""
         self.init_driver()
-        print("Indeed scraper initialized (no login required)")
+        self.logger.info("Indeed scraper initialized (no login required)")
     
     def search_jobs(self, keywords: str, location: str) -> List[Dict]:
         """Search for jobs on Indeed with fallback scraping strategies."""

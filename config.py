@@ -77,3 +77,69 @@ class Config:
     
     # Job freshness filter - only apply to jobs posted within this many days
     MAX_JOB_AGE_DAYS = int(os.getenv('MAX_JOB_AGE_DAYS', 30))  # Only apply to jobs posted in last 30 days
+    
+    # ============================================
+    # ANTI-DETECTION & PROXY SETTINGS
+    # ============================================
+    
+    # Proxy URL (optional, for anti-ban protection)
+    # Format: http://user:pass@proxy.example.com:8080 or http://proxy.example.com:8080
+    PROXY_URL = os.getenv('PROXY_URL', '')
+    
+    # Whether to rotate through multiple proxies (requires proxy list file)
+    ROTATE_PROXIES = os.getenv('ROTATE_PROXIES', 'false').lower() == 'true'
+    
+    # ============================================
+    # RETRY & RATE LIMITING SETTINGS
+    # ============================================
+    
+    # Maximum retry attempts for failed operations
+    MAX_RETRIES = int(os.getenv('MAX_RETRIES', 3))
+    
+    # Base delay between retries (doubles with each attempt)
+    RETRY_DELAY_SECONDS = float(os.getenv('RETRY_DELAY_SECONDS', 2.0))
+    
+    # Minimum delay between requests (to avoid rate limiting)
+    MIN_REQUEST_DELAY = float(os.getenv('MIN_REQUEST_DELAY', 1.0))
+    MAX_REQUEST_DELAY = float(os.getenv('MAX_REQUEST_DELAY', 3.0))
+    
+    # Wait time when rate limited (in minutes)
+    RATE_LIMIT_WAIT_MINUTES = int(os.getenv('RATE_LIMIT_WAIT_MINUTES', 5))
+    
+    # ============================================
+    # LOGGING SETTINGS
+    # ============================================
+    
+    # Log directory
+    LOG_DIR = os.getenv('LOG_DIR', 'logs')
+    
+    # Log level for file output (DEBUG, INFO, WARNING, ERROR)
+    LOG_LEVEL_FILE = os.getenv('LOG_LEVEL_FILE', 'DEBUG')
+    
+    # Log level for console output
+    LOG_LEVEL_CONSOLE = os.getenv('LOG_LEVEL_CONSOLE', 'INFO')
+    
+    # Enable debug mode (saves screenshots and HTML on failures)
+    DEBUG_MODE = os.getenv('DEBUG_MODE', 'false').lower() == 'true'
+    
+    # ============================================
+    # BROWSER SETTINGS (Persistent Sessions)
+    # ============================================
+    
+    # Chrome profile directory for persistent sessions
+    # First run: Log in manually → cookies saved here
+    # Subsequent runs: Auto-loads saved session (no login needed)
+    # Set to empty string '' to use fresh session each time
+    CHROME_DATA_DIR = os.getenv('CHROME_DATA_DIR', 
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), 'chrome_profile')
+    )
+    
+    # Headless mode - set to True for background operation
+    # Default: False (visible browser for first run / manual login)
+    # After first successful login, can set to True for automation
+    HEADLESS_MODE = os.getenv('HEADLESS_MODE', 'false').lower() == 'true'
+    
+    # Use existing Chrome profile (alternative to CHROME_DATA_DIR)
+    # If True, uses your default Chrome profile at ~/Library/Application Support/Google/Chrome
+    # WARNING: Chrome must be closed when using this option
+    USE_SYSTEM_CHROME_PROFILE = os.getenv('USE_SYSTEM_CHROME_PROFILE', 'false').lower() == 'true'

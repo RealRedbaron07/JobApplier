@@ -19,7 +19,7 @@ class WorkdayScraper(BaseScraper):
     def login(self):
         """Initialize driver (Workday doesn't require pre-login for browsing)."""
         self.init_driver()
-        print("Workday scraper initialized (login handled per application)")
+        self.logger.info("Workday scraper initialized (login handled per application)")
     
     def _extract_workday_base_url(self, job_url: str) -> str:
         """Extract base Workday URL from job URL."""

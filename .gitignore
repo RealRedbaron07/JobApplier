@@ -57,17 +57,24 @@ Thumbs.db
 
 # Logs
 *.log
+logs/
 
 # Chrome/ChromeDriver
 chromedriver
 chromedriver.exe
 *.crx
+chrome_profile/
 
 # Temporary files
 *.tmp
 temp/
 tmp/
 
+# Debug files
+debug_*.html
+debug_*.png
+debug_screenshots/
+debug_html/
 
 # Cursor IDE
 .cursor/
