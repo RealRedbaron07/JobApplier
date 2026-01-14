@@ -14,14 +14,14 @@ class GlassdoorScraper(BaseScraper):
     def login(self):
         """Try to browse Glassdoor without login."""
         self.init_driver()
-        self.logger.info("Glassdoor scraper initialized (attempting without login)")
+        print("Glassdoor scraper initialized (attempting without login)")
         
         # Only attempt login if credentials are provided
         if Config.GLASSDOOR_EMAIL != 'your-email@example.com' and Config.GLASSDOOR_PASSWORD != 'your-password-here':
             try:
                 self._attempt_login()
             except Exception as e:
-                self.logger.debug(f"Glassdoor login skipped or failed: {e}")
+                print(f"Glassdoor login skipped or failed: {e}")
     
     def _attempt_login(self):
         """Attempt login if credentials are available."""
@@ -41,27 +41,13 @@ class GlassdoorScraper(BaseScraper):
             password_field.send_keys(Keys.RETURN)
             
             time.sleep(5)
-            self.logger.info("Glassdoor login successful")
+            print("Glassdoor login successful")
         except Exception as e:
-            self.logger.warning(f"Glassdoor login error: {e}")
+            print(f"Glassdoor login error: {e}")
     
     def search_jobs(self, keywords: str, location: str) -> List[Dict]:
-        """Search for jobs on Glassdoor.
-        
-        GUEST MODE SUPPORT: Works without login using public job search.
-        Glassdoor allows public job browsing with limited functionality.
-        """
+        """Search for jobs on Glassdoor."""
         jobs = []
-        
-        # Ensure driver is initialized (for guest mode)
-        if not self.driver:
-            try:
-                self.init_driver()
-                self.logger.info("Guest Mode: Using public Glassdoor search")
-            except Exception as e:
-                self.logger.warning(f"Failed to initialize driver: {e}")
-                return []
-        
         search_url = f"{self.base_url}/Job/jobs.htm?sc.keyword={keywords.replace(' ', '%20')}&locT=C&locId={location.replace(' ', '%20')}"
         
         try:
@@ -88,7 +74,7 @@ class GlassdoorScraper(BaseScraper):
                 except Exception as e:
                     continue
         except Exception as e:
-            self.logger.error(f"Error searching Glassdoor jobs: {e}")
+            print(f"Error searching Glassdoor jobs: {e}")
         
         return jobs
     
@@ -106,6 +92,6 @@ class GlassdoorScraper(BaseScraper):
             description = self.driver.find_element(By.CLASS_NAME, "jobDescriptionContent").text
             details['description'] = description
         except Exception as e:
-            self.logger.debug(f"Error getting Glassdoor job details: {e}")
+            print(f"Error getting Glassdoor job details: {e}")
         
         return details
