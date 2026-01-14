@@ -28,6 +28,7 @@ class Config:
     
     # Add missing config
     MAX_JOB_AGE_DAYS = int(os.getenv('MAX_JOB_AGE_DAYS', 30))
+    MAX_SEARCH_TIME_MINUTES = int(os.getenv('MAX_SEARCH_TIME_MINUTES', 60))
     
     # Job search parameters - focused on tech/fintech internships
     JOB_TITLES = os.getenv('JOB_TITLES', 
