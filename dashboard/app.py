@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Web Dashboard for Job Applier.
+Web Dashboard for Job Applier - Command Center Edition.
 Provides a visual interface to view, manage, and apply to jobs.
 """
 
@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from database.models import Session, Job, UserProfile, ApplicationRecord, SavedLink
 from config import Config
-from sqlalchemy import desc, or_, func
+from sqlalchemy import desc, asc, or_, func
 
 app = Flask(__name__)
 
@@ -42,6 +42,12 @@ def get_stats():
         rejected = session.query(Job).filter_by(application_status='rejected').count()
         saved = session.query(SavedLink).count()
         
+        # Count jobs needing manual action
+        manual_needed = session.query(Job).filter(
+            Job.application_method == 'manual',
+            Job.applied == False
+        ).count()
+        
         # Average match score
         avg_score = session.query(Job).with_entities(
             func.avg(Job.match_score)
@@ -53,6 +59,7 @@ def get_stats():
             'pending': pending,
             'rejected': rejected,
             'saved': saved,
+            'manual_needed': manual_needed,
             'avg_score': round(avg_score, 1)
         })
     except Exception as e:
@@ -62,6 +69,7 @@ def get_stats():
             'pending': 0,
             'rejected': 0,
             'saved': 0,
+            'manual_needed': 0,
             'avg_score': 0
         })
     finally:
@@ -70,13 +78,14 @@ def get_stats():
 
 @app.route('/api/jobs')
 def get_jobs():
-    """Get jobs list with optional filtering."""
+    """Get jobs list with optional filtering. Supports 'tab' parameter for Command Center UI."""
     if Session is None:
         return jsonify({'error': 'Database not initialized'}), 500
     
     session = Session()
     try:
         # Get filter parameters
+        tab = request.args.get('tab', '')  # 'new' or 'history'
         status = request.args.get('status', 'all')
         min_score = int(request.args.get('min_score', 0))
         search = request.args.get('search', '').lower()
@@ -87,13 +96,36 @@ def get_jobs():
         # Base query
         query = session.query(Job)
         
-        # Apply filters
-        if status == 'applied':
-            query = query.filter_by(applied=True)
-        elif status == 'pending':
-            query = query.filter_by(applied=False)
-        elif status == 'rejected':
-            query = query.filter_by(application_status='rejected')
+        # Apply tab-based filtering (Command Center UI)
+        if tab == 'new':
+            # New Matches: Jobs where applied=False (excluding rejected)
+            query = query.filter(
+                Job.applied == False,
+                or_(Job.application_status == None, Job.application_status != 'rejected')
+            )
+            # Default sort by match_score descending for new matches
+            if sort_by == 'match_score':
+                order = 'desc'
+        elif tab == 'history':
+            # Application History: Jobs where applied=True OR application_method='manual'
+            query = query.filter(
+                or_(
+                    Job.applied == True,
+                    Job.application_method == 'manual'
+                )
+            )
+            # Default sort by applied_date descending for history
+            if sort_by == 'applied_date' or sort_by == 'date':
+                sort_by = 'applied_date'
+                order = 'desc'
+        else:
+            # Legacy status parameter support
+            if status == 'applied':
+                query = query.filter_by(applied=True)
+            elif status == 'pending':
+                query = query.filter_by(applied=False)
+            elif status == 'rejected':
+                query = query.filter_by(application_status='rejected')
         
         if min_score > 0:
             query = query.filter(Job.match_score >= min_score)
@@ -110,9 +142,9 @@ def get_jobs():
         # Apply sorting
         sort_column = getattr(Job, sort_by, Job.match_score)
         if order == 'desc':
-            query = query.order_by(desc(sort_column))
+            query = query.order_by(desc(sort_column).nullslast())
         else:
-            query = query.order_by(sort_column)
+            query = query.order_by(asc(sort_column).nullslast())
         
         # Limit results
         jobs = query.limit(limit).all()
@@ -125,19 +157,19 @@ def get_jobs():
             
             result.append({
                 'id': job.id,
-                'title': job.title,
-                'company': job.company,
-                'location': job.location or 'N/A',
-                'platform': job.platform or 'N/A',
-                'job_url': job.job_url,
+                'title': job.title or 'Untitled Position',
+                'company': job.company or 'Unknown Company',
+                'location': job.location if job.location else 'Remote/Unknown',
+                'platform': job.platform if job.platform else 'Unknown',
+                'job_url': job.job_url or '',
                 'match_score': job.match_score or 0,
                 'applied': job.applied,
-                'application_status': job.application_status or ('Applied' if job.applied else 'Pending'),
+                'application_status': job.application_status or '',
                 'application_method': job.application_method or '',
                 'applied_date': job.applied_date.strftime('%Y-%m-%d %H:%M') if job.applied_date else None,
                 'discovered_date': job.discovered_date.strftime('%Y-%m-%d') if job.discovered_date else 'N/A',
-                'has_cover_letter': bool(job.cover_letter_path or job.cover_letter),
-                'has_tailored_resume': bool(job.tailored_resume_path),
+                'has_cover_letter': bool(getattr(job, 'cover_letter_path', None) or getattr(job, 'cover_letter', None)),
+                'has_tailored_resume': bool(getattr(job, 'tailored_resume_path', None)),
                 'is_saved': is_saved
             })
         
@@ -166,27 +198,28 @@ def get_job_details(job_id):
         
         return jsonify({
             'id': job.id,
-            'title': job.title,
-            'company': job.company,
-            'location': job.location,
-            'platform': job.platform,
-            'job_url': job.job_url,
-            'description': job.description or '',
+            'title': job.title or 'Untitled Position',
+            'company': job.company or 'Unknown Company',
+            'location': job.location if job.location else 'Remote/Unknown',
+            'platform': job.platform if job.platform else 'Unknown',
+            'job_url': job.job_url or '',
+            'description': job.description if job.description else 'No description available',
             'requirements': job.requirements or '',
-            'match_score': job.match_score,
+            'match_score': job.match_score or 0,
             'applied': job.applied,
             'applied_date': job.applied_date.strftime('%Y-%m-%d %H:%M') if job.applied_date else None,
-            'application_status': job.application_status,
-            'cover_letter': job.cover_letter,
-            'cover_letter_path': job.cover_letter_path,
-            'tailored_resume_path': job.tailored_resume_path,
-            'notes': job.notes,
+            'application_status': job.application_status or '',
+            'application_method': job.application_method or '',
+            'cover_letter': getattr(job, 'cover_letter', '') or '',
+            'cover_letter_path': getattr(job, 'cover_letter_path', '') or '',
+            'tailored_resume_path': getattr(job, 'tailored_resume_path', '') or '',
+            'notes': job.notes or '',
             'discovered_date': job.discovered_date.strftime('%Y-%m-%d %H:%M') if job.discovered_date else None,
             'applications': [{
                 'date': r.application_date.strftime('%Y-%m-%d %H:%M') if r.application_date else None,
-                'method': r.application_method,
-                'status': r.application_status,
-                'notes': r.notes
+                'method': r.application_method or '',
+                'status': r.application_status or '',
+                'notes': r.notes or ''
             } for r in app_records]
         })
     
@@ -198,7 +231,10 @@ def get_job_details(job_id):
 
 @app.route('/api/jobs/<int:job_id>/materials')
 def get_job_materials(job_id):
-    """Get application materials (cover letter and resume) for a specific job."""
+    """
+    Get application materials (cover letter text and resume path) for a specific job.
+    This endpoint is used by the Materials Modal in the Command Center UI.
+    """
     if Session is None:
         return jsonify({'error': 'Database not initialized'}), 500
     
@@ -208,12 +244,29 @@ def get_job_materials(job_id):
         if not job:
             return jsonify({'error': 'Job not found'}), 404
         
+        # Get cover letter text from database
+        cover_letter_text = getattr(job, 'cover_letter', '') or ''
+        cover_letter_path = getattr(job, 'cover_letter_path', '') or ''
+        tailored_resume_path = getattr(job, 'tailored_resume_path', '') or ''
+        
+        # If cover letter text is empty but path exists, try to read from file
+        if not cover_letter_text and cover_letter_path:
+            try:
+                if os.path.exists(cover_letter_path):
+                    with open(cover_letter_path, 'r', encoding='utf-8') as f:
+                        cover_letter_text = f.read()
+            except Exception as e:
+                # Log but don't fail - just return empty
+                print(f"Could not read cover letter file: {e}")
+        
         return jsonify({
-            'cover_letter': job.cover_letter or '',
-            'cover_letter_path': job.cover_letter_path or '',
-            'tailored_resume_path': job.tailored_resume_path or '',
-            'original_resume_path': job.original_resume_path or '',
-            'has_materials': bool(job.cover_letter or job.tailored_resume_path)
+            'job_id': job.id,
+            'job_title': job.title or 'Untitled Position',
+            'company': job.company or 'Unknown Company',
+            'cover_letter': cover_letter_text,
+            'cover_letter_path': cover_letter_path,
+            'tailored_resume_path': tailored_resume_path,
+            'has_materials': bool(cover_letter_text or tailored_resume_path)
         })
     
     except Exception as e:
@@ -298,14 +351,21 @@ def get_saved_jobs():
                 result.append({
                     'id': link.id,
                     'job_id': job.id,
-                    'title': job.title,
-                    'company': job.company,
-                    'location': job.location,
-                    'job_url': job.job_url,
-                    'match_score': job.match_score,
+                    'title': job.title or 'Untitled Position',
+                    'company': job.company or 'Unknown Company',
+                    'location': job.location if job.location else 'Remote/Unknown',
+                    'platform': job.platform if job.platform else 'Unknown',
+                    'job_url': job.job_url or '',
+                    'match_score': job.match_score or 0,
+                    'applied': job.applied,
+                    'application_status': job.application_status or '',
+                    'application_method': job.application_method or '',
+                    'has_cover_letter': bool(getattr(job, 'cover_letter_path', None) or getattr(job, 'cover_letter', None)),
+                    'has_tailored_resume': bool(getattr(job, 'tailored_resume_path', None)),
                     'saved_date': link.saved_date.strftime('%Y-%m-%d'),
-                    'notes': link.notes,
-                    'category': link.category
+                    'notes': link.notes or '',
+                    'category': link.category or '',
+                    'is_saved': True
                 })
         
         return jsonify({'saved': result, 'count': len(result)})
@@ -343,12 +403,13 @@ def export_jobs():
         
         if format_type == 'json':
             data = [{
-                'title': job.title,
-                'company': job.company,
-                'location': job.location,
-                'url': job.job_url,
-                'match_score': job.match_score,
+                'title': job.title or '',
+                'company': job.company or '',
+                'location': job.location if job.location else 'Remote/Unknown',
+                'url': job.job_url or '',
+                'match_score': job.match_score or 0,
                 'status': job.application_status or ('Applied' if job.applied else 'Pending'),
+                'application_method': job.application_method or '',
                 'discovered_date': job.discovered_date.strftime('%Y-%m-%d') if job.discovered_date else None
             } for job in jobs]
             
@@ -361,16 +422,17 @@ def export_jobs():
             # CSV format
             output = StringIO()
             writer = csv.writer(output)
-            writer.writerow(['Title', 'Company', 'Location', 'URL', 'Match Score', 'Status', 'Discovered Date'])
+            writer.writerow(['Title', 'Company', 'Location', 'URL', 'Match Score', 'Status', 'Method', 'Discovered Date'])
             
             for job in jobs:
                 writer.writerow([
-                    job.title,
-                    job.company,
-                    job.location,
-                    job.job_url,
-                    job.match_score,
+                    job.title or '',
+                    job.company or '',
+                    job.location if job.location else 'Remote/Unknown',
+                    job.job_url or '',
+                    job.match_score or 0,
                     job.application_status or ('Applied' if job.applied else 'Pending'),
+                    job.application_method or '',
                     job.discovered_date.strftime('%Y-%m-%d') if job.discovered_date else ''
                 ])
             
@@ -414,7 +476,7 @@ def reject_job(job_id):
 
 if __name__ == '__main__':
     print("\n" + "=" * 60)
-    print("🖥️  Job Applier Dashboard")
+    print("🎯 Job Applier Command Center")
     print("=" * 60)
     print(f"Open in browser: http://{Config.DASHBOARD_HOST}:{Config.DASHBOARD_PORT}")
     print("Press Ctrl+C to stop")
