@@ -101,8 +101,8 @@ def get_jobs():
             # New Matches: Jobs where applied=False AND application_method is NULL/empty
             query = query.filter(
                 Job.applied == False,
-                or_(Job.application_method == None, Job.application_method == ''),
-                or_(Job.application_status == None, Job.application_status != 'rejected')
+                or_(Job.application_method.is_(None), Job.application_method == ''),
+                or_(Job.application_status.is_(None), Job.application_status != 'rejected')
             )
             # Default sort by match_score descending for new matches
             if sort_by == 'match_score':
@@ -112,7 +112,7 @@ def get_jobs():
             query = query.filter(
                 or_(
                     Job.applied == True,
-                    and_(Job.application_method != None, Job.application_method != '')
+                    and_(Job.application_method.isnot(None), Job.application_method != '')
                 )
             )
             # Default sort by applied_date descending for history
