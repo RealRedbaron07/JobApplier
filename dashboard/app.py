@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from database.models import Session, Job, UserProfile, ApplicationRecord, SavedLink
 from config import Config
-from sqlalchemy import desc, asc, or_, func
+from sqlalchemy import desc, asc, or_, and_, func
 
 app = Flask(__name__)
 
@@ -98,20 +98,21 @@ def get_jobs():
         
         # Apply tab-based filtering (Command Center UI)
         if tab == 'new':
-            # New Matches: Jobs where applied=False (excluding rejected)
+            # New Matches: Jobs where applied=False AND application_method is NULL/empty
             query = query.filter(
                 Job.applied == False,
-                or_(Job.application_status == None, Job.application_status != 'rejected')
+                or_(Job.application_method.is_(None), Job.application_method == ''),
+                or_(Job.application_status.is_(None), Job.application_status != 'rejected')
             )
             # Default sort by match_score descending for new matches
             if sort_by == 'match_score':
                 order = 'desc'
         elif tab == 'history':
-            # Application History: Jobs where applied=True OR application_method='manual'
+            # Application History: Jobs where applied=True OR application_method IS NOT NULL/empty
             query = query.filter(
                 or_(
                     Job.applied == True,
-                    Job.application_method == 'manual'
+                    and_(Job.application_method.isnot(None), Job.application_method != '')
                 )
             )
             # Default sort by applied_date descending for history

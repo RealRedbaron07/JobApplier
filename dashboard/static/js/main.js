@@ -58,14 +58,9 @@ async function loadJobs() {
         const minScore = document.getElementById('filter-score').value;
         const search = document.getElementById('filter-search').value;
         
-        let status = 'all';
-        if (currentTab === 'new-matches') {
-            status = 'pending'; // Show only unapplied jobs
-        } else if (currentTab === 'history') {
-            status = 'applied'; // Show applied jobs and manual ones
-        }
+        const tab = currentTab === 'new-matches' ? 'new' : 'history';
 
-        let url = `/api/jobs?status=${status}&min_score=${minScore}&sort=${currentSort}&order=${currentOrder}`;
+        let url = `/api/jobs?tab=${tab}&min_score=${minScore}&sort=${currentSort}&order=${currentOrder}`;
         if (search) url += `&search=${encodeURIComponent(search)}`;
 
         if (savedOnlyMode) {
@@ -76,11 +71,6 @@ async function loadJobs() {
         const data = await response.json();
 
         let jobs = savedOnlyMode ? data.saved : data.jobs;
-        
-        // For history tab, also include jobs with application_method='manual'
-        if (currentTab === 'history' && !savedOnlyMode) {
-            jobs = jobs.filter(job => job.applied || job.application_method === 'manual');
-        }
 
         if (!jobs || jobs.length === 0) {
             tbody.innerHTML = '<tr><td colspan="7" class="loading">No jobs found</td></tr>';
