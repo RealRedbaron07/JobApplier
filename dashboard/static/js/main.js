@@ -4,12 +4,35 @@ let currentSort = 'match_score';
 let currentOrder = 'desc';
 let searchTimeout = null;
 let savedOnlyMode = false;
+let currentTab = 'new-matches'; // 'new-matches' or 'history'
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
     loadStats();
     loadJobs();
 });
+
+// Switch between tabs
+function switchTab(tab) {
+    currentTab = tab;
+    
+    // Update tab button states
+    document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+    event.target.classList.add('active');
+    
+    // Update sort and filters based on tab
+    if (tab === 'new-matches') {
+        currentSort = 'match_score';
+        currentOrder = 'desc';
+        document.getElementById('filter-score-group').style.display = 'block';
+    } else if (tab === 'history') {
+        currentSort = 'applied_date';
+        currentOrder = 'desc';
+        document.getElementById('filter-score-group').style.display = 'none';
+    }
+    
+    loadJobs();
+}
 
 // Load dashboard statistics
 async function loadStats() {
@@ -32,9 +55,15 @@ async function loadJobs() {
     tbody.innerHTML = '<tr><td colspan="7" class="loading">Loading jobs...</td></tr>';
 
     try {
-        const status = document.getElementById('filter-status').value;
         const minScore = document.getElementById('filter-score').value;
         const search = document.getElementById('filter-search').value;
+        
+        let status = 'all';
+        if (currentTab === 'new-matches') {
+            status = 'pending'; // Show only unapplied jobs
+        } else if (currentTab === 'history') {
+            status = 'applied'; // Show applied jobs and manual ones
+        }
 
         let url = `/api/jobs?status=${status}&min_score=${minScore}&sort=${currentSort}&order=${currentOrder}`;
         if (search) url += `&search=${encodeURIComponent(search)}`;
@@ -46,7 +75,12 @@ async function loadJobs() {
         const response = await fetch(url);
         const data = await response.json();
 
-        const jobs = savedOnlyMode ? data.saved : data.jobs;
+        let jobs = savedOnlyMode ? data.saved : data.jobs;
+        
+        // For history tab, also include jobs with application_method='manual'
+        if (currentTab === 'history' && !savedOnlyMode) {
+            jobs = jobs.filter(job => job.applied || job.application_method === 'manual');
+        }
 
         if (!jobs || jobs.length === 0) {
             tbody.innerHTML = '<tr><td colspan="7" class="loading">No jobs found</td></tr>';
@@ -65,14 +99,26 @@ function createJobRow(job) {
     const scoreClass = job.match_score >= 80 ? 'score-high' :
         job.match_score >= 60 ? 'score-medium' : 'score-low';
 
-    const statusClass = job.applied ?
-        (job.application_status === 'rejected' ? 'status-rejected' : 'status-applied') :
-        'status-pending';
-
-    const statusText = job.application_status || (job.applied ? 'Applied' : 'Pending');
+    // Determine status badge based on application_method
+    let statusClass = 'status-pending';
+    let statusText = 'Pending';
+    
+    if (job.application_method === 'manual') {
+        statusClass = 'status-manual';
+        statusText = 'Ready for Manual Apply';
+    } else if (job.application_method && job.application_method.includes('auto')) {
+        statusClass = 'status-auto';
+        statusText = 'Auto-Applied';
+    } else if (job.applied) {
+        statusClass = job.application_status === 'rejected' ? 'status-rejected' : 'status-applied';
+        statusText = job.application_status || 'Applied';
+    }
 
     const saveClass = job.is_saved ? 'saved' : '';
     const saveText = job.is_saved ? '⭐ Saved' : '☆ Save';
+    
+    // Show materials button if job has cover letter or resume
+    const hasMaterials = job.has_cover_letter || job.has_tailored_resume;
 
     return `
         <tr data-id="${job.id || job.job_id}">
@@ -91,6 +137,7 @@ function createJobRow(job) {
             <td>
                 <div class="action-buttons">
                     <button class="action-btn action-view" onclick="viewJob(${job.id || job.job_id})" title="View details">👁️</button>
+                    ${hasMaterials ? `<button class="action-btn action-materials" onclick="viewMaterials(${job.id || job.job_id})" title="View materials">📄</button>` : ''}
                     <button class="action-btn action-save ${saveClass}" onclick="toggleSave(${job.id || job.job_id})" title="Save link">${saveText}</button>
                     <button class="action-btn action-copy" onclick="copyLink('${escapeHtml(job.job_url)}')" title="Copy link">📋</button>
                     ${!job.applied ? `<button class="action-btn action-reject" onclick="rejectJob(${job.id || job.job_id})" title="Reject">✗</button>` : ''}
@@ -172,12 +219,20 @@ function closeModal() {
 
 // Close modal on escape key
 document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') closeModal();
+    if (e.key === 'Escape') {
+        closeModal();
+        closeMaterialsModal();
+    }
 });
 
 // Close modal on background click
 document.getElementById('job-modal').addEventListener('click', (e) => {
     if (e.target.id === 'job-modal') closeModal();
+});
+
+// Close materials modal on background click
+document.getElementById('materials-modal').addEventListener('click', (e) => {
+    if (e.target.id === 'materials-modal') closeMaterialsModal();
 });
 
 // Toggle save/unsave a job
@@ -230,6 +285,65 @@ async function rejectJob(jobId) {
     } catch (error) {
         console.error('Failed to reject job:', error);
     }
+}
+
+// View application materials in modal
+async function viewMaterials(jobId) {
+    const modal = document.getElementById('materials-modal');
+    const modalBody = document.getElementById('materials-modal-body');
+    const modalTitle = document.getElementById('materials-modal-title');
+
+    try {
+        const response = await fetch(`/api/jobs/${jobId}/materials`);
+        const data = await response.json();
+
+        modalTitle.textContent = 'Application Materials';
+
+        let materialsHtml = '';
+        
+        if (data.cover_letter) {
+            materialsHtml += `
+                <div class="materials-section">
+                    <h3>📝 Cover Letter</h3>
+                    <div class="cover-letter-text">${escapeHtml(data.cover_letter).replace(/\n/g, '<br>')}</div>
+                </div>
+            `;
+        }
+        
+        if (data.cover_letter_path) {
+            materialsHtml += `
+                <div class="materials-section">
+                    <h3>📄 Cover Letter File</h3>
+                    <p>${escapeHtml(data.cover_letter_path)}</p>
+                </div>
+            `;
+        }
+        
+        if (data.tailored_resume_path) {
+            materialsHtml += `
+                <div class="materials-section">
+                    <h3>📄 Tailored Resume</h3>
+                    <p>${escapeHtml(data.tailored_resume_path)}</p>
+                </div>
+            `;
+        }
+        
+        if (!materialsHtml) {
+            materialsHtml = '<p>No materials available for this job.</p>';
+        }
+
+        modalBody.innerHTML = materialsHtml;
+        modal.classList.add('active');
+    } catch (error) {
+        console.error('Failed to load materials:', error);
+        modalBody.innerHTML = '<p>Error loading materials.</p>';
+        modal.classList.add('active');
+    }
+}
+
+// Close materials modal
+function closeMaterialsModal() {
+    document.getElementById('materials-modal').classList.remove('active');
 }
 
 // Show notification

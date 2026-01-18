@@ -519,3 +519,95 @@ body {
         opacity: 1;
     }
 }
+
+/* Tabs */
+.tabs-section {
+    margin-bottom: 20px;
+}
+
+.tabs {
+    display: flex;
+    gap: 12px;
+    border-bottom: 2px solid var(--border-color);
+    padding-bottom: 0;
+}
+
+.tab-btn {
+    padding: 12px 24px;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    position: relative;
+    transition: all 0.2s ease;
+}
+
+.tab-btn:hover {
+    color: var(--text-primary);
+}
+
+.tab-btn.active {
+    color: var(--accent-primary);
+}
+
+.tab-btn.active::after {
+    content: '';
+    position: absolute;
+    bottom: -2px;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: var(--gradient-primary);
+    border-radius: 2px 2px 0 0;
+}
+
+/* Status badges - Manual and Auto */
+.status-badge.status-manual {
+    background: var(--accent-warning);
+    color: var(--bg-primary);
+    font-weight: 600;
+}
+
+.status-badge.status-auto {
+    background: var(--accent-success);
+    color: white;
+}
+
+/* Materials section in modal */
+.materials-section {
+    margin-bottom: 24px;
+}
+
+.materials-section h3 {
+    font-size: 1.1rem;
+    margin-bottom: 12px;
+    color: var(--text-primary);
+}
+
+.cover-letter-text {
+    background: var(--bg-tertiary);
+    padding: 16px;
+    border-radius: var(--radius-sm);
+    border-left: 3px solid var(--accent-primary);
+    color: var(--text-primary);
+    line-height: 1.6;
+    white-space: pre-wrap;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.materials-section p {
+    color: var(--text-secondary);
+    margin: 8px 0;
+}
+
+/* Action button for materials */
+.action-btn.action-materials {
+    background: var(--accent-info);
+}
+
+.action-btn.action-materials:hover {
+    background: var(--accent-primary);
+}

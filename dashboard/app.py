@@ -133,8 +133,10 @@ def get_jobs():
                 'match_score': job.match_score or 0,
                 'applied': job.applied,
                 'application_status': job.application_status or ('Applied' if job.applied else 'Pending'),
+                'application_method': job.application_method or '',
+                'applied_date': job.applied_date.strftime('%Y-%m-%d %H:%M') if job.applied_date else None,
                 'discovered_date': job.discovered_date.strftime('%Y-%m-%d') if job.discovered_date else 'N/A',
-                'has_cover_letter': bool(job.cover_letter_path),
+                'has_cover_letter': bool(job.cover_letter_path or job.cover_letter),
                 'has_tailored_resume': bool(job.tailored_resume_path),
                 'is_saved': is_saved
             })
@@ -186,6 +188,32 @@ def get_job_details(job_id):
                 'status': r.application_status,
                 'notes': r.notes
             } for r in app_records]
+        })
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+
+
+@app.route('/api/jobs/<int:job_id>/materials')
+def get_job_materials(job_id):
+    """Get application materials (cover letter and resume) for a specific job."""
+    if Session is None:
+        return jsonify({'error': 'Database not initialized'}), 500
+    
+    session = Session()
+    try:
+        job = session.query(Job).get(job_id)
+        if not job:
+            return jsonify({'error': 'Job not found'}), 404
+        
+        return jsonify({
+            'cover_letter': job.cover_letter or '',
+            'cover_letter_path': job.cover_letter_path or '',
+            'tailored_resume_path': job.tailored_resume_path or '',
+            'original_resume_path': job.original_resume_path or '',
+            'has_materials': bool(job.cover_letter or job.tailored_resume_path)
         })
     
     except Exception as e:
