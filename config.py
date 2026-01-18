@@ -30,6 +30,10 @@ class Config:
     MAX_JOB_AGE_DAYS = int(os.getenv('MAX_JOB_AGE_DAYS', 30))
     MAX_SEARCH_TIME_MINUTES = int(os.getenv('MAX_SEARCH_TIME_MINUTES', 60))
     
+    # Dashboard settings
+    DASHBOARD_HOST = os.getenv('DASHBOARD_HOST', '127.0.0.1')
+    DASHBOARD_PORT = int(os.getenv('DASHBOARD_PORT', 5000))
+    
     # Job search parameters - focused on tech/fintech internships
     JOB_TITLES = os.getenv('JOB_TITLES', 
         'Software Engineering Intern,'

@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from database.models import Session, Job, UserProfile, ApplicationRecord, SavedLink
 from config import Config
-from sqlalchemy import desc, or_
+from sqlalchemy import desc, or_, func
 
 app = Flask(__name__)
 
@@ -44,7 +44,7 @@ def get_stats():
         
         # Average match score
         avg_score = session.query(Job).with_entities(
-            db_func.avg(Job.match_score)
+            func.avg(Job.match_score)
         ).scalar() or 0
         
         return jsonify({
