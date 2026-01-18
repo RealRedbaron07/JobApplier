@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Job Applier Dashboard</title>
+    <title>Job Applier Command Center</title>
     <link rel="stylesheet" href="/static/css/style.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -13,11 +13,11 @@
         <!-- Header -->
         <header class="header">
             <div class="header-content">
-                <h1 class="logo">🚀 Job Applier</h1>
+                <h1 class="logo">🎯 Job Applier Command Center</h1>
                 <div class="header-actions">
                     <button class="btn btn-secondary" onclick="exportJobs('csv')">📥 Export CSV</button>
                     <button class="btn btn-secondary" onclick="exportJobs('json')">📥 Export JSON</button>
-                    <button class="btn btn-primary" onclick="window.location.reload()">🔄 Refresh</button>
+                    <button class="btn btn-primary" onclick="refreshDashboard()">🔄 Refresh</button>
                 </div>
             </div>
         </header>
@@ -35,7 +35,7 @@
                 </div>
                 <div class="stat-card stat-warning" id="stat-pending">
                     <div class="stat-value">-</div>
-                    <div class="stat-label">Pending</div>
+                    <div class="stat-label">New Matches</div>
                 </div>
                 <div class="stat-card stat-info" id="stat-saved">
                     <div class="stat-value">-</div>
@@ -44,11 +44,17 @@
             </div>
         </section>
 
-        <!-- Tabs -->
+        <!-- Tabs - Command Center View -->
         <section class="tabs-section">
             <div class="tabs">
-                <button class="tab-btn active" onclick="switchTab('new-matches')">🎯 New Matches</button>
-                <button class="tab-btn" onclick="switchTab('history')">📋 Application History</button>
+                <button class="tab-btn active" data-tab="new" onclick="switchTab('new')">
+                    🎯 New Matches
+                    <span class="tab-badge" id="badge-new">0</span>
+                </button>
+                <button class="tab-btn" data-tab="history" onclick="switchTab('history')">
+                    📋 Application History
+                    <span class="tab-badge" id="badge-history">0</span>
+                </button>
             </div>
         </section>
 
@@ -70,7 +76,7 @@
                 </div>
                 <div class="filter-group">
                     <label>&nbsp;</label>
-                    <button class="btn btn-secondary" onclick="showSavedOnly()">⭐ Saved Only</button>
+                    <button class="btn btn-secondary" id="btn-saved-only" onclick="toggleSavedOnly()">⭐ Saved Only</button>
                 </div>
             </div>
         </section>
@@ -81,9 +87,15 @@
                 <table class="jobs-table">
                     <thead>
                         <tr>
-                            <th class="sortable" data-sort="match_score" onclick="sortBy('match_score')">Score ▼</th>
-                            <th class="sortable" data-sort="title" onclick="sortBy('title')">Title</th>
-                            <th class="sortable" data-sort="company" onclick="sortBy('company')">Company</th>
+                            <th class="sortable" data-sort="match_score" onclick="sortBy('match_score')">
+                                Score <span class="sort-arrow" id="sort-match_score">▼</span>
+                            </th>
+                            <th class="sortable" data-sort="title" onclick="sortBy('title')">
+                                Title <span class="sort-arrow" id="sort-title"></span>
+                            </th>
+                            <th class="sortable" data-sort="company" onclick="sortBy('company')">
+                                Company <span class="sort-arrow" id="sort-company"></span>
+                            </th>
                             <th>Location</th>
                             <th>Platform</th>
                             <th>Status</th>
@@ -95,17 +107,23 @@
                     </tbody>
                 </table>
             </div>
+            <div class="table-info" id="table-info">
+                Showing 0 jobs
+            </div>
         </section>
 
         <!-- Materials Modal -->
         <div class="modal" id="materials-modal">
-            <div class="modal-content">
+            <div class="modal-content modal-wide">
                 <div class="modal-header">
-                    <h2 id="materials-modal-title">Application Materials</h2>
+                    <h2 id="materials-modal-title">📄 Application Materials</h2>
                     <button class="modal-close" onclick="closeMaterialsModal()">&times;</button>
                 </div>
                 <div class="modal-body" id="materials-modal-body">
                     <!-- Populated by JavaScript -->
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" onclick="closeMaterialsModal()">Close</button>
                 </div>
             </div>
         </div>
