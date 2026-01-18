@@ -44,19 +44,22 @@
             </div>
         </section>
 
+        <!-- Tabs -->
+        <section class="tabs-section">
+            <div class="tabs">
+                <button class="tab-btn active" onclick="switchTab('new-matches')">🎯 New Matches</button>
+                <button class="tab-btn" onclick="switchTab('history')">📋 Application History</button>
+            </div>
+        </section>
+
         <!-- Filters -->
         <section class="filters-section">
             <div class="filters-row">
-                <div class="filter-group">
-                    <label>Status</label>
-                    <select id="filter-status" onchange="loadJobs()">
-                        <option value="all">All Jobs</option>
-                        <option value="pending">Pending</option>
-                        <option value="applied">Applied</option>
-                        <option value="rejected">Rejected</option>
-                    </select>
+                <div class="filter-group search-group">
+                    <label>Search</label>
+                    <input type="text" id="filter-search" placeholder="Company, title, location..." onkeyup="debounceSearch()">
                 </div>
-                <div class="filter-group">
+                <div class="filter-group" id="filter-score-group">
                     <label>Min Score</label>
                     <select id="filter-score" onchange="loadJobs()">
                         <option value="0">Any</option>
@@ -64,10 +67,6 @@
                         <option value="60" selected>60+</option>
                         <option value="80">80+</option>
                     </select>
-                </div>
-                <div class="filter-group search-group">
-                    <label>Search</label>
-                    <input type="text" id="filter-search" placeholder="Company, title, location..." onkeyup="debounceSearch()">
                 </div>
                 <div class="filter-group">
                     <label>&nbsp;</label>
@@ -97,6 +96,19 @@
                 </table>
             </div>
         </section>
+
+        <!-- Materials Modal -->
+        <div class="modal" id="materials-modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2 id="materials-modal-title">Application Materials</h2>
+                    <button class="modal-close" onclick="closeMaterialsModal()">&times;</button>
+                </div>
+                <div class="modal-body" id="materials-modal-body">
+                    <!-- Populated by JavaScript -->
+                </div>
+            </div>
+        </div>
 
         <!-- Job Details Modal -->
         <div class="modal" id="job-modal">

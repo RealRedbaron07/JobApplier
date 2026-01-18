@@ -66,6 +66,15 @@ class ApplicationRecord(Base):
     follow_up_date = Column(DateTime)
     notes = Column(Text)
 
+class SavedLink(Base):
+    __tablename__ = 'saved_links'
+    
+    id = Column(Integer, primary_key=True)
+    job_id = Column(Integer, ForeignKey('jobs.id'))
+    saved_date = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    notes = Column(Text)
+    category = Column(String(50), default='interesting')
+
 # Database setup
 try:
     engine = create_engine(Config.DATABASE_URL, echo=False)
