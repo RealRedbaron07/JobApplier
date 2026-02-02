@@ -78,3 +78,4 @@ debug_html/
 
 # Cursor IDE
 .cursor/
+user_settings.json

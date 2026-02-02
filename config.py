@@ -48,25 +48,35 @@ class Config:
         'Full Stack Intern,'
         'Finance Technology Intern,'
         'Quantitative Analyst Intern,'
-        'Summer Intern Software,'
-        'Summer Intern Technology'
+        'Economics Intern,'
+        'Quantitative Developer Intern,'
+        'Summer Intern Software'
     ).split(',')
     
-    # Locations: Canada (GTA) and Turkey (Istanbul, Ankara)
+    # Locations: Canada first, then Turkey
     LOCATIONS = os.getenv('LOCATIONS', 
-        'Remote,'
         'Toronto, ON,'
+        'Canada,'
+        'Remote,'
         'Mississauga, ON,'
-        'Brampton, ON,'
         'Markham, ON,'
-        'Vaughan, ON,'
-        'Richmond Hill, ON,'
-        'Oakville, ON,'
-        'Burlington, ON,'
         'Ontario, Canada,'
         'Istanbul, Turkey,'
         'Ankara, Turkey,'
+        'Antalya, Turkey,'
         'Turkey'
     ).split(',')
+    
+    # Matching priorities
+    TARGET_LOCATIONS = ["Toronto", "Canada", "Istanbul", "Ankara", "Antalya", "Turkey"]
+    LOCATION_PRIORITY = {"Toronto": 1, "Canada": 2, "Istanbul": 3, "Ankara": 4, "Antalya": 5, "Turkey": 6}
+    TARGET_FIELDS = ["software", "tech", "data", "analytics", "finance", "fintech", "quantitative", "economics"]
+    JOB_TYPES = ["internship", "intern", "entry-level", "junior", "new grad", "student", "undergraduate"]
+
+    # Platforms
+    ENABLED_PLATFORMS = ["linkedin", "workday"]
+
+    # Resume settings file path
+    USER_SETTINGS_FILE = "user_settings.json"
     
     EXPERIENCE_LEVELS = ['Internship', 'Entry Level', 'Student']

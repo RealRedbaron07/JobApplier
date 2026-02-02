@@ -9,11 +9,14 @@ import random
 import ssl
 import certifi
 
+import logging
+
 class BaseScraper(ABC):
     def __init__(self):
         self.driver = None
+        self.logger = logging.getLogger(self.__class__.__name__)
     
-    def init_driver(self):
+    def init_driver(self, use_profile=False):
         """Initialize undetected Chrome driver with SSL fix."""
         try:
             # Fix SSL certificate issues
@@ -29,9 +32,16 @@ class BaseScraper(ABC):
             options.add_argument('--ignore-certificate-errors')
             options.add_argument('--ignore-ssl-errors')
             
+            if use_profile:
+                profile_dir = os.path.join(os.getcwd(), "chrome_profile")
+                if not os.path.exists(profile_dir):
+                    os.makedirs(profile_dir)
+                options.add_argument(f"--user-data-dir={profile_dir}")
+                self.logger.info(f"Using Chrome profile at: {profile_dir}")
+            
             self.driver = uc.Chrome(options=options, use_subprocess=False)
         except Exception as e:
-            print(f"Error initializing driver: {e}")
+            self.logger.error(f"Error initializing driver: {e}")
             raise
     
     def close_driver(self):

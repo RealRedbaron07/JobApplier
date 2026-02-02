@@ -8,8 +8,9 @@ import os
 import sys
 import json
 import csv
+import threading
 from io import StringIO
-from datetime import datetime
+from datetime import datetime, timezone
 from flask import Flask, render_template, jsonify, request, Response
 
 # Add parent directory to path for imports
@@ -18,8 +19,220 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from database.models import Session, Job, UserProfile, ApplicationRecord, SavedLink
 from config import Config
 from sqlalchemy import desc, asc, or_, and_, func
+from matcher.job_matcher import JobMatcher
+from scrapers.linkedin_scraper import LinkedInScraper
+from cover_letter_generator import CoverLetterGenerator
+from resume_tailor import ResumeTailor
+from utils import (
+    parse_user_profile, 
+    generate_job_materials, 
+    apply_to_job,
+    format_job_summary
+)
 
 app = Flask(__name__)
+
+# Task tracking
+search_task = {
+    'status': 'idle',
+    'progress': 0,
+    'total_found': 0,
+    'message': ''
+}
+
+apply_task = {
+    'status': 'idle',
+    'progress': 0,
+    'total_to_apply': 0,
+    'current_job': '',
+    'message': ''
+}
+
+
+@app.route('/api/settings', methods=['GET', 'POST'])
+def handle_settings():
+    """Get or update user settings."""
+    settings_file = Config.USER_SETTINGS_FILE
+    
+    if request.method == 'POST':
+        data = request.get_json()
+        with open(settings_file, 'w') as f:
+            json.dump(data, f, indent=2)
+        return jsonify({'message': 'Settings updated', 'settings': data})
+    
+    # GET
+    if os.path.exists(settings_file):
+        with open(settings_file, 'r') as f:
+            return jsonify(json.load(f))
+    return jsonify({})
+
+
+@app.route('/api/search/start', methods=['POST'])
+def start_search():
+    """Trigger job search in a background thread."""
+    global search_task
+    
+    if search_task['status'] == 'running':
+        return jsonify({'error': 'Search already running'}), 400
+    
+    search_task = {
+        'status': 'running',
+        'progress': 0,
+        'total_found': 0,
+        'message': 'Initializing search...'
+    }
+    
+    def run_search():
+        global search_task
+        try:
+            session = Session()
+            user_profile_db = session.query(UserProfile).first()
+            if not user_profile_db:
+                search_task['status'] = 'error'
+                search_task['message'] = 'No user profile found'
+                session.close()
+                return
+
+            user_profile = parse_user_profile(user_profile_db)
+            matcher = JobMatcher(user_profile)
+            
+            linkedin = LinkedInScraper()
+            linkedin.login()
+            
+            titles = Config.JOB_TITLES[:3]
+            locations = Config.LOCATIONS[:2]
+            total_steps = len(titles) * len(locations)
+            current_step = 0
+            
+            for title in titles:
+                for loc in locations:
+                    current_step += 1
+                    search_task['message'] = f"Searching for '{title}' in '{loc}'..."
+                    search_task['progress'] = int((current_step / total_steps) * 100)
+                    
+                    found_jobs = linkedin.search_jobs(title, loc)
+                    for job_data in found_jobs:
+                        # Check if already exists
+                        existing = session.query(Job).filter_by(job_url=job_data['url']).first()
+                        if existing:
+                            continue
+                        
+                        details = linkedin.get_job_details(job_data['url'])
+                        job_data.update(details)
+                        score = matcher.calculate_match_score(job_data)
+                        
+                        job_db = Job(
+                            title=job_data['title'],
+                            company=job_data['company'],
+                            location=job_data['location'],
+                            platform=job_data['platform'],
+                            job_url=job_data['url'],
+                            description=job_data.get('description', ''),
+                            match_score=score,
+                            external_site=job_data.get('external_site', True),
+                            discovered_date=datetime.now(timezone.utc),
+                            applied=False
+                        )
+                        session.add(job_db)
+                        search_task['total_found'] += 1
+                    session.commit()
+            
+            linkedin.close_driver()
+            search_task['status'] = 'completed'
+            search_task['message'] = f"Search finished. Found {search_task['total_found']} new jobs."
+            session.close()
+        except Exception as e:
+            search_task['status'] = 'error'
+            search_task['message'] = f"Search failed: {str(e)}"
+    
+    threading.Thread(target=run_search).start()
+    return jsonify({'message': 'Search started'})
+
+
+@app.route('/api/search/status')
+def get_search_status():
+    """Get current search task status."""
+    return jsonify(search_task)
+
+
+@app.route('/api/apply/batch', methods=['POST'])
+def batch_apply():
+    """Apply to multiple jobs in a background thread."""
+    global apply_task
+    
+    if apply_task['status'] == 'running':
+        return jsonify({'error': 'Application task already running'}), 400
+    
+    data = request.get_json()
+    job_ids = data.get('job_ids', [])
+    
+    if not job_ids:
+        return jsonify({'error': 'No job IDs provided'}), 400
+    
+    # Load resume path from settings
+    settings_file = Config.USER_SETTINGS_FILE
+    if not os.path.exists(settings_file):
+        return jsonify({'error': 'No default resume set'}), 400
+        
+    with open(settings_file, 'r') as f:
+        settings = json.load(f)
+    
+    resume_path = settings.get('resume_path')
+    if not resume_path or not os.path.exists(resume_path):
+        return jsonify({'error': 'Resume file not found'}), 400
+        
+    apply_task = {
+        'status': 'running',
+        'progress': 0,
+        'total_to_apply': len(job_ids),
+        'current_job': '',
+        'message': f"Preparing to apply to {len(job_ids)} jobs..."
+    }
+    
+    def run_apply():
+        global apply_task
+        try:
+            session = Session()
+            user_profile_db = session.query(UserProfile).first()
+            user_profile = parse_user_profile(user_profile_db)
+            
+            cover_letter_gen = CoverLetterGenerator()
+            resume_tailor = ResumeTailor()
+            
+            applied_count = 0
+            for i, job_id in enumerate(job_ids, 1):
+                job = session.query(Job).get(job_id)
+                if not job or job.applied:
+                    continue
+                
+                apply_task['current_job'] = f"{job.title} at {job.company}"
+                apply_task['message'] = f"Applying to {job.title} at {job.company}..."
+                apply_task['progress'] = int(((i-1) / len(job_ids)) * 100)
+                
+                # 1. Generate materials
+                generate_job_materials(job, user_profile, resume_path, cover_letter_gen, resume_tailor, session)
+                
+                # 2. Apply
+                success = apply_to_job(job, user_profile, resume_path, session)
+                if success:
+                    applied_count += 1
+                    
+            apply_task['status'] = 'completed'
+            apply_task['progress'] = 100
+            apply_task['message'] = f"Finished! Successfully applied to {applied_count} out of {len(job_ids)} jobs."
+            session.close()
+        except Exception as e:
+            apply_task['status'] = 'error'
+            apply_task['message'] = f"Batch apply failed: {str(e)}"
+    
+    threading.Thread(target=run_apply).start()
+    return jsonify({'message': 'Batch application started'})
+
+
+@app.route('/api/apply/status')
+def get_apply_status():
+    """Get current application task status."""
+    return jsonify(apply_task)
 
 
 @app.route('/')

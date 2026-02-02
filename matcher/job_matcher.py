@@ -10,13 +10,15 @@ class JobMatcher:
             'python', 'java', 'javascript', 'react', 'node', 'sql', 'git',
             'aws', 'docker', 'api', 'software', 'developer', 'engineer',
             'data', 'machine learning', 'ai', 'web development', 'backend',
-            'frontend', 'full stack', 'mobile', 'android', 'ios'
+            'frontend', 'full stack', 'mobile', 'android', 'ios', 'c++', 'c#',
+            'typescript', 'cloud', 'devops', 'cybersecurity'
         ]
         
         self.fintech_keywords = [
             'fintech', 'finance', 'trading', 'banking', 'payment', 'blockchain',
             'cryptocurrency', 'financial', 'investment', 'portfolio', 'risk',
-            'quantitative', 'analytics', 'economics', 'market', 'capital'
+            'quantitative', 'analytics', 'economics', 'market', 'capital',
+            'econometrics', 'derivative', 'equity', 'asset management', 'macro'
         ]
         
         self.internship_keywords = [
@@ -73,11 +75,22 @@ class JobMatcher:
             skill_matches = sum(1 for skill in default_skills if skill in combined_text)
             score += min(15, skill_matches * 4)
         
-        # 5. Location bonus (10 points)
-        if 'remote' in job_location or 'hybrid' in job_location:
+        # 5. Location bonus (15 points)
+        if 'toronto' in job_location:
+            score += 15
+        elif 'canada' in job_location:
             score += 10
-        elif any(city in job_location for city in ['san francisco', 'new york', 'boston', 'seattle']):
+        elif any(city in job_location for city in ['istanbul', 'istanbul', 'ankara', 'antalya']):
+            score += 8
+        elif 'turkey' in job_location or 'türkiye' in job_location:
             score += 5
+        elif 'remote' in job_location or 'hybrid' in job_location:
+            score += 5
+        
+        # 5b. Field hybrid bonus (CS + Econ)
+        if ('computer science' in combined_text or 'software' in combined_text) and \
+           ('economics' in combined_text or 'finance' in combined_text or 'econometrics' in combined_text):
+            score += 10
         
         # 6. Red flags (deductions)
         red_flag_count = sum(1 for flag in self.red_flags if flag in combined_text)

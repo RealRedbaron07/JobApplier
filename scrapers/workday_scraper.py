@@ -569,17 +569,17 @@ class WorkdayScraper(BaseScraper):
                 self.random_delay(2, 3)
             
             # Check if login/account creation is required
-            # Look for sign-in or create account prompts - but don't block, just warn
+            # If detected, pause and let user handle it, then continue
             try:
-                # Wait a bit for page to load
                 self.random_delay(2, 3)
                 
                 sign_in_indicators = [
-                    "//*[contains(., 'Sign In')]",
-                    "//*[contains(., 'Log In')]",
-                    "//*[contains(., 'Create Account')]",
-                    "//input[@type='email' and contains(@placeholder, 'email')]",
-                    "//input[@id='username']",
+                    "//*[contains(text(), 'Sign In')]",
+                    "//*[contains(text(), 'Log In')]",
+                    "//*[contains(text(), 'Create Account')]",
+                    "//*[contains(text(), 'Create an Account')]",
+                    "//button[contains(., 'Sign In')]",
+                    "//a[contains(., 'Sign In')]",
                 ]
                 
                 requires_login = False
@@ -593,9 +593,28 @@ class WorkdayScraper(BaseScraper):
                         continue
                 
                 if requires_login:
-                    print("  ⚠️  Login prompt detected - attempting to continue")
-                    print("  → If login required, application will fail gracefully")
-                    # Don't return False - try to continue, some forms work without login
+                    print("\n" + "=" * 50)
+                    print("🔐 LOGIN/ACCOUNT REQUIRED")
+                    print("=" * 50)
+                    print(f"   Company: {job_url.split('/')[2]}")
+                    print("   Please complete sign-in or account creation")
+                    print("   in the browser window, then come back here.")
+                    print("=" * 50)
+                    input(">>> Press ENTER when you're logged in and ready to continue... ")
+                    print("   Waiting for page to stabilize...")
+                    self.random_delay(3, 5)
+                    
+                    # Re-click Apply button if we're back on job page
+                    try:
+                        for selector in apply_selectors:
+                            buttons = self.driver.find_elements(By.XPATH, selector)
+                            for btn in buttons:
+                                if btn.is_displayed():
+                                    self.driver.execute_script("arguments[0].click();", btn)
+                                    self.random_delay(2, 3)
+                                    break
+                    except:
+                        pass
             except:
                 pass
             
@@ -639,7 +658,6 @@ class WorkdayScraper(BaseScraper):
                 self.random_delay(1, 2)
                 
                 # Check for required fields that might be missing
-                # This is a safety check - but be lenient since Workday forms are complex
                 try:
                     required_fields = self.driver.find_elements(By.CSS_SELECTOR, 
                         "input[required], select[required], textarea[required]")
@@ -647,22 +665,31 @@ class WorkdayScraper(BaseScraper):
                     for field in required_fields:
                         try:
                             value = field.get_attribute('value') or field.text
-                            # Check if field is actually empty (not just whitespace)
                             if not value or not value.strip():
-                                # Check if it's a file input (already uploaded)
                                 if field.get_attribute('type') != 'file':
                                     empty_required.append(field)
                         except:
                             pass
                     
-                    # Only warn if many required fields are empty
                     if len(empty_required) > 3:
                         print(f"  ⚠️  {len(empty_required)} required fields appear empty")
-                        print("  → Attempting to submit anyway (some fields may be auto-filled)")
                     elif len(empty_required) > 0:
-                        print(f"  ℹ️  {len(empty_required)} required field(s) may be empty - submitting anyway")
+                        print(f"  ℹ️  {len(empty_required)} required field(s) may be empty")
                 except:
-                    pass  # Continue with submission
+                    pass
+                
+                # FINAL CHECK before submitting
+                print("\n" + "-" * 40)
+                print("📋 FINAL CHECK - Review the application")
+                print("-" * 40)
+                print("   Please review the form in the browser.")
+                print("   Make any final edits if needed.")
+                print("-" * 40)
+                confirm = input(">>> Submit this application? [y/n]: ").strip().lower()
+                
+                if confirm != 'y':
+                    print("  ⏭️  Skipped - not submitted")
+                    return False
                 
                 # Submit
                 try:

@@ -13,12 +13,19 @@ class LinkedInScraper(BaseScraper):
         self.logged_in = False
     
     def login(self):
-        """Login to LinkedIn - supports auto, manual wait, or skip modes."""
+        """Login to LinkedIn - supports auto, manual wait, or skip modes.
+        
+        Uses Chrome profile by default to leverage saved passwords.
+        Set USE_CHROME_PROFILE=false to disable.
+        """
         # Check config for login mode
         wait_for_login = os.getenv('WAIT_FOR_LOGIN', 'true').lower() == 'true'  # Default to true
-        use_profile = os.getenv('USE_CHROME_PROFILE', 'false').lower() == 'true'
+        use_profile = os.getenv('USE_CHROME_PROFILE', 'true').lower() == 'true'  # Default to TRUE now
         
         self.init_driver(use_profile=use_profile)
+        
+        if use_profile:
+            print("🔑 Using Chrome profile with saved passwords...")
         
         # Navigate to LinkedIn
         self.driver.get(f"{self.base_url}/login")
@@ -445,6 +452,209 @@ class LinkedInScraper(BaseScraper):
         
         return jobs
     
+    def apply_to_job(self, job_url: str, resume_path: str, max_steps: int = 10) -> bool:
+        """Attempt to apply to a LinkedIn job using Easy Apply with recursive form navigation.
+        
+        GUEST MODE: If not logged in, this will skip Easy Apply and mark for manual application.
+        """
+        # GUEST MODE CHECK: Skip Easy Apply if not logged in
+        if not self.logged_in:
+            self.logger.warning("Skipping Easy Apply (Guest Mode)")
+            print(f"     → Apply manually at: {job_url}")
+            return False
+        
+        try:
+            # Navigate to job page
+            self.driver.get(job_url)
+            self.random_delay(2, 4)
+            
+            # Look for Easy Apply button
+            try:
+                easy_apply_button = None
+                easy_apply_selectors = [
+                    "//button[contains(@class, 'jobs-apply-button')]",
+                    "//button[contains(., 'Easy Apply')]",
+                    "//button[contains(@aria-label, 'Easy Apply')]",
+                    "//button[contains(., 'Apply')]//span[contains(., 'Easy')]/..",
+                ]
+                
+                for selector in easy_apply_selectors:
+                    try:
+                        buttons = self.driver.find_elements(By.XPATH, selector)
+                        for btn in buttons:
+                            if btn.is_displayed() and 'easy' in btn.text.lower():
+                                easy_apply_button = btn
+                                break
+                        if easy_apply_button:
+                            break
+                    except:
+                        continue
+                
+                if not easy_apply_button:
+                    self.logger.info("Easy Apply button not found - may require external application")
+                    return False
+                
+                self.driver.execute_script("arguments[0].click();", easy_apply_button)
+                self.random_delay(2, 3)
+                
+                # Now navigate through the multi-step application form
+                step = 0
+                while step < max_steps:
+                    step += 1
+                    print(f"  📝 Processing Easy Apply step {step}...")
+                    
+                    # Wait for modal to load
+                    self.random_delay(1, 2)
+                    
+                    # Try to upload resume if file input is present
+                    try:
+                        file_inputs = self.driver.find_elements(By.XPATH, "//input[@type='file']")
+                        for file_input in file_inputs:
+                            try:
+                                if os.path.exists(resume_path):
+                                    file_input.send_keys(resume_path)
+                                    print(f"    ✓ Resume uploaded")
+                                    self.random_delay(2, 3)
+                                    break
+                            except:
+                                continue
+                    except:
+                        pass
+                    
+                    # Handle common questions with radio buttons
+                    try:
+                        # Find Yes/No questions and select appropriate answers
+                        question_containers = self.driver.find_elements(By.XPATH, 
+                            "//fieldset | //div[.//input[@type='radio']]")
+                        
+                        for container in question_containers:
+                            try:
+                                question_text = container.text.lower()
+                                
+                                # Default answers based on common patterns
+                                answer_to_select = None
+                                if 'sponsor' in question_text or 'visa' in question_text:
+                                    answer_to_select = 'no'
+                                elif 'authorized' in question_text or 'eligible' in question_text:
+                                    answer_to_select = 'yes'
+                                elif 'relocate' in question_text:
+                                    answer_to_select = 'yes'
+                                elif 'experience' in question_text:
+                                    # For experience questions, try to enter a number if text input
+                                    try:
+                                        exp_input = container.find_element(By.XPATH, ".//input[@type='text' or @type='number']")
+                                        if exp_input.is_displayed() and not exp_input.get_attribute('value'):
+                                            exp_input.send_keys("3")  # Default years of experience
+                                    except:
+                                        pass
+                                    continue
+                                
+                                if answer_to_select:
+                                    radios = container.find_elements(By.XPATH, ".//input[@type='radio']")
+                                    for radio in radios:
+                                        try:
+                                            radio_id = radio.get_attribute('id')
+                                            if radio_id:
+                                                label_elem = self.driver.find_element(By.XPATH, f"//label[@for='{radio_id}']")
+                                                if answer_to_select in label_elem.text.lower():
+                                                    if not radio.is_selected():
+                                                        self.driver.execute_script("arguments[0].click();", radio)
+                                                        self.random_delay(0.3, 0.5)
+                                                    break
+                                        except:
+                                            continue
+                            except:
+                                continue
+                    except:
+                        pass
+                    
+                    # Look for Next/Review/Submit button
+                    action_button = None
+                    button_selectors = [
+                        # Submit buttons (highest priority)
+                        "//button[contains(@aria-label, 'Submit')]",
+                        "//button[contains(., 'Submit application')]",
+                        "//button[contains(., 'Submit')]",
+                        # Review button
+                        "//button[contains(., 'Review')]",
+                        # Next button
+                        "//button[contains(@aria-label, 'Continue')]",
+                        "//button[contains(., 'Next')]",
+                        "//button[contains(., 'Continue')]",
+                    ]
+                    
+                    is_submit = False
+                    for selector in button_selectors:
+                        try:
+                            buttons = self.driver.find_elements(By.XPATH, selector)
+                            for btn in buttons:
+                                if btn.is_displayed() and btn.is_enabled():
+                                    action_button = btn
+                                    is_submit = 'submit' in btn.text.lower()
+                                    break
+                            if action_button:
+                                break
+                        except:
+                            continue
+                    
+                    if not action_button:
+                        # Check if we're done (modal closed or success message)
+                        try:
+                            success_indicators = self.driver.find_elements(By.XPATH, 
+                                "//*[contains(., 'Application submitted') or contains(., 'Your application was sent')]")
+                            if success_indicators:
+                                print("  ✅ Application submitted successfully!")
+                                return True
+                        except:
+                            pass
+                        
+                        # No button found - may be done
+                        self.logger.warning("No more action buttons found")
+                        break
+                    
+                    # Click the button
+                    try:
+                        self.driver.execute_script("arguments[0].scrollIntoView(true);", action_button)
+                        self.random_delay(0.5, 1)
+                        self.driver.execute_script("arguments[0].click();", action_button)
+                        self.random_delay(2, 3)
+                        
+                        if is_submit:
+                            # Check for success
+                            self.random_delay(2, 3)
+                            try:
+                                success = self.driver.find_elements(By.XPATH, 
+                                    "//*[contains(., 'Application submitted') or contains(., 'Your application was sent') or contains(., 'successfully')]")
+                                if success:
+                                    print("  ✅ Application submitted successfully!")
+                                    return True
+                            except:
+                                pass
+                            
+                            # Check if modal is closed (another success indicator)
+                            try:
+                                modal = self.driver.find_elements(By.XPATH, "//div[contains(@class, 'jobs-easy-apply-modal')]")
+                                if not modal or not any(m.is_displayed() for m in modal):
+                                    print("  ✅ Application appears submitted (modal closed)")
+                                    return True
+                            except:
+                                pass
+                    except Exception as e:
+                        self.logger.error(f"Error clicking button: {e}")
+                        break
+                
+                # If we got here, we went through steps but couldn't confirm submission
+                self.logger.warning("Completed form navigation but submission status unclear")
+                return False
+                
+            except Exception as e:
+                self.logger.error(f"Easy Apply error: {e}")
+                return False
+                
+        except Exception as e:
+            self.logger.error(f"Error applying to LinkedIn job: {e}")
+            return False
+
     def get_job_details(self, job_url: str) -> Dict:
         """Get detailed job information."""
         self.driver.get(job_url)

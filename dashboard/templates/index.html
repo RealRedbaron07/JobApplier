@@ -15,12 +15,59 @@
             <div class="header-content">
                 <h1 class="logo">🎯 Job Applier Command Center</h1>
                 <div class="header-actions">
+                    <button class="btn btn-secondary" onclick="toggleSettings()">⚙️ Settings</button>
                     <button class="btn btn-secondary" onclick="exportJobs('csv')">📥 Export CSV</button>
-                    <button class="btn btn-secondary" onclick="exportJobs('json')">📥 Export JSON</button>
                     <button class="btn btn-primary" onclick="refreshDashboard()">🔄 Refresh</button>
                 </div>
             </div>
         </header>
+
+        <!-- Settings Panel (Hidden by default) -->
+        <section class="settings-panel" id="settings-panel" style="display: none;">
+            <div class="card">
+                <h3>⚙️ User Settings</h3>
+                <div class="settings-grid">
+                    <div class="setting-item">
+                        <label>📄 Default Resume</label>
+                        <div class="resume-row">
+                            <span id="current-resume-path">No resume set</span>
+                            <input type="file" id="resume-upload" style="display: none;" onchange="handleResumeUpload(event)">
+                            <button class="btn btn-small" onclick="document.getElementById('resume-upload').click()">Change</button>
+                        </div>
+                    </div>
+                    <div class="setting-item">
+                        <label>📍 Locations</label>
+                        <input type="text" id="setting-locations" placeholder="Toronto, Canada, Istanbul...">
+                    </div>
+                    <div class="setting-item">
+                        <label>🔧 Target Fields</label>
+                        <input type="text" id="setting-fields" placeholder="Tech, Data, Finance...">
+                    </div>
+                </div>
+                <div class="settings-actions">
+                    <button class="btn btn-primary" onclick="saveSettings()">Save Settings</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Search and Action Bar -->
+        <section class="action-section">
+            <div class="action-card">
+                <div class="search-controls">
+                    <button class="btn btn-primary btn-large" id="btn-start-search" onclick="startSearch()">🔍 Search for New Jobs</button>
+                    <div id="search-progress-container" style="display: none; flex-grow: 1; margin-left: 20px;">
+                        <div class="progress-bar-bg">
+                            <div id="search-progress-bar" class="progress-bar-fill" style="width: 0%"></div>
+                        </div>
+                        <span id="search-status-msg" class="status-msg">Initializing...</span>
+                    </div>
+                </div>
+                <div class="batch-controls" id="batch-controls" style="display: none;">
+                    <span id="selected-count-msg">0 jobs selected</span>
+                    <button class="btn btn-success" id="btn-batch-apply" onclick="confirmBatchApply()">🚀 Apply to Selected</button>
+                </div>
+            </div>
+        </section>
 
         <!-- Stats Cards -->
         <section class="stats-section">
@@ -87,6 +134,9 @@
                 <table class="jobs-table">
                     <thead>
                         <tr>
+                            <th class="checkbox-col">
+                                <input type="checkbox" id="select-all-jobs" onclick="toggleSelectAll()">
+                            </th>
                             <th class="sortable" data-sort="match_score" onclick="sortBy('match_score')">
                                 Score <span class="sort-arrow" id="sort-match_score">▼</span>
                             </th>
@@ -137,6 +187,28 @@
                 </div>
                 <div class="modal-body" id="modal-body">
                     <!-- Populated by JavaScript -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Batch Apply Progress Modal -->
+        <div class="modal" id="apply-modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>🚀 Applying to Jobs</h2>
+                    <button class="modal-close" onclick="closeApplyModal()">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="apply-progress-container">
+                        <div class="progress-bar-bg">
+                            <div id="apply-progress-bar" class="progress-bar-fill" style="width: 0%"></div>
+                        </div>
+                        <p id="apply-status-msg">Starting application process...</p>
+                        <div id="current-applying-job" class="current-job-display"></div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" id="btn-close-apply" onclick="closeApplyModal()" style="display: none;">Close</button>
                 </div>
             </div>
         </div>

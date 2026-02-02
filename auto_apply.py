@@ -22,7 +22,14 @@ from cover_letter_generator import CoverLetterGenerator
 from resume_tailor import ResumeTailor
 from config import Config
 from logger import get_logger, LogContext
-from utils import validate_job_data, clean_job_data, format_job_summary
+from utils import (
+    validate_job_data, 
+    clean_job_data, 
+    format_job_summary, 
+    parse_user_profile, 
+    generate_job_materials, 
+    apply_to_job
+)
 from sqlalchemy import or_, and_
 
 # Initialize logger
@@ -132,51 +139,14 @@ def generate_materials(session, jobs: list, user_profile: dict, resume_path: str
     
     for i, job in enumerate(jobs, 1):
         log(f"[{i}/{len(jobs)}] Processing: {job.title} at {job.company}")
-        
-        try:
-            job_data = {
-                'title': job.title,
-                'company': job.company,
-                'location': job.location or '',
-                'description': job.description or '',
-                'requirements': job.requirements or ''
-            }
-            
-            # Generate cover letter
-            if not job.cover_letter_path:
-                try:
-                    cover_letter_text, cover_letter_path = cover_letter_gen.generate_cover_letter(
-                        job_data, user_profile
-                    )
-                    job.cover_letter = cover_letter_text
-                    job.cover_letter_path = cover_letter_path
-                except Exception as e:
-                    log(f"  Cover letter failed: {e}", "WARNING")
-            
-            # Tailor resume
-            if not job.tailored_resume_path and resume_path:
-                try:
-                    tailored_resume_path = resume_tailor.tailor_resume(
-                        resume_path,
-                        job_data,
-                        user_profile
-                    )
-                    job.tailored_resume_path = tailored_resume_path
-                except Exception as e:
-                    log(f"  Resume tailoring failed: {e}", "WARNING")
-            
-            session.commit()
-            processed.append(job)
-            
-        except Exception as e:
-            log(f"  Error processing job: {e}", "ERROR")
-            continue
+        generate_job_materials(job, user_profile, resume_path, cover_letter_gen, resume_tailor, session)
+        processed.append(job)
     
     log(f"Generated materials for {len(processed)} jobs", "SUCCESS")
     return processed
 
 
-def apply_to_jobs(session, jobs: list, user_profile_db, resume_path: str) -> tuple:
+def apply_to_jobs(session, jobs: list, user_profile: dict, resume_path: str) -> tuple:
     """Apply to all processed jobs automatically."""
     log(f"Starting automatic application to {len(jobs)} jobs...", "STEP")
     
@@ -185,78 +155,11 @@ def apply_to_jobs(session, jobs: list, user_profile_db, resume_path: str) -> tup
     
     for i, job in enumerate(jobs, 1):
         log(f"[{i}/{len(jobs)}] Applying: {job.title} at {job.company}")
-        
-        try:
-            job_url_lower = job.job_url.lower()
-            is_workday = 'myworkdayjobs.com' in job_url_lower or 'workday.com' in job_url_lower
-            is_greenhouse = 'greenhouse.io' in job_url_lower
-            is_lever = 'lever.co' in job_url_lower
-            
-            success = False
-            application_method = 'manual'
-            
-            # Try automated application for supported platforms
-            if is_workday or is_greenhouse or is_lever:
-                try:
-                    workday_scraper = WorkdayScraper()
-                    workday_scraper.login()
-                    
-                    user_info = {
-                        'email': getattr(user_profile_db, 'email', '') or '',
-                        'phone': getattr(user_profile_db, 'phone', '') or '',
-                        'first_name': getattr(user_profile_db, 'first_name', '') or '',
-                        'last_name': getattr(user_profile_db, 'last_name', '') or ''
-                    }
-                    
-                    if user_info['email']:
-                        resume_for_app = job.tailored_resume_path or resume_path
-                        success = workday_scraper.apply_to_job(
-                            job.job_url,
-                            user_info,
-                            resume_for_app,
-                            job.cover_letter_path
-                        )
-                        
-                        if success:
-                            application_method = 'auto'
-                    
-                    workday_scraper.close_driver()
-                except Exception as e:
-                    log(f"  Automation failed: {e}", "WARNING")
-            
-            # Record application
-            now = datetime.now(timezone.utc)
-            
-            if success:
-                job.applied = True
-                job.applied_date = now
-                job.application_status = 'applied'
-                job.notes = (job.notes or '') + f"\n[Auto-applied on {now.strftime('%Y-%m-%d %H:%M')}]"
-                applied_count += 1
-                log(f"  Applied successfully!", "SUCCESS")
-            else:
-                job.notes = (job.notes or '') + f"\n[Manual application required - {now.strftime('%Y-%m-%d %H:%M')}]"
-                manual_count += 1
-                log(f"  Marked for manual application")
-            
-            # Create application record
-            app_record = ApplicationRecord(
-                job_id=job.id,
-                application_date=now,
-                resume_used=resume_path,
-                cover_letter_used=job.cover_letter_path,
-                tailored_resume_used=job.tailored_resume_path,
-                application_method=application_method,
-                application_status='submitted' if success else 'pending',
-                follow_up_date=now + timedelta(hours=48),
-                notes=f"{'Auto-applied' if success else 'Manual application required'}"
-            )
-            session.add(app_record)
-            session.commit()
-            
-        except Exception as e:
-            log(f"  Error: {e}", "ERROR")
-            continue
+        success = apply_to_job(job, user_profile, resume_path, session)
+        if success:
+            applied_count += 1
+        else:
+            manual_count += 1
     
     log(f"Applied: {applied_count}, Manual: {manual_count}", "SUCCESS")
     return applied_count, manual_count
@@ -285,12 +188,7 @@ def main(dry_run: bool = False):
         session.close()
         return 1
     
-    user_profile = {
-        'skills': json.loads(user_profile_db.skills) if user_profile_db.skills else [],
-        'experience': json.loads(user_profile_db.experience) if user_profile_db.experience else [],
-        'education': json.loads(user_profile_db.education) if user_profile_db.education else [],
-        'contact_info': {}
-    }
+    user_profile = parse_user_profile(user_profile_db)
     
     resume_path = user_profile_db.resume_path
     if not resume_path or not os.path.exists(resume_path):
