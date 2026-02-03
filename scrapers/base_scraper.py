@@ -8,24 +8,21 @@ import time
 import random
 import ssl
 import certifi
-
 import logging
 
 class BaseScraper(ABC):
     def __init__(self):
         self.driver = None
         self.logger = logging.getLogger(self.__class__.__name__)
+        logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
     
     def init_driver(self, use_profile=False):
         """Initialize undetected Chrome driver with SSL fix."""
         try:
-            # Fix SSL certificate issues
             import os
             os.environ['SSL_CERT_FILE'] = certifi.where()
             
             options = uc.ChromeOptions()
-            # Remove headless mode to see what's happening
-            # options.add_argument('--headless=new')
             options.add_argument('--no-sandbox')
             options.add_argument('--disable-dev-shm-usage')
             options.add_argument('--disable-blink-features=AutomationControlled')
@@ -37,15 +34,13 @@ class BaseScraper(ABC):
                 if not os.path.exists(profile_dir):
                     os.makedirs(profile_dir)
                 options.add_argument(f"--user-data-dir={profile_dir}")
-                self.logger.info(f"Using Chrome profile at: {profile_dir}")
             
-            self.driver = uc.Chrome(options=options, use_subprocess=False)
+            self.driver = uc.Chrome(options=options, use_subprocess=False, version_main=144)
         except Exception as e:
             self.logger.error(f"Error initializing driver: {e}")
             raise
     
     def close_driver(self):
-        """Close the browser."""
         if self.driver:
             try:
                 self.driver.quit()
@@ -53,7 +48,6 @@ class BaseScraper(ABC):
                 print(f"Error closing driver: {e}")
     
     def wait_for_element(self, by, value, timeout=10):
-        """Wait for element to be present."""
         try:
             return WebDriverWait(self.driver, timeout).until(
                 EC.presence_of_element_located((by, value))
@@ -63,10 +57,9 @@ class BaseScraper(ABC):
             raise
     
     def safe_click(self, element):
-        """Safely click an element with retry."""
         try:
             element.click()
-        except Exception as e:
+        except:
             try:
                 self.driver.execute_script("arguments[0].click();", element)
             except Exception as e2:
@@ -75,19 +68,15 @@ class BaseScraper(ABC):
     
     @abstractmethod
     def login(self):
-        """Login to the platform."""
         pass
     
     @abstractmethod
     def search_jobs(self, keywords: str, location: str) -> List[Dict]:
-        """Search for jobs and return list of job dictionaries."""
         pass
     
     @abstractmethod
     def get_job_details(self, job_url: str) -> Dict:
-        """Get detailed information about a specific job."""
         pass
     
     def random_delay(self, min_sec=1, max_sec=3):
-        """Add random delay to appear more human-like."""
         time.sleep(random.uniform(min_sec, max_sec))

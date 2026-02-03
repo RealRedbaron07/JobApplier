@@ -76,6 +76,10 @@ debug_*.png
 debug_screenshots/
 debug_html/
 
+# Job logs
+jobs_log.json
+dashboard.html
+
 # Cursor IDE
 .cursor/
 user_settings.json
