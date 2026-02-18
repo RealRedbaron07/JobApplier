@@ -52,13 +52,29 @@ An automated job application system that scrapes job listings from LinkedIn, Ind
 
    # Optional: Customize job search
    MIN_MATCH_SCORE=60
+   
+   # IMPORTANT: Enable full automation (no prompts during application)
+   # Set to true for unattended operation (e.g., scheduled runs)
    AUTO_APPLY_ENABLED=false
+   
+   # Optional: Set preferred locations for job matching
+   # Example: PREFERRED_LOCATIONS=Toronto,Canada,Remote,New York
+   PREFERRED_LOCATIONS=
+   
+   # Optional: Override resume path (uses profile resume by default)
+   # Example: RESUME_PATH=/Users/username/Documents/resume.pdf
+   RESUME_PATH=
    ```
 
    **Note**: The system works without any API keys or credentials! It will:
    - Use rule-based resume parsing (no OpenAI needed)
    - Scrape public job listings (no login needed for Indeed/Glassdoor)
    - Provide job links for manual application
+   
+   **For Full Automation**:
+   - Set `AUTO_APPLY_ENABLED=true` to skip manual confirmation prompts
+   - Configure `PREFERRED_LOCATIONS` for location-based matching
+   - Set `RESUME_PATH` to override the default resume from your profile
 
 ## Quick Start
 
