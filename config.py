@@ -76,7 +76,13 @@ class Config:
     # Platforms
     ENABLED_PLATFORMS = ["linkedin", "workday"]
 
-    # Resume settings file path
+    # Resume settings
     USER_SETTINGS_FILE = "user_settings.json"
+    
+    # Optional: Override resume path (uses profile resume by default)
+    RESUME_PATH = os.getenv('RESUME_PATH', '')
+    
+    # Optional: Preferred locations for job matching (comma-separated)
+    PREFERRED_LOCATIONS = os.getenv('PREFERRED_LOCATIONS', '')
     
     EXPERIENCE_LEVELS = ['Internship', 'Entry Level', 'Student']
