@@ -224,17 +224,18 @@ def apply_to_jobs():
     print("  • Track everything in the database")
     print("\n" + "=" * 70)
     
-    # Ask for confirmation
-    confirm = input("\n🤖 Proceed with automatic application? (yes/no, default=yes): ").strip().lower()
-    if confirm and confirm not in ['yes', 'y', '']:
-        print("\n❌ Application cancelled.")
-        print("All materials have been generated and saved.")
-        print("You can review them and run again later.")
+    # Check if auto-apply is enabled (for unattended operation)
+    if not Config.AUTO_APPLY_ENABLED:
+        print("\n⚠️  AUTO_APPLY_ENABLED is set to False in config.")
+        print("   Set AUTO_APPLY_ENABLED=true in .env to enable fully automated application.")
+        print("   All materials have been generated and saved.")
+        print("   You can review them and run again later with AUTO_APPLY_ENABLED=true.")
         session.close()
         return
     
     print("\n" + "=" * 70)
     print(f"🚀 Starting automatic application to {len(processed_jobs)} jobs...")
+    print(f"   (AUTO_APPLY_ENABLED=true - running in fully automated mode)")
     print("=" * 70)
     print()
     
