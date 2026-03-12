@@ -12,17 +12,61 @@ from datetime import datetime
 class CoverLetterGenerator:
     def __init__(self):
         self.use_ai = Config.OPENAI_API_KEY and Config.OPENAI_API_KEY != ''
+        self.client = None
         if self.use_ai:
             try:
-                import openai
-                self.openai = openai
-                self.openai.api_key = Config.OPENAI_API_KEY
+                from openai import OpenAI
+                self.client = OpenAI(api_key=Config.OPENAI_API_KEY)
                 print("Cover letter generator initialized with AI support")
             except Exception as e:
                 print(f"OpenAI import failed: {e}")
                 self.use_ai = False
         else:
             print("Cover letter generator initialized with template-based generation")
+
+    def _get_candidate_name(self, user_profile: Dict) -> str:
+        """Return the best available candidate name for the cover letter signature."""
+        contact_info = user_profile.get('contact_info', {}) or {}
+        first_name = (
+            contact_info.get('first_name')
+            or user_profile.get('first_name')
+            or ''
+        ).strip()
+        last_name = (
+            contact_info.get('last_name')
+            or user_profile.get('last_name')
+            or ''
+        ).strip()
+
+        full_name = f"{first_name} {last_name}".strip()
+        return full_name or "Applicant"
+
+    def _get_matching_skills(self, job_description: str, user_profile: Dict) -> list[str]:
+        """Return user skills that also appear in the job description, preserving display case."""
+        matched_skills = []
+        for skill in user_profile.get('skills', []):
+            skill_text = str(skill).strip()
+            if not skill_text:
+                continue
+            if skill_text.lower() in job_description and skill_text not in matched_skills:
+                matched_skills.append(skill_text)
+        return matched_skills
+
+    def _build_interest_reason(self, company: str, job_title: str, common_skills: list[str]) -> str:
+        """Create a complete interest sentence without manual placeholders."""
+        if common_skills:
+            skill_text = ', '.join(common_skills[:3])
+            return (
+                f"I am particularly drawn to the {job_title} opportunity at {company} "
+                f"because it aligns closely with my background in {skill_text} and "
+                "with the kind of practical technical work I want to keep building."
+            )
+
+        return (
+            f"I am particularly drawn to the {job_title} opportunity at {company} "
+            "because it offers the chance to contribute to meaningful technical work "
+            "while continuing to grow as a developer."
+        )
     
     def generate_cover_letter(self, job: Dict, user_profile: Dict, output_dir: str = "cover_letters") -> Tuple[str, str]:
         """
@@ -110,7 +154,7 @@ Requirements:
 
 Write the cover letter:"""
 
-            response = self.openai.chat.completions.create(
+            response = self.client.chat.completions.create(
                 model="gpt-4",
                 messages=[
                     {"role": "system", "content": "You are a professional career coach writing cover letters. Write compelling, personalized cover letters that highlight the candidate's relevant experience and enthusiasm for the role."},
@@ -136,41 +180,41 @@ Write the cover letter:"""
         """Generate cover letter using template."""
         job_title = job.get('title', 'Position')
         company = job.get('company', 'Company')
-        location = job.get('location', '')
-        
+        candidate_name = self._get_candidate_name(user_profile)
+
         # Extract key requirements from job description
         description = job.get('description', '').lower()
-        key_requirements = []
-        
-        # Match user skills to job requirements
-        user_skills = [s.lower() for s in user_profile.get('skills', [])]
-        common_skills = [skill for skill in user_skills if skill in description]
-        
+        common_skills = self._get_matching_skills(description, user_profile)
+
         # Get most relevant experience
         experience = user_profile.get('experience', [])
         relevant_exp = experience[0] if experience else {}
-        
-        # Get education
-        education = user_profile.get('education', [])
-        edu = education[0] if education else {}
-        
+
         # Build cover letter
         cover_letter = f"""Dear Hiring Manager,
 
 I am writing to express my strong interest in the {job_title} position at {company}. With my background in {', '.join(common_skills[:3]) if common_skills else 'technology'}, I am excited about the opportunity to contribute to your team."""
-        
+
         # Add experience paragraph
         if relevant_exp:
             title = relevant_exp.get('title', '')
             company_exp = relevant_exp.get('company', '')
             if title and company_exp:
                 cover_letter += f"\n\nIn my role as {title} at {company_exp}, I developed expertise in {', '.join(common_skills[:2]) if common_skills else 'software development'}. This experience has prepared me to excel in the {job_title} role, particularly in areas such as {', '.join(common_skills[:2]) if common_skills else 'problem-solving and technical implementation'}."
-        
+
         # Add why interested
-        cover_letter += f"\n\nI am particularly drawn to this opportunity at {company} because of [your interest in the company/role - please customize this section]. I am eager to bring my passion for {common_skills[0] if common_skills else 'technology'} and my commitment to excellence to your team."
-        
+        cover_letter += (
+            f"\n\n{self._build_interest_reason(company, job_title, common_skills)} "
+            f"I am eager to bring my passion for {common_skills[0] if common_skills else 'technology'} "
+            "and my commitment to excellence to your team."
+        )
+
         # Closing
-        cover_letter += f"\n\nThank you for considering my application. I look forward to the opportunity to discuss how my skills and experience align with the {job_title} position. I am available for an interview at your convenience.\n\nSincerely,\n[Your Name]"
+        cover_letter += (
+            f"\n\nThank you for considering my application. I look forward to the opportunity "
+            f"to discuss how my skills and experience align with the {job_title} position. "
+            f"I am available for an interview at your convenience.\n\nSincerely,\n{candidate_name}"
+        )
         
         # Save to file
         file_path = self._save_cover_letter(cover_letter, job, output_dir)
@@ -197,4 +241,3 @@ I am writing to express my strong interest in the {job_title} position at {compa
             f.write(cover_letter)
         
         return file_path
-

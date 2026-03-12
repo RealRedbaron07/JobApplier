@@ -11,7 +11,7 @@ from datetime import datetime
 from sqlalchemy import desc
 from cover_letter_generator import CoverLetterGenerator
 from resume_tailor import ResumeTailor
-import json
+from utils import parse_user_profile
 
 def display_job(job: Job, index: int, total: int):
     """Display a single job in a formatted way."""
@@ -83,12 +83,7 @@ def review_jobs():
     user_profile_db = session.query(UserProfile).first()
     user_profile = {}
     if user_profile_db:
-        user_profile = {
-            'skills': json.loads(user_profile_db.skills) if user_profile_db.skills else [],
-            'experience': json.loads(user_profile_db.experience) if user_profile_db.experience else [],
-            'education': json.loads(user_profile_db.education) if user_profile_db.education else [],
-            'contact_info': {}
-        }
+        user_profile = parse_user_profile(user_profile_db)
     
     cover_letter_gen = CoverLetterGenerator()
     resume_tailor = ResumeTailor()
@@ -281,4 +276,3 @@ if __name__ == "__main__":
         list_jobs()
     else:
         review_jobs()
-
