@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""
-Full Automation Entry Point for Job Applications.
-Runs the complete cycle: scrape → match → generate materials → apply
-No user interaction required when AUTO_MODE=true.
-"""
+"""Legacy package-preparation entry point. Application submission is disabled."""
 
 import sys
 import os
@@ -147,22 +143,13 @@ def generate_materials(session, jobs: list, user_profile: dict, resume_path: str
 
 
 def apply_to_jobs(session, jobs: list, user_profile: dict, resume_path: str) -> tuple:
-    """Apply to all processed jobs automatically."""
-    log(f"Starting automatic application to {len(jobs)} jobs...", "STEP")
-    
-    applied_count = 0
-    manual_count = 0
-    
+    """Prepare drafts for selected jobs without opening application websites."""
+    log(f"Preparing {len(jobs)} human-reviewed application packages...", "STEP")
     for i, job in enumerate(jobs, 1):
-        log(f"[{i}/{len(jobs)}] Applying: {job.title} at {job.company}")
-        success = apply_to_job(job, user_profile, resume_path, session)
-        if success:
-            applied_count += 1
-        else:
-            manual_count += 1
-    
-    log(f"Applied: {applied_count}, Manual: {manual_count}", "SUCCESS")
-    return applied_count, manual_count
+        log(f"[{i}/{len(jobs)}] Preparing: {job.title} at {job.company}")
+        apply_to_job(job, user_profile, resume_path, session)
+    log(f"Prepared: {len(jobs)}; submitted: 0", "SUCCESS")
+    return 0, len(jobs), 0
 
 
 def main(dry_run: bool = False):
@@ -260,22 +247,23 @@ def main(dry_run: bool = False):
     
     # Step 4: Apply
     print("\n" + "-" * 70)
-    log("STEP 4: APPLYING TO JOBS", "STEP")
+    log("STEP 4: PREPARING PACKAGES (NO SUBMISSION)", "STEP")
     print("-" * 70)
     
     if not dry_run:
-        applied, manual = apply_to_jobs(session, processed, user_profile_db, resume_path)
+        applied, manual, ready = apply_to_jobs(session, processed, user_profile, resume_path)
     else:
         log("Would apply to the following jobs:")
         for job in processed:
             print(f"  • {job.title} at {job.company} - {job.job_url}")
-        applied, manual = 0, len(processed)
+        applied, manual, ready = 0, len(processed), 0
     
     # Summary
     print("\n" + "=" * 70)
     log("AUTOMATION COMPLETE", "SUCCESS")
     print("=" * 70)
-    print(f"  ✅ Auto-applied: {applied}")
+    print(f"  ✅ Auto-applied: {applied} (submission is disabled)")
+    print(f"  ⏸️  Ready to submit: {ready}")
     print(f"  📋 Manual needed: {manual}")
     print(f"\n  Run 'python3 dashboard/app.py' to view dashboard")
     print("=" * 70 + "\n")

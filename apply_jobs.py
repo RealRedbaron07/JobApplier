@@ -23,6 +23,10 @@ from logger import get_logger
 logger = get_logger("apply_jobs")
 
 def apply_to_jobs():
+    """Legacy command retained as a safe redirect to the local dashboard."""
+    print("\nApplication submission from this command is disabled.")
+    print("Run 'python3 dashboard/app.py', prepare a package, review it, and submit manually.")
+    return
     """Apply to approved jobs."""
     print("=" * 70)
     print("Job Application Bot")

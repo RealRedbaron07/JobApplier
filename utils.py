@@ -58,88 +58,33 @@ def generate_job_materials(job, user_profile, resume_to_use, cover_letter_gen, r
 
 def apply_to_job(job, user_profile, resume_path, session):
     """
-    Apply to a job using the appropriate scraper.
+    Legacy compatibility wrapper that records a prepared package only.
+
+    JobApplier deliberately never submits applications. Browser-specific
+    scrapers are not opened here; the user reviews materials and submits on the
+    official portal, then marks the application as applied in the dashboard.
     """
-    from scrapers.linkedin_scraper import LinkedInScraper
-    from scrapers.workday_scraper import WorkdayScraper
     from database.models import ApplicationRecord
-    from datetime import datetime, timezone, timedelta
-    
-    job_url_lower = job.job_url.lower()
-    is_workday = 'myworkdayjobs.com' in job_url_lower or 'workday.com' in job_url_lower
-    is_greenhouse = 'greenhouse.io' in job_url_lower
-    is_lever = 'lever.co' in job_url_lower
-    
-    success = False
-    application_method = 'manual'
-    scraper = None
-    
-    try:
-        # 1. Try automated application for supported platforms
-        if is_workday or is_greenhouse or is_lever:
-            logger.info(f"Using Workday scraper for {job.company}")
-            scraper = WorkdayScraper()
-            scraper.login()
-            
-            user_info = user_profile.get('contact_info', {})
-            resume_for_app = job.tailored_resume_path or resume_path
-            
-            success = scraper.apply_to_job(
-                job.job_url,
-                user_info,
-                resume_for_app,
-                job.cover_letter_path
-            )
-            
-            if success:
-                application_method = 'auto'
-                
-        elif 'linkedin.com' in job_url_lower:
-            logger.info(f"Using LinkedIn scraper for {job.company}")
-            scraper = LinkedInScraper()
-            scraper.login()
-            
-            resume_for_app = job.tailored_resume_path or resume_path
-            success = scraper.apply_to_job(job.job_url, resume_for_app)
-            
-            if success:
-                application_method = 'auto'
-        
-        # 2. Record application status
-        now = datetime.now(timezone.utc)
-        if success:
-            job.applied = True
-            job.applied_date = now
-            job.application_status = 'applied'
-            job.notes = (job.notes or '') + f"\n[Auto-applied on {now.strftime('%Y-%m-%d %H:%M')}]"
-            logger.info(f"✅ Successfully applied to {job.title} at {job.company}")
-        else:
-            job.notes = (job.notes or '') + f"\n[Manual application required - {now.strftime('%Y-%m-%d %H:%M')}]"
-            logger.info(f"⚠️ Manual application required for {job.title} at {job.company}")
-        
-        # 3. Create application record
-        app_record = ApplicationRecord(
-            job_id=job.id,
-            application_date=now,
-            resume_used=resume_path,
-            cover_letter_used=job.cover_letter_path,
-            tailored_resume_used=job.tailored_resume_path,
-            application_method=application_method,
-            application_status='submitted' if success else 'pending',
-            follow_up_date=now + timedelta(hours=48),
-            notes=f"{'Auto-applied' if success else 'Manual application required'}"
-        )
-        session.add(app_record)
-        session.commit()
-        
-        return success
-        
-    except Exception as e:
-        logger.error(f"Error applying to job {job.id}: {e}")
-        return False
-    finally:
-        if scraper:
-            scraper.close_driver()
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc)
+    job.applied = False
+    job.application_status = 'resume_tailored' if job.tailored_resume_path else 'interested'
+    job.application_method = 'human_review_required'
+    job.notes = (job.notes or '') + f"\n[Package prepared; manual submission required - {now.strftime('%Y-%m-%d %H:%M')}]"
+    session.add(ApplicationRecord(
+        job_id=job.id,
+        application_date=now,
+        resume_used=resume_path,
+        cover_letter_used=job.cover_letter_path,
+        tailored_resume_used=job.tailored_resume_path,
+        application_method='human_review_required',
+        application_status='draft',
+        notes='Application package prepared. Nothing was submitted.',
+    ))
+    session.commit()
+    logger.info(f"Package prepared for {job.title} at {job.company}; manual submission required")
+    return False
 
 
 def validate_job_data(job_data: dict, strict: bool = False) -> Tuple[bool, List[str]]:
