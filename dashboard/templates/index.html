@@ -1,219 +1,99 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Job Applier Command Center</title>
-    <link rel="stylesheet" href="/static/css/style.css">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="Mustafa's local-first, human-reviewed job application workspace">
+  <title>JobApplier OS</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
-    <div class="app-container">
-        <!-- Header -->
-        <header class="header">
-            <div class="header-content">
-                <h1 class="logo">🎯 Job Applier Command Center</h1>
-                <div class="header-actions">
-                    <button class="btn btn-secondary" onclick="toggleSettings()">⚙️ Settings</button>
-                    <button class="btn btn-secondary" onclick="exportJobs('csv')">📥 Export CSV</button>
-                    <button class="btn btn-primary" onclick="refreshDashboard()">🔄 Refresh</button>
-                </div>
-            </div>
-        </header>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark">JA</span><div><strong>JobApplier</strong><small>Mustafa's workspace</small></div></div>
+      <nav id="nav">
+        <button class="nav-item active" data-view="dashboard"><span>◫</span> Dashboard</button>
+        <button class="nav-item" data-view="add-job"><span>＋</span> Add job</button>
+        <button class="nav-item" data-view="tracker"><span>▤</span> Application tracker</button>
+        <button class="nav-item" data-view="tailor"><span>✦</span> Resume tailor</button>
+        <button class="nav-item" data-view="followups"><span>↗</span> Follow-ups</button>
+        <button class="nav-item" data-view="contacts"><span>◎</span> Contacts</button>
+        <button class="nav-item" data-view="analytics"><span>⌁</span> Analytics</button>
+        <button class="nav-item" data-view="settings"><span>⚙</span> Settings & profile</button>
+      </nav>
+      <div class="safety-card"><span class="pulse"></span><div><strong>Human approval on</strong><small>Nothing is auto-submitted</small></div></div>
+    </aside>
 
-        <!-- Settings Panel (Hidden by default) -->
-        <section class="settings-panel" id="settings-panel" style="display: none;">
-            <div class="card">
-                <h3>⚙️ User Settings</h3>
-                <div class="settings-grid">
-                    <div class="setting-item">
-                        <label>📄 Default Resume</label>
-                        <div class="resume-row">
-                            <span id="current-resume-path">No resume set</span>
-                            <input type="file" id="resume-upload" style="display: none;" onchange="handleResumeUpload(event)">
-                            <button class="btn btn-small" onclick="document.getElementById('resume-upload').click()">Change</button>
-                        </div>
-                    </div>
-                    <div class="setting-item">
-                        <label>📍 Locations</label>
-                        <input type="text" id="setting-locations" placeholder="Toronto, Canada, Istanbul...">
-                    </div>
-                    <div class="setting-item">
-                        <label>🔧 Target Fields</label>
-                        <input type="text" id="setting-fields" placeholder="Tech, Data, Finance...">
-                    </div>
-                </div>
-                <div class="settings-actions">
-                    <button class="btn btn-primary" onclick="saveSettings()">Save Settings</button>
-                </div>
-            </div>
-        </section>
+    <main>
+      <header class="topbar">
+        <div><p class="eyebrow">JOB SEARCH OPERATING SYSTEM</p><h1 id="page-title">Dashboard</h1></div>
+        <div class="top-actions"><span class="level">Automation level {{ automation_level }} / 4</span><button class="button secondary" data-view-link="add-job">Add job</button></div>
+      </header>
 
-        <!-- Search and Action Bar -->
-        <section class="action-section">
-            <div class="action-card">
-                <div class="search-controls">
-                    <button class="btn btn-primary btn-large" id="btn-start-search" onclick="startSearch()">🔍 Search for New Jobs</button>
-                    <div id="search-progress-container" style="display: none; flex-grow: 1; margin-left: 20px;">
-                        <div class="progress-bar-bg">
-                            <div id="search-progress-bar" class="progress-bar-fill" style="width: 0%"></div>
-                        </div>
-                        <span id="search-status-msg" class="status-msg">Initializing...</span>
-                    </div>
-                </div>
-                <div class="batch-controls" id="batch-controls" style="display: none;">
-                    <span id="selected-count-msg">0 jobs selected</span>
-                    <button class="btn btn-success" id="btn-batch-apply" onclick="confirmBatchApply()">🚀 Apply to Selected</button>
-                </div>
-            </div>
-        </section>
-
-        <!-- Stats Cards -->
-        <section class="stats-section">
-            <div class="stats-grid">
-                <div class="stat-card" id="stat-total">
-                    <div class="stat-value">-</div>
-                    <div class="stat-label">Total Jobs</div>
-                </div>
-                <div class="stat-card stat-success" id="stat-applied">
-                    <div class="stat-value">-</div>
-                    <div class="stat-label">Applied</div>
-                </div>
-                <div class="stat-card stat-warning" id="stat-pending">
-                    <div class="stat-value">-</div>
-                    <div class="stat-label">New Matches</div>
-                </div>
-                <div class="stat-card stat-info" id="stat-saved">
-                    <div class="stat-value">-</div>
-                    <div class="stat-label">Saved Links</div>
-                </div>
-            </div>
-        </section>
-
-        <!-- Tabs - Command Center View -->
-        <section class="tabs-section">
-            <div class="tabs">
-                <button class="tab-btn active" data-tab="new" onclick="switchTab('new')">
-                    🎯 New Matches
-                    <span class="tab-badge" id="badge-new">0</span>
-                </button>
-                <button class="tab-btn" data-tab="history" onclick="switchTab('history')">
-                    📋 Application History
-                    <span class="tab-badge" id="badge-history">0</span>
-                </button>
-            </div>
-        </section>
-
-        <!-- Filters -->
-        <section class="filters-section">
-            <div class="filters-row">
-                <div class="filter-group search-group">
-                    <label>Search</label>
-                    <input type="text" id="filter-search" placeholder="Company, title, location..." onkeyup="debounceSearch()">
-                </div>
-                <div class="filter-group" id="filter-score-group">
-                    <label>Min Score</label>
-                    <select id="filter-score" onchange="loadJobs()">
-                        <option value="0">Any</option>
-                        <option value="40">40+</option>
-                        <option value="60" selected>60+</option>
-                        <option value="80">80+</option>
-                    </select>
-                </div>
-                <div class="filter-group">
-                    <label>&nbsp;</label>
-                    <button class="btn btn-secondary" id="btn-saved-only" onclick="toggleSavedOnly()">⭐ Saved Only</button>
-                </div>
-            </div>
-        </section>
-
-        <!-- Jobs Table -->
-        <section class="jobs-section">
-            <div class="table-container">
-                <table class="jobs-table">
-                    <thead>
-                        <tr>
-                            <th class="checkbox-col">
-                                <input type="checkbox" id="select-all-jobs" onclick="toggleSelectAll()">
-                            </th>
-                            <th class="sortable" data-sort="match_score" onclick="sortBy('match_score')">
-                                Score <span class="sort-arrow" id="sort-match_score">▼</span>
-                            </th>
-                            <th class="sortable" data-sort="title" onclick="sortBy('title')">
-                                Title <span class="sort-arrow" id="sort-title"></span>
-                            </th>
-                            <th class="sortable" data-sort="company" onclick="sortBy('company')">
-                                Company <span class="sort-arrow" id="sort-company"></span>
-                            </th>
-                            <th>Location</th>
-                            <th>Platform</th>
-                            <th>Status</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody id="jobs-tbody">
-                        <tr><td colspan="7" class="loading">Loading jobs...</td></tr>
-                    </tbody>
-                </table>
-            </div>
-            <div class="table-info" id="table-info">
-                Showing 0 jobs
-            </div>
-        </section>
-
-        <!-- Materials Modal -->
-        <div class="modal" id="materials-modal">
-            <div class="modal-content modal-wide">
-                <div class="modal-header">
-                    <h2 id="materials-modal-title">📄 Application Materials</h2>
-                    <button class="modal-close" onclick="closeMaterialsModal()">&times;</button>
-                </div>
-                <div class="modal-body" id="materials-modal-body">
-                    <!-- Populated by JavaScript -->
-                </div>
-                <div class="modal-footer">
-                    <button class="btn btn-secondary" onclick="closeMaterialsModal()">Close</button>
-                </div>
-            </div>
+      <section class="view active" id="view-dashboard">
+        <div class="hero">
+          <div><span class="status-dot"></span> Local-first & ready</div>
+          <h2>Focus your effort where it has the best chance to compound.</h2>
+          <p>Score opportunities, prepare truthful drafts, and keep the final decision in your hands.</p>
+          <div class="hero-actions"><button class="button light" data-view-link="add-job">Paste a job post</button><button class="button ghost" id="seed-demo">Load demo data</button></div>
         </div>
-
-        <!-- Job Details Modal -->
-        <div class="modal" id="job-modal">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h2 id="modal-title">Job Details</h2>
-                    <button class="modal-close" onclick="closeModal()">&times;</button>
-                </div>
-                <div class="modal-body" id="modal-body">
-                    <!-- Populated by JavaScript -->
-                </div>
-            </div>
+        <div class="metrics" id="metrics"></div>
+        <div class="grid two">
+          <article class="panel"><div class="panel-head"><div><p class="eyebrow">PRIORITY QUEUE</p><h3>Best next applications</h3></div><button class="text-button" data-view-link="tracker">View all →</button></div><div id="priority-jobs" class="stack"></div></article>
+          <article class="panel"><div class="panel-head"><div><p class="eyebrow">ATTENTION</p><h3>Next actions</h3></div></div><div id="attention-list" class="stack"></div></article>
         </div>
+      </section>
 
-        <!-- Batch Apply Progress Modal -->
-        <div class="modal" id="apply-modal">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h2>🚀 Applying to Jobs</h2>
-                    <button class="modal-close" onclick="closeApplyModal()">&times;</button>
-                </div>
-                <div class="modal-body">
-                    <div class="apply-progress-container">
-                        <div class="progress-bar-bg">
-                            <div id="apply-progress-bar" class="progress-bar-fill" style="width: 0%"></div>
-                        </div>
-                        <p id="apply-status-msg">Starting application process...</p>
-                        <div id="current-applying-job" class="current-job-display"></div>
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button class="btn btn-secondary" id="btn-close-apply" onclick="closeApplyModal()" style="display: none;">Close</button>
-                </div>
-            </div>
+      <section class="view" id="view-add-job">
+        <div class="grid add-grid">
+          <article class="panel">
+            <div class="panel-head"><div><p class="eyebrow">SAFE INGESTION</p><h3>Paste a job description</h3></div></div>
+            <form id="job-form">
+              <div class="form-grid"><label>Job title<input name="title" placeholder="Software Developer Intern"></label><label>Company<input name="company" placeholder="Company name"></label></div>
+              <div class="form-grid"><label>Location<input name="location" placeholder="Toronto, ON / Remote Canada"></label><label>Source<select name="source"><option>manual</option><option>company_site</option><option>referral</option><option>official_api</option><option>career_fair</option></select></label></div>
+              <label>Application URL<input name="job_url" type="url" placeholder="https://company.example/careers/job"></label>
+              <details><summary>Optional structured details</summary><div class="form-grid optional-fields"><label>Work mode<select name="work_mode"><option value="">Detect from text</option><option value="remote">Remote</option><option value="hybrid">Hybrid</option><option value="on_site">On-site</option></select></label><label>Term length<input name="term_length" placeholder="4 months"></label><label>Start date<input name="start_date" placeholder="Fall 2026"></label><label>Deadline<input name="deadline" type="date"></label><label>Minimum pay<input name="salary_min" type="number" step="0.01"></label><label>Maximum pay<input name="salary_max" type="number" step="0.01"></label><label>Application effort<select name="application_effort"><option value="">Detect from text</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></label><label>Portal/login note<input name="login_portal" placeholder="Employer Workday account"></label></div></details>
+              <label>Job post text<textarea name="description" rows="15" required placeholder="Paste the complete public job description here..."></textarea></label>
+              <div class="form-actions"><button class="button secondary" type="button" id="preview-job">Preview score</button><button class="button" type="submit">Add & score job</button></div>
+            </form>
+          </article>
+          <aside class="panel preview-panel"><p class="eyebrow">LIVE PREVIEW</p><div id="parse-preview" class="empty">Paste a description, then select Preview score.</div></aside>
         </div>
-    </div>
+        <article class="panel import-panel"><div><p class="eyebrow">BULK IMPORT</p><h3>Import a CSV you control</h3><p>Columns can include title, company, location, description, application_url, source, deadline, and notes.</p></div><label class="file-button">Choose CSV<input id="csv-file" type="file" accept=".csv,text/csv"></label></article>
+      </section>
 
-    <script src="/static/js/main.js"></script>
+      <section class="view" id="view-tracker">
+        <article class="panel">
+          <div class="toolbar"><input id="job-search" class="search" placeholder="Search company, role, or location"><select id="status-filter"><option value="all">All statuses</option></select><select id="category-filter"><option value="all">All fit levels</option><option>strong_apply</option><option>apply</option><option>maybe</option><option>low_priority</option><option>skip</option></select><a class="button secondary small" href="/api/export?format=csv">Export CSV</a><a class="button secondary small" href="/api/export?format=json">Export JSON</a></div>
+          <div class="table-wrap"><table><thead><tr><th>Fit</th><th>Opportunity</th><th>Location</th><th>Status</th><th>Deadline</th><th>Next action</th></tr></thead><tbody id="jobs-table"></tbody></table></div>
+        </article>
+      </section>
+
+      <section class="view" id="view-tailor">
+        <div class="section-intro"><p class="eyebrow">TRUTH-CONSTRAINED DRAFTING</p><h2>Resume tailoring workspace</h2><p>Choose a tracked job. Missing skills stay visible as gaps; they are never inserted as claims.</p></div>
+        <div class="grid tailor-grid"><article class="panel"><label>Tracked job<select id="tailor-job"></select></label><label>Resume profile<select id="resume-profile"><option>general_software</option><option>web_frontend</option><option>qa_testing</option><option>data_reporting_bi</option><option>fintech</option><option>applied_ai_automation</option><option>food_service_survival_job</option></select></label><div class="form-actions vertical"><button class="button" id="generate-tailor">Generate resume suggestions</button><button class="button secondary" id="generate-answers">Generate answer drafts</button><button class="button dark" id="prepare-package">Prepare full package</button></div><div class="warning-note">Drafts require review. The inspected base PDF has a graduation-date mismatch; use the configured May 2029 value unless you change it.</div></article><article class="panel result-panel" id="tailor-result"><div class="empty">Tailoring suggestions will appear here.</div></article></div>
+      </section>
+
+      <section class="view" id="view-followups">
+        <div class="section-intro"><p class="eyebrow">REMINDERS, NOT AUTO-SEND</p><h2>Follow-up assistant</h2></div>
+        <div class="grid two"><article class="panel"><form id="followup-form"><label>Job<select name="job_id" id="followup-job"></select></label><label>Reminder type<select name="type"><option value="application">7–10 business days after application</option><option value="recruiter_contact">3–5 business days after recruiter contact</option><option value="interview_thank_you">Interview thank-you</option><option value="referral">Referral request</option></select></label><label>Optional due date<input name="due_date" type="datetime-local"></label><button class="button" type="submit">Create reminder</button></form></article><article class="panel"><div id="followup-list" class="stack"></div></article></div>
+      </section>
+
+      <section class="view" id="view-contacts">
+        <div class="section-intro"><p class="eyebrow">RECRUITER CRM</p><h2>Relationships, with context</h2></div>
+        <div class="grid two"><article class="panel"><form id="contact-form"><div class="form-grid"><label>Name<input name="name" required></label><label>Company<input name="company"></label></div><div class="form-grid"><label>Role<input name="role"></label><label>Email<input name="email" type="email"></label></div><label>LinkedIn<input name="linkedin" type="url"></label><label>Notes<textarea name="notes" rows="4"></textarea></label><button class="button" type="submit">Add contact</button></form></article><article class="panel"><div id="contact-list" class="stack"></div></article></div>
+      </section>
+
+      <section class="view" id="view-analytics"><div class="section-intro"><p class="eyebrow">CONVERSION, NOT VANITY</p><h2>Application analytics</h2></div><div id="analytics-content"></div></section>
+
+      <section class="view" id="view-settings">
+        <div class="grid settings-grid"><article class="panel"><p class="eyebrow">PROFILE</p><h3>Mustafa Alp ARI</h3><form id="profile-form"><div class="form-grid"><label>Name<input name="name"></label><label>Expected graduation<input name="graduation"></label></div><div class="form-grid"><label>Email<input name="email" type="email"></label><label>Phone<input name="phone"></label></div><label>Location<input name="location"></label><label>Availability<input name="availability"></label><label>Target locations<textarea name="target_locations" rows="3"></textarea></label><label>Automation level<select name="automation_level"><option value="0">0 — tracking only</option><option value="1">1 — parse & score</option><option value="2">2 — generate drafts</option><option value="3">3 — prepare packages</option><option value="4">4 — human-approved assistance</option></select></label><button class="button" type="submit">Save locally</button></form></article><article class="panel policy"><p class="eyebrow">SAFETY BOUNDARY</p><h3>What this app will not do</h3><ul><li>Submit applications without your final action</li><li>Bypass CAPTCHAs, authentication, rate limits, or site protections</li><li>Claim unknown skills or invent experience</li><li>Send recruiter emails automatically</li><li>Turn missing requirements into fake resume keywords</li></ul><div class="automation-scale"><span class="on">0</span><span class="on">1</span><span class="on">2</span><span class="on">3</span><span class="conditional">4</span><span class="off">5</span></div><small>Level 5 blind auto-apply is deliberately unavailable.</small></article></div>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="job-dialog"><button class="dialog-close" aria-label="Close">×</button><div id="job-detail"></div></dialog>
+  <div id="toast" role="status"></div>
+  <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 </body>
 </html>

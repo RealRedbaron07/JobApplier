@@ -1,703 +1,445 @@
 #!/usr/bin/env python3
-"""
-Web Dashboard for Job Applier - Command Center Edition.
-Provides a visual interface to view, manage, and apply to jobs.
-"""
+"""Local-first Flask API and dashboard for the JobApplier operating system."""
 
+from __future__ import annotations
+
+import json
 import os
 import sys
-import json
-import csv
-import threading
-from io import StringIO
 from datetime import datetime, timezone
-from flask import Flask, render_template, jsonify, request, Response
+from pathlib import Path
 
-# Add parent directory to path for imports
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from flask import Flask, Response, jsonify, render_template, request
+from sqlalchemy import asc, desc, or_
 
-from database.models import Session, Job, UserProfile, ApplicationRecord, SavedLink
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+
 from config import Config
-from sqlalchemy import desc, asc, or_, and_, func
-from matcher.job_matcher import JobMatcher
-from scrapers.linkedin_scraper import LinkedInScraper
-from cover_letter_generator import CoverLetterGenerator
-from resume_tailor import ResumeTailor
-from utils import (
-    parse_user_profile, 
-    generate_job_materials, 
-    apply_to_job,
-    format_job_summary
-)
+from database.models import ApplicationRecord, Contact, FollowUp, Job, Session, TailoredDraft
+from job_os.analytics import summarize_jobs
+from job_os.drafts import generate_application_answers, recruiter_message
+from job_os.io import export_csv, export_json, parse_csv, prepare_import
+from job_os.parser import parse_iso_date, parse_job_description
+from job_os.profile import load_profile, save_profile
+from job_os.scoring import score_job
+from job_os.tailoring import create_tailoring_plan, save_latex_draft
+from job_os.workflow import STATUSES, can_transition, suggested_follow_up
+
 
 app = Flask(__name__)
-
-# Task tracking
-search_task = {
-    'status': 'idle',
-    'progress': 0,
-    'total_found': 0,
-    'message': ''
-}
-
-apply_task = {
-    'status': 'idle',
-    'progress': 0,
-    'total_to_apply': 0,
-    'current_job': '',
-    'message': ''
-}
+app.config.update(JSON_SORT_KEYS=False, MAX_CONTENT_LENGTH=4 * 1024 * 1024)
 
 
-@app.route('/api/settings', methods=['GET', 'POST'])
-def handle_settings():
-    """Get or update user settings."""
-    settings_file = Config.USER_SETTINGS_FILE
-    
-    if request.method == 'POST':
-        data = request.get_json()
-        with open(settings_file, 'w') as f:
-            json.dump(data, f, indent=2)
-        return jsonify({'message': 'Settings updated', 'settings': data})
-    
-    # GET
-    if os.path.exists(settings_file):
-        with open(settings_file, 'r') as f:
-            return jsonify(json.load(f))
-    return jsonify({})
+def _json_load(value, fallback):
+    try:
+        return json.loads(value) if value else fallback
+    except (TypeError, ValueError):
+        return fallback
 
 
-@app.route('/api/search/start', methods=['POST'])
-def start_search():
-    """Trigger job search in a background thread."""
-    global search_task
-    
-    if search_task['status'] == 'running':
-        return jsonify({'error': 'Search already running'}), 400
-    
-    search_task = {
-        'status': 'running',
-        'progress': 0,
-        'total_found': 0,
-        'message': 'Initializing search...'
+def _iso(value):
+    return value.isoformat() if value else None
+
+
+def _job_dict(job: Job, detail: bool = False) -> dict:
+    explanation = _json_load(job.match_explanation, {})
+    data = {
+        "id": job.id, "title": job.title, "company": job.company, "location": job.location,
+        "work_mode": job.work_mode or "unknown", "source": job.source or job.platform or "manual",
+        "job_url": job.job_url or "", "application_url": job.job_url or "",
+        "application_status": job.application_status or "discovered", "applied": bool(job.applied),
+        "match_score": job.match_score or 0, "fit_category": job.fit_category or "maybe",
+        "resume_profile": job.resume_profile or explanation.get("resume_profile", "general_software"),
+        "suggested_project": job.suggested_project or explanation.get("project_to_emphasize", "JobApplier"),
+        "discovered_date": _iso(job.discovered_date), "applied_date": _iso(job.applied_date),
+        "deadline": _iso(job.deadline), "follow_up_date": _iso(job.follow_up_date),
+        "salary_min": job.salary_min, "salary_max": job.salary_max,
+        "next_action": job.next_action or explanation.get("strategy", "Review the posting."),
+        "safety_flags": _json_load(job.safety_flags, []),
     }
-    
-    def run_search():
-        global search_task
-        try:
-            session = Session()
-            user_profile_db = session.query(UserProfile).first()
-            if not user_profile_db:
-                search_task['status'] = 'error'
-                search_task['message'] = 'No user profile found'
-                session.close()
-                return
-
-            user_profile = parse_user_profile(user_profile_db)
-            matcher = JobMatcher(user_profile)
-            
-            linkedin = LinkedInScraper()
-            linkedin.login()
-            
-            titles = Config.JOB_TITLES[:3]
-            locations = Config.LOCATIONS[:2]
-            total_steps = len(titles) * len(locations)
-            current_step = 0
-            
-            for title in titles:
-                for loc in locations:
-                    current_step += 1
-                    search_task['message'] = f"Searching for '{title}' in '{loc}'..."
-                    search_task['progress'] = int((current_step / total_steps) * 100)
-                    
-                    found_jobs = linkedin.search_jobs(title, loc)
-                    for job_data in found_jobs:
-                        # Check if already exists
-                        existing = session.query(Job).filter_by(job_url=job_data['url']).first()
-                        if existing:
-                            continue
-                        
-                        details = linkedin.get_job_details(job_data['url'])
-                        job_data.update(details)
-                        score = matcher.calculate_match_score(job_data)
-                        
-                        job_db = Job(
-                            title=job_data['title'],
-                            company=job_data['company'],
-                            location=job_data['location'],
-                            platform=job_data['platform'],
-                            job_url=job_data['url'],
-                            description=job_data.get('description', ''),
-                            match_score=score,
-                            external_site=job_data.get('external_site', True),
-                            discovered_date=datetime.now(timezone.utc),
-                            applied=False
-                        )
-                        session.add(job_db)
-                        search_task['total_found'] += 1
-                    session.commit()
-            
-            linkedin.close_driver()
-            search_task['status'] = 'completed'
-            search_task['message'] = f"Search finished. Found {search_task['total_found']} new jobs."
-            session.close()
-        except Exception as e:
-            search_task['status'] = 'error'
-            search_task['message'] = f"Search failed: {str(e)}"
-    
-    threading.Thread(target=run_search).start()
-    return jsonify({'message': 'Search started'})
-
-
-@app.route('/api/search/status')
-def get_search_status():
-    """Get current search task status."""
-    return jsonify(search_task)
-
-
-@app.route('/api/apply/batch', methods=['POST'])
-def batch_apply():
-    """Apply to multiple jobs in a background thread."""
-    global apply_task
-    
-    if apply_task['status'] == 'running':
-        return jsonify({'error': 'Application task already running'}), 400
-    
-    data = request.get_json()
-    job_ids = data.get('job_ids', [])
-    
-    if not job_ids:
-        return jsonify({'error': 'No job IDs provided'}), 400
-    
-    # Load resume path from settings
-    settings_file = Config.USER_SETTINGS_FILE
-    if not os.path.exists(settings_file):
-        return jsonify({'error': 'No default resume set'}), 400
-        
-    with open(settings_file, 'r') as f:
-        settings = json.load(f)
-    
-    resume_path = settings.get('resume_path')
-    if not resume_path or not os.path.exists(resume_path):
-        return jsonify({'error': 'Resume file not found'}), 400
-        
-    apply_task = {
-        'status': 'running',
-        'progress': 0,
-        'total_to_apply': len(job_ids),
-        'current_job': '',
-        'message': f"Preparing to apply to {len(job_ids)} jobs..."
-    }
-    
-    def run_apply():
-        global apply_task
-        try:
-            session = Session()
-            user_profile_db = session.query(UserProfile).first()
-            user_profile = parse_user_profile(user_profile_db)
-            
-            cover_letter_gen = CoverLetterGenerator()
-            resume_tailor = ResumeTailor()
-            
-            applied_count = 0
-            for i, job_id in enumerate(job_ids, 1):
-                job = session.query(Job).get(job_id)
-                if not job or job.applied:
-                    continue
-                
-                apply_task['current_job'] = f"{job.title} at {job.company}"
-                apply_task['message'] = f"Applying to {job.title} at {job.company}..."
-                apply_task['progress'] = int(((i-1) / len(job_ids)) * 100)
-                
-                # 1. Generate materials
-                generate_job_materials(job, user_profile, resume_path, cover_letter_gen, resume_tailor, session)
-                
-                # 2. Apply
-                success = apply_to_job(job, user_profile, resume_path, session)
-                if success:
-                    applied_count += 1
-                    
-            apply_task['status'] = 'completed'
-            apply_task['progress'] = 100
-            apply_task['message'] = f"Finished! Successfully applied to {applied_count} out of {len(job_ids)} jobs."
-            session.close()
-        except Exception as e:
-            apply_task['status'] = 'error'
-            apply_task['message'] = f"Batch apply failed: {str(e)}"
-    
-    threading.Thread(target=run_apply).start()
-    return jsonify({'message': 'Batch application started'})
-
-
-@app.route('/api/apply/status')
-def get_apply_status():
-    """Get current application task status."""
-    return jsonify(apply_task)
-
-
-@app.route('/')
-def index():
-    """Main dashboard page."""
-    return render_template('index.html')
-
-
-@app.route('/api/stats')
-def get_stats():
-    """Get dashboard statistics."""
-    if Session is None:
-        return jsonify({'error': 'Database not initialized'}), 500
-    
-    session = Session()
-    try:
-        total_jobs = session.query(Job).count()
-        applied = session.query(Job).filter_by(applied=True).filter(Job.application_status != 'rejected').count()
-        pending = session.query(Job).filter_by(applied=False).filter(Job.match_score >= Config.MIN_MATCH_SCORE).count()
-        rejected = session.query(Job).filter_by(application_status='rejected').count()
-        saved = session.query(SavedLink).count()
-        
-        # Count jobs needing manual action
-        manual_needed = session.query(Job).filter(
-            Job.application_method == 'manual',
-            Job.applied == False
-        ).count()
-        
-        # Average match score
-        avg_score = session.query(Job).with_entities(
-            func.avg(Job.match_score)
-        ).scalar() or 0
-        
-        return jsonify({
-            'total_jobs': total_jobs,
-            'applied': applied,
-            'pending': pending,
-            'rejected': rejected,
-            'saved': saved,
-            'manual_needed': manual_needed,
-            'avg_score': round(avg_score, 1)
+    if detail:
+        data.update({
+            "description": job.description or "", "notes": job.notes or "", "term_length": job.term_length,
+            "start_date": job.start_date, "required_skills": _json_load(job.required_skills, []),
+            "preferred_skills": _json_load(job.preferred_skills, []), "tech_stack": _json_load(job.tech_stack, []),
+            "work_authorization": job.work_authorization, "sponsorship": job.sponsorship,
+            "coop_eligible": job.coop_eligible, "industry": job.industry,
+            "seniority_level": job.seniority_level, "required_documents": _json_load(job.required_documents, []),
+            "login_portal": job.login_portal, "application_effort": job.application_effort,
+            "score_breakdown": _json_load(job.score_breakdown, {}), "match_explanation": explanation,
+            "resume_version_used": job.resume_version_used, "cover_letter_version_used": job.cover_letter_version_used,
+            "contact_name": job.contact_name, "contact_details": job.contact_details,
         })
-    except Exception as e:
-        return jsonify({
-            'total_jobs': 0,
-            'applied': 0,
-            'pending': 0,
-            'rejected': 0,
-            'saved': 0,
-            'manual_needed': 0,
-            'avg_score': 0
-        })
-    finally:
-        session.close()
+    return data
 
 
-@app.route('/api/jobs')
-def get_jobs():
-    """Get jobs list with optional filtering. Supports 'tab' parameter for Command Center UI."""
-    if Session is None:
-        return jsonify({'error': 'Database not initialized'}), 500
-    
-    session = Session()
-    try:
-        # Get filter parameters
-        tab = request.args.get('tab', '')  # 'new' or 'history'
-        status = request.args.get('status', 'all')
-        min_score = int(request.args.get('min_score', 0))
-        search = request.args.get('search', '').lower()
-        sort_by = request.args.get('sort', 'match_score')
-        order = request.args.get('order', 'desc')
-        limit = int(request.args.get('limit', 100))
-        
-        # Base query
-        query = session.query(Job)
-        
-        # Apply tab-based filtering (Command Center UI)
-        if tab == 'new':
-            # New Matches: Jobs where applied=False AND application_method is NULL/empty
-            query = query.filter(
-                Job.applied == False,
-                or_(Job.application_method.is_(None), Job.application_method == ''),
-                or_(Job.application_status.is_(None), Job.application_status != 'rejected')
-            )
-            # Default sort by match_score descending for new matches
-            if sort_by == 'match_score':
-                order = 'desc'
-        elif tab == 'history':
-            # Application History: Jobs where applied=True OR application_method IS NOT NULL/empty
-            query = query.filter(
-                or_(
-                    Job.applied == True,
-                    and_(Job.application_method.isnot(None), Job.application_method != '')
-                )
-            )
-            # Default sort by applied_date descending for history
-            if sort_by == 'applied_date' or sort_by == 'date':
-                sort_by = 'applied_date'
-                order = 'desc'
-        else:
-            # Legacy status parameter support
-            if status == 'applied':
-                query = query.filter_by(applied=True)
-            elif status == 'pending':
-                query = query.filter_by(applied=False)
-            elif status == 'rejected':
-                query = query.filter_by(application_status='rejected')
-        
-        if min_score > 0:
-            query = query.filter(Job.match_score >= min_score)
-        
-        if search:
-            query = query.filter(
-                or_(
-                    Job.title.ilike(f'%{search}%'),
-                    Job.company.ilike(f'%{search}%'),
-                    Job.location.ilike(f'%{search}%')
-                )
-            )
-        
-        # Apply sorting
-        sort_column = getattr(Job, sort_by, Job.match_score)
-        if order == 'desc':
-            query = query.order_by(desc(sort_column).nullslast())
-        else:
-            query = query.order_by(asc(sort_column).nullslast())
-        
-        # Limit results
-        jobs = query.limit(limit).all()
-        
-        # Convert to JSON-serializable format
-        result = []
-        for job in jobs:
-            # Check if job is saved
-            is_saved = session.query(SavedLink).filter_by(job_id=job.id).first() is not None
-            
-            result.append({
-                'id': job.id,
-                'title': job.title or 'Untitled Position',
-                'company': job.company or 'Unknown Company',
-                'location': job.location if job.location else 'Remote/Unknown',
-                'platform': job.platform if job.platform else 'Unknown',
-                'job_url': job.job_url or '',
-                'match_score': job.match_score or 0,
-                'applied': job.applied,
-                'application_status': job.application_status or '',
-                'application_method': job.application_method or '',
-                'applied_date': job.applied_date.strftime('%Y-%m-%d %H:%M') if job.applied_date else None,
-                'discovered_date': job.discovered_date.strftime('%Y-%m-%d') if job.discovered_date else 'N/A',
-                'has_cover_letter': bool(getattr(job, 'cover_letter_path', None) or getattr(job, 'cover_letter', None)),
-                'has_tailored_resume': bool(getattr(job, 'tailored_resume_path', None)),
-                'is_saved': is_saved
-            })
-        
-        return jsonify({'jobs': result, 'count': len(result)})
-    
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-    finally:
-        session.close()
+def _apply_score(job: Job, parsed: dict, result: dict) -> None:
+    job.match_score = result["overall_score"]
+    job.fit_category = result["category"]
+    job.score_breakdown = json.dumps(result["breakdown"])
+    job.match_explanation = json.dumps(result)
+    job.safety_flags = json.dumps(result["safety_flags"])
+    job.resume_profile = result["resume_profile"]
+    job.suggested_project = result["project_to_emphasize"]
+    job.next_action = result["strategy"]
 
 
-@app.route('/api/jobs/<int:job_id>')
-def get_job_details(job_id):
-    """Get detailed information about a specific job."""
-    if Session is None:
-        return jsonify({'error': 'Database not initialized'}), 500
-    
-    session = Session()
-    try:
-        job = session.query(Job).get(job_id)
-        if not job:
-            return jsonify({'error': 'Job not found'}), 404
-        
-        # Get application records
-        app_records = session.query(ApplicationRecord).filter_by(job_id=job_id).all()
-        
-        return jsonify({
-            'id': job.id,
-            'title': job.title or 'Untitled Position',
-            'company': job.company or 'Unknown Company',
-            'location': job.location if job.location else 'Remote/Unknown',
-            'platform': job.platform if job.platform else 'Unknown',
-            'job_url': job.job_url or '',
-            'description': job.description if job.description else 'No description available',
-            'requirements': job.requirements or '',
-            'match_score': job.match_score or 0,
-            'applied': job.applied,
-            'applied_date': job.applied_date.strftime('%Y-%m-%d %H:%M') if job.applied_date else None,
-            'application_status': job.application_status or '',
-            'application_method': job.application_method or '',
-            'cover_letter': getattr(job, 'cover_letter', '') or '',
-            'cover_letter_path': getattr(job, 'cover_letter_path', '') or '',
-            'tailored_resume_path': getattr(job, 'tailored_resume_path', '') or '',
-            'notes': job.notes or '',
-            'discovered_date': job.discovered_date.strftime('%Y-%m-%d %H:%M') if job.discovered_date else None,
-            'applications': [{
-                'date': r.application_date.strftime('%Y-%m-%d %H:%M') if r.application_date else None,
-                'method': r.application_method or '',
-                'status': r.application_status or '',
-                'notes': r.notes or ''
-            } for r in app_records]
-        })
-    
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-    finally:
-        session.close()
-
-
-@app.route('/api/jobs/<int:job_id>/materials')
-def get_job_materials(job_id):
-    """
-    Get application materials (cover letter text and resume path) for a specific job.
-    This endpoint is used by the Materials Modal in the Command Center UI.
-    """
-    if Session is None:
-        return jsonify({'error': 'Database not initialized'}), 500
-    
-    session = Session()
-    try:
-        job = session.query(Job).get(job_id)
-        if not job:
-            return jsonify({'error': 'Job not found'}), 404
-        
-        # Get cover letter text from database
-        cover_letter_text = getattr(job, 'cover_letter', '') or ''
-        cover_letter_path = getattr(job, 'cover_letter_path', '') or ''
-        tailored_resume_path = getattr(job, 'tailored_resume_path', '') or ''
-        
-        # If cover letter text is empty but path exists, try to read from file
-        if not cover_letter_text and cover_letter_path:
-            try:
-                if os.path.exists(cover_letter_path):
-                    with open(cover_letter_path, 'r', encoding='utf-8') as f:
-                        cover_letter_text = f.read()
-            except Exception as e:
-                # Log but don't fail - just return empty
-                print(f"Could not read cover letter file: {e}")
-        
-        return jsonify({
-            'job_id': job.id,
-            'job_title': job.title or 'Untitled Position',
-            'company': job.company or 'Unknown Company',
-            'cover_letter': cover_letter_text,
-            'cover_letter_path': cover_letter_path,
-            'tailored_resume_path': tailored_resume_path,
-            'has_materials': bool(cover_letter_text or tailored_resume_path)
-        })
-    
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-    finally:
-        session.close()
-
-
-@app.route('/api/jobs/<int:job_id>/save', methods=['POST'])
-def save_job(job_id):
-    """Save/bookmark a job link."""
-    if Session is None:
-        return jsonify({'error': 'Database not initialized'}), 500
-    
-    session = Session()
-    try:
-        job = session.query(Job).get(job_id)
-        if not job:
-            return jsonify({'error': 'Job not found'}), 404
-        
-        # Check if already saved
-        existing = session.query(SavedLink).filter_by(job_id=job_id).first()
-        if existing:
-            return jsonify({'message': 'Job already saved', 'id': existing.id})
-        
-        # Get optional data from request
-        data = request.get_json() or {}
-        
-        saved_link = SavedLink(
-            job_id=job_id,
-            notes=data.get('notes', ''),
-            category=data.get('category', 'interesting')
-        )
-        session.add(saved_link)
-        session.commit()
-        
-        return jsonify({'message': 'Job saved successfully', 'id': saved_link.id})
-    
-    except Exception as e:
-        session.rollback()
-        return jsonify({'error': str(e)}), 500
-    finally:
-        session.close()
-
-
-@app.route('/api/jobs/<int:job_id>/unsave', methods=['POST'])
-def unsave_job(job_id):
-    """Remove a saved job link."""
-    if Session is None:
-        return jsonify({'error': 'Database not initialized'}), 500
-    
-    session = Session()
-    try:
-        saved = session.query(SavedLink).filter_by(job_id=job_id).first()
-        if saved:
-            session.delete(saved)
-            session.commit()
-            return jsonify({'message': 'Job unsaved'})
-        return jsonify({'message': 'Job was not saved'})
-    
-    except Exception as e:
-        session.rollback()
-        return jsonify({'error': str(e)}), 500
-    finally:
-        session.close()
-
-
-@app.route('/api/saved')
-def get_saved_jobs():
-    """Get all saved job links."""
-    if Session is None:
-        return jsonify({'error': 'Database not initialized'}), 500
-    
-    session = Session()
-    try:
-        saved_links = session.query(SavedLink).order_by(desc(SavedLink.saved_date)).all()
-        
-        result = []
-        for link in saved_links:
-            job = session.query(Job).get(link.job_id)
-            if job:
-                result.append({
-                    'id': link.id,
-                    'job_id': job.id,
-                    'title': job.title or 'Untitled Position',
-                    'company': job.company or 'Unknown Company',
-                    'location': job.location if job.location else 'Remote/Unknown',
-                    'platform': job.platform if job.platform else 'Unknown',
-                    'job_url': job.job_url or '',
-                    'match_score': job.match_score or 0,
-                    'applied': job.applied,
-                    'application_status': job.application_status or '',
-                    'application_method': job.application_method or '',
-                    'has_cover_letter': bool(getattr(job, 'cover_letter_path', None) or getattr(job, 'cover_letter', None)),
-                    'has_tailored_resume': bool(getattr(job, 'tailored_resume_path', None)),
-                    'saved_date': link.saved_date.strftime('%Y-%m-%d'),
-                    'notes': link.notes or '',
-                    'category': link.category or '',
-                    'is_saved': True
-                })
-        
-        return jsonify({'saved': result, 'count': len(result)})
-    
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-    finally:
-        session.close()
-
-
-@app.route('/api/export')
-def export_jobs():
-    """Export jobs as CSV or JSON."""
-    if Session is None:
-        return jsonify({'error': 'Database not initialized'}), 500
-    
-    format_type = request.args.get('format', 'csv')
-    status = request.args.get('status', 'all')
-    saved_only = request.args.get('saved_only', 'false').lower() == 'true'
-    
-    session = Session()
-    try:
-        if saved_only:
-            # Get saved jobs
-            saved_links = session.query(SavedLink).all()
-            job_ids = [link.job_id for link in saved_links]
-            jobs = session.query(Job).filter(Job.id.in_(job_ids)).all()
-        else:
-            query = session.query(Job)
-            if status == 'applied':
-                query = query.filter_by(applied=True)
-            elif status == 'pending':
-                query = query.filter_by(applied=False)
-            jobs = query.order_by(desc(Job.match_score)).all()
-        
-        if format_type == 'json':
-            data = [{
-                'title': job.title or '',
-                'company': job.company or '',
-                'location': job.location if job.location else 'Remote/Unknown',
-                'url': job.job_url or '',
-                'match_score': job.match_score or 0,
-                'status': job.application_status or ('Applied' if job.applied else 'Pending'),
-                'application_method': job.application_method or '',
-                'discovered_date': job.discovered_date.strftime('%Y-%m-%d') if job.discovered_date else None
-            } for job in jobs]
-            
-            return Response(
-                json.dumps(data, indent=2),
-                mimetype='application/json',
-                headers={'Content-Disposition': 'attachment; filename=jobs_export.json'}
-            )
-        else:
-            # CSV format
-            output = StringIO()
-            writer = csv.writer(output)
-            writer.writerow(['Title', 'Company', 'Location', 'URL', 'Match Score', 'Status', 'Method', 'Discovered Date'])
-            
-            for job in jobs:
-                writer.writerow([
-                    job.title or '',
-                    job.company or '',
-                    job.location if job.location else 'Remote/Unknown',
-                    job.job_url or '',
-                    job.match_score or 0,
-                    job.application_status or ('Applied' if job.applied else 'Pending'),
-                    job.application_method or '',
-                    job.discovered_date.strftime('%Y-%m-%d') if job.discovered_date else ''
-                ])
-            
-            return Response(
-                output.getvalue(),
-                mimetype='text/csv',
-                headers={'Content-Disposition': 'attachment; filename=jobs_export.csv'}
-            )
-    
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-    finally:
-        session.close()
-
-
-@app.route('/api/jobs/<int:job_id>/reject', methods=['POST'])
-def reject_job(job_id):
-    """Mark a job as rejected (not interested)."""
-    if Session is None:
-        return jsonify({'error': 'Database not initialized'}), 500
-    
-    session = Session()
-    try:
-        job = session.query(Job).get(job_id)
-        if not job:
-            return jsonify({'error': 'Job not found'}), 404
-        
-        job.applied = True  # Mark as processed
-        job.application_status = 'rejected'
-        job.notes = (job.notes or '') + f"\n[Rejected via dashboard on {datetime.now().strftime('%Y-%m-%d %H:%M')}]"
-        session.commit()
-        
-        return jsonify({'message': 'Job rejected'})
-    
-    except Exception as e:
-        session.rollback()
-        return jsonify({'error': str(e)}), 500
-    finally:
-        session.close()
-
-
-if __name__ == '__main__':
-    print("\n" + "=" * 60)
-    print("🎯 Job Applier Command Center")
-    print("=" * 60)
-    print(f"Open in browser: http://{Config.DASHBOARD_HOST}:{Config.DASHBOARD_PORT}")
-    print("Press Ctrl+C to stop")
-    print("=" * 60 + "\n")
-    
-    app.run(
-        host=Config.DASHBOARD_HOST,
-        port=Config.DASHBOARD_PORT,
-        debug=True
+def _new_job(parsed: dict, profile: dict) -> Job:
+    result = score_job(parsed, profile)
+    job = Job(
+        title=parsed["title"], company=parsed["company"], location=parsed.get("location"),
+        platform=parsed.get("source", "manual"), source=parsed.get("source", "manual"),
+        job_url=parsed.get("job_url") or None, description=parsed.get("description"),
+        work_mode=parsed.get("work_mode"), term_length=parsed.get("term_length"),
+        start_date=parsed.get("start_date"), required_skills=json.dumps(parsed.get("required_skills", [])),
+        preferred_skills=json.dumps(parsed.get("preferred_skills", [])), tech_stack=json.dumps(parsed.get("tech_stack", [])),
+        work_authorization=parsed.get("work_authorization"), sponsorship=parsed.get("sponsorship"),
+        coop_eligible=parsed.get("coop_eligible"), industry=parsed.get("industry"),
+        seniority_level=parsed.get("seniority_level"), deadline=parse_iso_date(parsed.get("deadline")),
+        salary_min=parsed.get("salary_min"), salary_max=parsed.get("salary_max"),
+        application_effort=parsed.get("application_effort"), required_documents=json.dumps(parsed.get("required_documents", [])),
+        login_portal=parsed.get("login_portal"), notes=parsed.get("notes", ""),
+        application_status="discovered", applied=False, discovered_date=datetime.now(timezone.utc),
     )
+    _apply_score(job, parsed, result)
+    return job
+
+
+@app.get("/")
+def index():
+    return render_template("index.html", automation_level=Config.AUTOMATION_LEVEL)
+
+
+@app.get("/api/health")
+def health():
+    return jsonify({"status": "ok", "local_first": True, "auto_submit": False, "automation_level": Config.AUTOMATION_LEVEL})
+
+
+@app.route("/api/profile", methods=["GET", "PUT"])
+@app.route("/api/settings", methods=["GET", "POST"])
+def profile_settings():
+    if request.method in ("PUT", "POST"):
+        profile = save_profile(request.get_json(silent=True) or {})
+        return jsonify({"message": "Profile saved locally", "profile": profile})
+    return jsonify(load_profile())
+
+
+@app.post("/api/jobs/parse")
+def parse_preview():
+    payload = request.get_json(silent=True) or {}
+    parsed = parse_job_description(payload.get("description", ""), payload)
+    return jsonify({"parsed": parsed, "score": score_job(parsed, load_profile())})
+
+
+@app.route("/api/jobs", methods=["GET", "POST"])
+def jobs_collection():
+    if request.method == "POST":
+        payload = request.get_json(silent=True) or {}
+        if not payload.get("description") and not payload.get("title"):
+            return jsonify({"error": "Provide a title or pasted job description."}), 400
+        parsed = parse_job_description(payload.get("description", ""), payload)
+        session = Session()
+        try:
+            if parsed.get("job_url"):
+                existing = session.query(Job).filter_by(job_url=parsed["job_url"]).first()
+                if existing:
+                    return jsonify({"error": "That application URL is already tracked.", "job_id": existing.id}), 409
+            job = _new_job(parsed, load_profile())
+            session.add(job)
+            session.commit()
+            return jsonify({"message": "Job added and scored", "job": _job_dict(job, True)}), 201
+        finally:
+            session.close()
+
+    session = Session()
+    try:
+        query = session.query(Job)
+        status = request.args.get("status")
+        category = request.args.get("category")
+        search = request.args.get("search", "").strip()
+        if status and status != "all":
+            query = query.filter(Job.application_status == status)
+        if category and category != "all":
+            query = query.filter(Job.fit_category == category)
+        if search:
+            query = query.filter(or_(Job.title.ilike(f"%{search}%"), Job.company.ilike(f"%{search}%"), Job.location.ilike(f"%{search}%")))
+        sort = request.args.get("sort", "match_score")
+        column = getattr(Job, sort, Job.match_score)
+        query = query.order_by(desc(column).nullslast() if request.args.get("order", "desc") == "desc" else asc(column).nullslast())
+        rows = query.limit(min(500, int(request.args.get("limit", 200)))).all()
+        return jsonify({"jobs": [_job_dict(job) for job in rows], "count": len(rows)})
+    finally:
+        session.close()
+
+
+@app.route("/api/jobs/<int:job_id>", methods=["GET", "PATCH", "DELETE"])
+def job_detail(job_id: int):
+    session = Session()
+    try:
+        job = session.get(Job, job_id)
+        if not job:
+            return jsonify({"error": "Job not found"}), 404
+        if request.method == "DELETE":
+            job.application_status = "archived"
+            session.commit()
+            return jsonify({"message": "Job archived"})
+        if request.method == "PATCH":
+            payload = request.get_json(silent=True) or {}
+            target = payload.get("application_status")
+            current = job.application_status or "discovered"
+            if target and not can_transition(current, target):
+                return jsonify({"error": f"Invalid status transition: {current} -> {target}"}), 409
+            editable = ("notes", "deadline", "follow_up_date", "contact_name", "contact_details", "login_portal", "salary_min", "salary_max")
+            for field in editable:
+                if field not in payload:
+                    continue
+                value = payload[field]
+                if field in ("deadline", "follow_up_date"):
+                    value = parse_iso_date(value)
+                setattr(job, field, value)
+            if target:
+                job.application_status = target
+                if target == "applied":
+                    job.applied = True
+                    job.applied_date = job.applied_date or datetime.now(timezone.utc)
+                    job.follow_up_date = job.follow_up_date or suggested_follow_up("application", job.applied_date)
+                    session.add(ApplicationRecord(job_id=job.id, application_date=job.applied_date, application_status="applied", application_method="human_confirmed", notes="User confirmed submission outside JobApplier."))
+                elif target in ("discovered", "interested", "resume_tailored"):
+                    job.applied = False
+            session.commit()
+            return jsonify({"message": "Job updated", "job": _job_dict(job, True)})
+        return jsonify(_job_dict(job, True))
+    finally:
+        session.close()
+
+
+@app.post("/api/jobs/<int:job_id>/rescore")
+def rescore_job(job_id: int):
+    session = Session()
+    try:
+        job = session.get(Job, job_id)
+        if not job:
+            return jsonify({"error": "Job not found"}), 404
+        parsed = parse_job_description(job.description or "", _job_dict(job, True))
+        result = score_job(parsed, load_profile())
+        job.required_skills = json.dumps(parsed["required_skills"])
+        job.preferred_skills = json.dumps(parsed["preferred_skills"])
+        job.tech_stack = json.dumps(parsed["tech_stack"])
+        _apply_score(job, parsed, result)
+        session.commit()
+        return jsonify({"message": "Job rescored", "score": result})
+    finally:
+        session.close()
+
+
+@app.post("/api/jobs/<int:job_id>/tailor")
+def tailor_job(job_id: int):
+    session = Session()
+    try:
+        job = session.get(Job, job_id)
+        if not job:
+            return jsonify({"error": "Job not found"}), 404
+        profile = load_profile()
+        job_data = _job_dict(job, True)
+        scoring = _json_load(job.match_explanation, score_job(job_data, profile))
+        selected = (request.get_json(silent=True) or {}).get("resume_profile") or job.resume_profile
+        plan = create_tailoring_plan(job_data, scoring, profile, selected)
+        path = save_latex_draft(job.id, plan.pop("latex"))
+        plan["latex_path"] = path
+        draft = TailoredDraft(job_id=job.id, draft_type="resume_tailoring", resume_profile=plan["resume_profile"], content=json.dumps(plan), file_path=path, review_status="draft", safety_report=json.dumps(plan["safety_report"]))
+        session.add(draft)
+        job.resume_profile = plan["resume_profile"]
+        job.tailored_resume_path = path
+        if can_transition(job.application_status, "resume_tailored"):
+            job.application_status = "resume_tailored"
+        session.commit()
+        return jsonify({"message": "Tailoring draft created; human review required", "draft_id": draft.id, "plan": plan})
+    finally:
+        session.close()
+
+
+@app.post("/api/jobs/<int:job_id>/answers")
+def draft_answers(job_id: int):
+    session = Session()
+    try:
+        job = session.get(Job, job_id)
+        if not job:
+            return jsonify({"error": "Job not found"}), 404
+        answers = generate_application_answers(_job_dict(job, True), load_profile())
+        draft = TailoredDraft(job_id=job.id, draft_type="application_answers", content=json.dumps(answers), review_status="draft", safety_report=json.dumps({"passed": True, "requires_human_review": True}))
+        session.add(draft)
+        session.commit()
+        return jsonify({"message": "Editable answer drafts created", "draft_id": draft.id, "answers": answers})
+    finally:
+        session.close()
+
+
+@app.post("/api/jobs/<int:job_id>/prepare")
+def prepare_package(job_id: int):
+    """Prepare materials only. This endpoint never opens or submits an application."""
+    session = Session()
+    try:
+        job = session.get(Job, job_id)
+        if not job:
+            return jsonify({"error": "Job not found"}), 404
+        profile = load_profile()
+        job_data = _job_dict(job, True)
+        scoring = _json_load(job.match_explanation, score_job(job_data, profile))
+        plan = create_tailoring_plan(job_data, scoring, profile, job.resume_profile)
+        latex_path = save_latex_draft(job.id, plan.pop("latex"))
+        answers = generate_application_answers(job_data, profile)
+        session.add(TailoredDraft(job_id=job.id, draft_type="application_package", resume_profile=plan["resume_profile"], content=json.dumps({"tailoring": plan, "answers": answers}), file_path=latex_path, review_status="draft", safety_report=json.dumps(plan["safety_report"])))
+        job.tailored_resume_path = latex_path
+        job.application_status = "resume_tailored" if can_transition(job.application_status, "resume_tailored") else job.application_status
+        job.next_action = "Review the LaTeX draft and answers, complete the checklist, then submit manually on the official portal."
+        session.commit()
+        return jsonify({"message": "Application package prepared; nothing was submitted", "latex_path": latex_path, "tailoring": plan, "answers": answers, "checklist": ["Verify company and role details", "Review every resume claim", "Resolve safety warnings", "Confirm work authorization answer", "Check one-page PDF output", "Submit manually on the official portal", "Return and mark the job applied"]})
+    finally:
+        session.close()
+
+
+@app.get("/api/jobs/<int:job_id>/drafts")
+def list_drafts(job_id: int):
+    session = Session()
+    try:
+        drafts = session.query(TailoredDraft).filter_by(job_id=job_id).order_by(desc(TailoredDraft.created_date)).all()
+        return jsonify({"drafts": [{"id": d.id, "type": d.draft_type, "profile": d.resume_profile, "content": _json_load(d.content, d.content), "file_path": d.file_path, "review_status": d.review_status, "created_date": _iso(d.created_date)} for d in drafts]})
+    finally:
+        session.close()
+
+
+@app.post("/api/import/csv")
+def import_csv_route():
+    content = request.files["file"].read().decode("utf-8-sig") if "file" in request.files else (request.get_json(silent=True) or {}).get("csv", "")
+    rows = prepare_import(parse_csv(content), load_profile())
+    session = Session()
+    created = 0
+    skipped = 0
+    try:
+        for item in rows:
+            if item.get("job_url") and session.query(Job).filter_by(job_url=item["job_url"]).first():
+                skipped += 1
+                continue
+            session.add(_new_job(item, load_profile()))
+            created += 1
+        session.commit()
+        return jsonify({"message": "CSV import complete", "created": created, "skipped_duplicates": skipped})
+    finally:
+        session.close()
+
+
+@app.get("/api/export")
+def export_route():
+    session = Session()
+    try:
+        jobs = session.query(Job).order_by(desc(Job.discovered_date)).all()
+        format_name = request.args.get("format", "csv")
+        if format_name == "json":
+            return Response(export_json(jobs), mimetype="application/json", headers={"Content-Disposition": "attachment; filename=jobapplier_export.json"})
+        if format_name == "summary":
+            return jsonify(summarize_jobs(jobs))
+        return Response(export_csv(jobs), mimetype="text/csv", headers={"Content-Disposition": "attachment; filename=jobapplier_tracker.csv"})
+    finally:
+        session.close()
+
+
+@app.route("/api/contacts", methods=["GET", "POST"])
+def contacts_collection():
+    session = Session()
+    try:
+        if request.method == "POST":
+            payload = request.get_json(silent=True) or {}
+            if not payload.get("name"):
+                return jsonify({"error": "Contact name is required"}), 400
+            contact = Contact(name=payload["name"], company=payload.get("company"), role=payload.get("role"), email=payload.get("email"), linkedin=payload.get("linkedin"), notes=payload.get("notes"), relationship_strength=payload.get("relationship_strength", "new"), follow_up_needed=bool(payload.get("follow_up_needed")))
+            session.add(contact)
+            session.commit()
+            return jsonify({"message": "Contact added", "id": contact.id}), 201
+        contacts = session.query(Contact).order_by(desc(Contact.last_contact_date).nullslast(), Contact.name).all()
+        return jsonify({"contacts": [{"id": c.id, "name": c.name, "company": c.company, "role": c.role, "email": c.email, "linkedin": c.linkedin, "notes": c.notes, "relationship_strength": c.relationship_strength, "follow_up_needed": c.follow_up_needed, "last_contact_date": _iso(c.last_contact_date)} for c in contacts]})
+    finally:
+        session.close()
+
+
+@app.post("/api/contacts/<int:contact_id>/message")
+def contact_message(contact_id: int):
+    session = Session()
+    try:
+        contact = session.get(Contact, contact_id)
+        if not contact:
+            return jsonify({"error": "Contact not found"}), 404
+        payload = request.get_json(silent=True) or {}
+        job = session.get(Job, payload.get("job_id")) if payload.get("job_id") else None
+        data = {column.name: getattr(contact, column.name) for column in Contact.__table__.columns}
+        return jsonify({"message": recruiter_message(payload.get("kind", "application_follow_up"), data, _job_dict(job, True) if job else None), "review_required": True})
+    finally:
+        session.close()
+
+
+@app.route("/api/follow-ups", methods=["GET", "POST"])
+def followups_collection():
+    session = Session()
+    try:
+        if request.method == "POST":
+            payload = request.get_json(silent=True) or {}
+            due = parse_iso_date(payload.get("due_date")) or suggested_follow_up(payload.get("type", "application"))
+            job = session.get(Job, payload.get("job_id")) if payload.get("job_id") else None
+            contact = session.get(Contact, payload.get("contact_id")) if payload.get("contact_id") else None
+            contact_data = {"name": contact.name, "company": contact.company, "role": contact.role} if contact else {"name": "Hiring Team", "company": job.company if job else "the company"}
+            message_kind = {"interview_thank_you": "thank_you", "referral": "referral_request"}.get(payload.get("type"), "application_follow_up")
+            message = payload.get("message_draft") or recruiter_message(message_kind, contact_data, _job_dict(job, True) if job else None)
+            followup = FollowUp(job_id=payload.get("job_id"), contact_id=payload.get("contact_id"), follow_up_type=payload.get("type", "application"), due_date=due, message_draft=message, status="pending")
+            session.add(followup)
+            session.commit()
+            return jsonify({"message": "Follow-up reminder created", "id": followup.id}), 201
+        items = session.query(FollowUp).order_by(asc(FollowUp.due_date)).all()
+        return jsonify({"follow_ups": [{"id": item.id, "job_id": item.job_id, "contact_id": item.contact_id, "type": item.follow_up_type, "due_date": _iso(item.due_date), "status": item.status, "message_draft": item.message_draft} for item in items]})
+    finally:
+        session.close()
+
+
+@app.get("/api/analytics")
+@app.get("/api/stats")
+def analytics():
+    session = Session()
+    try:
+        return jsonify(summarize_jobs(session.query(Job).all()))
+    finally:
+        session.close()
+
+
+@app.post("/api/seed-demo")
+def seed_demo():
+    examples = [
+        {"title": "Software Developer Intern", "company": "Northstar Demo", "location": "Toronto, ON", "source": "demo", "job_url": "https://demo.invalid/northstar-intern", "description": "Summer 2026 paid internship. Required: TypeScript, React, Git. Next.js preferred. Hybrid Toronto. No sponsorship available."},
+        {"title": "QA Analyst Co-op", "company": "Maple Quality Demo", "location": "Remote Canada", "source": "demo", "job_url": "https://demo.invalid/maple-qa-coop", "description": "8 month co-op starting Fall 2026. Manual testing, regression testing, SQL, Selenium and bug reporting. Remote in Canada."},
+        {"title": "Senior Platform Engineer", "company": "Example Systems", "location": "Vancouver, BC", "source": "demo", "job_url": "https://demo.invalid/senior-platform", "description": "Senior role requiring 5+ years, AWS, Kubernetes, Go, and production operations."},
+    ]
+    session = Session()
+    try:
+        for example in examples:
+            parsed = parse_job_description(example["description"], example)
+            if not session.query(Job).filter_by(job_url=parsed["job_url"]).first():
+                session.add(_new_job(parsed, load_profile()))
+        session.commit()
+        return jsonify({"message": "Three demo jobs added"}), 201
+    finally:
+        session.close()
+
+
+# Legacy routes are retained as explicit safety responses.
+@app.post("/api/apply/batch")
+def disabled_batch_apply():
+    return jsonify({"error": "Blind or batch submission is disabled. Use each job's Prepare package action, review it, and submit manually."}), 403
+
+
+@app.post("/api/search/start")
+def restricted_search():
+    return jsonify({"error": "Protected-board scraping is disabled in the dashboard. Add jobs manually, paste text, import CSV, or use an official API integration."}), 403
+
+
+if __name__ == "__main__":
+    print(f"JobApplier: http://{Config.DASHBOARD_HOST}:{Config.DASHBOARD_PORT}")
+    print("Local-first. Application submission is always manual.")
+    app.run(host=Config.DASHBOARD_HOST, port=Config.DASHBOARD_PORT, debug=os.getenv("FLASK_DEBUG", "false").lower() == "true")
