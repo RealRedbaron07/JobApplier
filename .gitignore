@@ -83,3 +83,10 @@ dashboard.html
 # Cursor IDE
 .cursor/
 user_settings.json
+
+# Local-first private JobApplier data and generated drafts
+data/*.json
+data/drafts/
+output/
+exports/
+!.gitkeep

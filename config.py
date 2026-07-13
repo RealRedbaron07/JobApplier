@@ -4,9 +4,13 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class Config:
+    # JobApplier prepares application packages but never submits them. These
+    # constants intentionally cannot be enabled through environment variables.
+    AUTO_MODE = False
+
     # OPTIONAL: OpenAI API Key (system works without it)
     OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
-    
+
     # OPTIONAL: LinkedIn credentials (only needed for Easy Apply feature)
     # If not provided, will still scrape jobs and apply via company websites
     LINKEDIN_EMAIL = os.getenv('LINKEDIN_EMAIL', '')
@@ -23,8 +27,36 @@ class Config:
     
     # AUTO-APPLY SETTINGS
     # If True, automatically applies to jobs above MIN_MATCH_SCORE without review
-    # If False, requires manual review before applying
-    AUTO_APPLY_ENABLED = os.getenv('AUTO_APPLY_ENABLED', 'false').lower() == 'true'
+    AUTO_APPLY_ENABLED = False
+
+    # Only apply to internship roles
+    REQUIRE_INTERNSHIP = os.getenv('REQUIRE_INTERNSHIP', 'true').lower() == 'true'
+
+    # Hard safety boundary: browser assistance must stop before final submit.
+    STOP_BEFORE_SUBMIT = True
+
+    # Chrome profile login may assist a local user but never changes the submit boundary.
+    _wait_for_login = os.getenv('WAIT_FOR_LOGIN', '').lower()
+    if _wait_for_login == '':
+        WAIT_FOR_LOGIN = True
+    else:
+        WAIT_FOR_LOGIN = _wait_for_login == 'true'
+
+    # Prefer jobs posted/discovered within this many hours ("new" postings)
+    NEW_JOB_HOURS = int(os.getenv('NEW_JOB_HOURS', '72'))
+
+    # Default resume path (used when profile DB path is missing or stale)
+    DEFAULT_RESUME_PATH = os.getenv(
+        'DEFAULT_RESUME_PATH',
+        '/Users/malpari/Library/Mobile Documents/com~apple~CloudDocs/Downloads/Mustafa_Alp_ARI_Resume_10.pdf'
+    )
+    LOCAL_RESUME_PATH = os.getenv(
+        'LOCAL_RESUME_PATH',
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), 'resumes', 'Mustafa_Alp_ARI_Resume_10.pdf')
+    )
+
+    MIN_REQUEST_DELAY = float(os.getenv('MIN_REQUEST_DELAY', '1.0'))
+    MAX_REQUEST_DELAY = float(os.getenv('MAX_REQUEST_DELAY', '3.0'))
     
     # Add missing config
     MAX_JOB_AGE_DAYS = int(os.getenv('MAX_JOB_AGE_DAYS', 30))
@@ -35,41 +67,21 @@ class Config:
     DASHBOARD_PORT = int(os.getenv('DASHBOARD_PORT', 5000))
     
     # Job search parameters - focused on tech/fintech internships
-    JOB_TITLES = os.getenv('JOB_TITLES', 
-        'Software Engineering Intern,'
-        'Software Developer Intern,'
-        'Data Science Intern,'
-        'Data Analyst Intern,'
-        'Fintech Intern,'
-        'Technology Intern,'
-        'Computer Science Intern,'
-        'Backend Intern,'
-        'Frontend Intern,'
-        'Full Stack Intern,'
-        'Finance Technology Intern,'
-        'Quantitative Analyst Intern,'
-        'Economics Intern,'
-        'Quantitative Developer Intern,'
-        'Summer Intern Software'
-    ).split(',')
+    JOB_TITLES = [value.strip() for value in os.getenv('JOB_TITLES',
+        'Software Developer Intern|Web Developer Intern|QA Software Testing Intern|'
+        'Data Reporting BI Co-op|Fintech Technology Co-op|Applied AI Automation Intern|'
+        'Technical Analyst Intern'
+    ).split('|') if value.strip()]
     
-    # Locations: Canada first, then Turkey
-    LOCATIONS = os.getenv('LOCATIONS', 
-        'Toronto, ON,'
-        'Canada,'
-        'Remote,'
-        'Mississauga, ON,'
-        'Markham, ON,'
-        'Ontario, Canada,'
-        'Istanbul, Turkey,'
-        'Ankara, Turkey,'
-        'Antalya, Turkey,'
-        'Turkey'
-    ).split(',')
+    # Locations are intentionally Canada-first and tailored to Mustafa's search.
+    LOCATIONS = [value.strip() for value in os.getenv('LOCATIONS',
+        'Toronto, ON|North York, ON|Vaughan, ON|Mississauga, ON|Markham, ON|'
+        'Brampton, ON|Ontario, Canada|Remote, Canada'
+    ).split('|') if value.strip()]
     
     # Matching priorities
-    TARGET_LOCATIONS = ["Toronto", "Canada", "Istanbul", "Ankara", "Antalya", "Turkey"]
-    LOCATION_PRIORITY = {"Toronto": 1, "Canada": 2, "Istanbul": 3, "Ankara": 4, "Antalya": 5, "Turkey": 6}
+    TARGET_LOCATIONS = ["Toronto", "North York", "Vaughan", "Markham", "Brampton", "Mississauga", "Ontario", "Canada", "Remote"]
+    LOCATION_PRIORITY = {"Toronto": 1, "North York": 2, "Vaughan": 2, "Markham": 2, "Mississauga": 2, "Brampton": 2, "Ontario": 3, "Canada": 4, "Remote": 1}
     TARGET_FIELDS = ["software", "tech", "data", "analytics", "finance", "fintech", "quantitative", "economics"]
     JOB_TYPES = ["internship", "intern", "entry-level", "junior", "new grad", "student", "undergraduate"]
 
@@ -80,3 +92,9 @@ class Config:
     USER_SETTINGS_FILE = "user_settings.json"
     
     EXPERIENCE_LEVELS = ['Internship', 'Entry Level', 'Student']
+
+    # Safe automation levels: 0=tracking, 1=parse/score, 2=drafts,
+    # 3=package preparation, 4=human-approved browser assistance.
+    AUTOMATION_LEVEL = min(4, max(0, int(os.getenv('AUTOMATION_LEVEL', '3'))))
+    PROFILE_PATH = os.getenv('PROFILE_PATH', os.path.join('data', 'candidate_profile.json'))
+    DRAFTS_DIR = os.getenv('DRAFTS_DIR', os.path.join('data', 'drafts'))
