@@ -32,7 +32,7 @@ React Native finance app; UI/navigation/flows; authentication-related screens; b
 
 ### CSHub — York University, August 2025–April 2026
 
-VP Events & Executive; technical/community events; executives, volunteers, attendees; support for a 24-hour event with more than 50 participants.
+VP Events & Executive; technical/community events; executives, volunteers, attendees; support for a 24-hour event with 50+ participants.
 
 ## Project boundaries
 
@@ -42,4 +42,13 @@ VP Events & Executive; technical/community events; executives, volunteers, atten
 
 ## Resume discrepancy detected
 
-The inspected one-page PDF `resumes/Mustafa_Alp_ARI_Resume_10.pdf` says **Expected May 2028** and describes the trading project as an automated bot using live data. JobApplier does not alter that source file. New drafts use May 2029 and the paper-only boundaries above. Mustafa must resolve the source-resume wording before using it.
+The inspected one-page PDF `resumes/Mustafa_Alp_ARI_Resume_10.pdf` renders cleanly, but it is reference-only until these facts are resolved:
+
+- Expected May 2028 conflicts with configured May 2029.
+- Allymon says “Present” instead of ending June 2026.
+- NBA Cap Tracker is absent.
+- S.E.N.S.E. says “Built” without clearly describing the team contribution.
+- The trading project lacks an explicit paper-only boundary and uses ambiguous automated/live-data wording.
+- FindMyProf, App Store Connect, and WebSockets are not in the supplied approved profile and require confirmation before reuse.
+
+JobApplier does not alter or upload the source file. New drafts use the currently configured graduation value and the approved facts above. Review and correct the source resume before using it in an application.

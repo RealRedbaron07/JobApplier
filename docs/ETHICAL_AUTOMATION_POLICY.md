@@ -10,7 +10,7 @@ JobApplier may automate organization and preparation. It may not automate the fi
 - **Level 1:** description parsing and fit scoring.
 - **Level 2:** truthful resume and answer drafts.
 - **Level 3:** complete application-package preparation.
-- **Level 4:** optional user-driven local field assistance, only where legal and permitted, stopping before final submission.
+- **Level 4:** a user-confirmed handoff that exposes the reviewed official link and a manual-action checklist. It never opens protected flows, fills fields, authenticates, or submits.
 - **Level 5:** blind auto-apply is not implemented.
 
 The default is Level 3. Environment variables cannot enable automatic submission.
@@ -21,7 +21,7 @@ JobApplier must not bypass CAPTCHAs, authentication walls, rate limits, platform
 
 ## Human approval boundary
 
-The user must review the target role, eligibility, safety flags, resume, short answers, cover letter, requested documents, and application form. The user performs the official portal's final submit action and then manually marks the application as applied.
+The user must review the target role, eligibility, safety flags, resume, short answers, cover letter, requested documents, and application form. A Level-4 handoff may organize the link and checklist after review; the user still opens and completes the portal, performs the final submit action, and then manually marks the application as applied.
 
 ## Safety flags
 
@@ -30,6 +30,8 @@ The app warns about sponsorship conflicts, graduation-date conflicts, unknown re
 ## Data and privacy
 
 Private operational data is local by default. Database, `.env`, private profile JSON, generated drafts, exports, logs, and browser profiles are gitignored. Secrets and job-portal passwords must never be committed. Exports are user-triggered.
+
+The supported dashboard uses deterministic local generation and does not send candidate or posting content to an external AI provider.
 
 ## Generated content
 

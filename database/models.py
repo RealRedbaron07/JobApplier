@@ -17,6 +17,8 @@ class Job(Base):
     description = Column(Text)
     requirements = Column(Text)
     salary = Column(String(100))
+    salary_unit = Column(String(30))
+    salary_currency = Column(String(10))
     job_type = Column(String(50))  # full-time, internship, etc.
     posted_date = Column(DateTime)
     discovered_date = Column(DateTime, default=lambda: datetime.now(timezone.utc))

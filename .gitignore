@@ -1,7 +1,8 @@
 # Environment variables (contains API keys, passwords)
 .env
 .env.local
-.env.*.local
+.env.*
+!.env.example
 
 # Database
 *.db

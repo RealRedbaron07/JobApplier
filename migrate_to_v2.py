@@ -93,7 +93,7 @@ def migrate():
     conn.close()
     
     print("\n✅ Database migration complete!")
-    print("You can now run: python3 auto_apply.py --dry-run")
+    print("You can now run the local dashboard: python3 run.py")
 
 if __name__ == "__main__":
     migrate()

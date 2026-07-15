@@ -1,19 +1,12 @@
-import PyPDF2
 import pdfplumber
 from docx import Document
 import re
 from typing import Dict, List
-from config import Config
 
 class ResumeParser:
     def __init__(self):
-        self.use_ai = Config.OPENAI_API_KEY and Config.OPENAI_API_KEY != ''
-        if self.use_ai:
-            import openai
-            openai.api_key = Config.OPENAI_API_KEY
-            print("Resume parser initialized with AI support")
-        else:
-            print("Resume parser initialized with rule-based extraction (no API key)")
+        self.use_ai = False
+        print("Resume parser initialized with local rule-based extraction")
     
     def extract_text_from_pdf(self, pdf_path: str) -> str:
         """Extract text from PDF using pdfplumber for better accuracy."""
@@ -44,44 +37,7 @@ class ResumeParser:
         else:
             raise ValueError("Unsupported file format. Use PDF or DOCX.")
         
-        if self.use_ai:
-            parsed_data = self._extract_with_ai(text)
-        else:
-            parsed_data = self._extract_with_rules(text)
-        
-        return parsed_data
-    
-    def _extract_with_ai(self, resume_text: str) -> Dict:
-        """Use OpenAI to extract structured data from resume."""
-        import openai
-        import json
-        
-        prompt = f"""
-        Extract the following information from this resume and return as JSON:
-        - skills (list of technical and soft skills)
-        - experience (list of job experiences with company, title, duration, responsibilities)
-        - education (list of degrees with institution, degree, field, year)
-        - certifications (list)
-        - contact_info (email, phone, linkedin)
-        
-        Resume:
-        {resume_text}
-        """
-        
-        try:
-            response = openai.chat.completions.create(
-                model="gpt-4",
-                messages=[
-                    {"role": "system", "content": "You are a resume parsing assistant. Return only valid JSON."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0
-            )
-            
-            return json.loads(response.choices[0].message.content)
-        except Exception as e:
-            print(f"Error parsing with AI: {e}")
-            return self._extract_with_rules(resume_text)
+        return self._extract_with_rules(text)
     
     def _extract_with_rules(self, text: str) -> Dict:
         """Rule-based extraction without AI."""

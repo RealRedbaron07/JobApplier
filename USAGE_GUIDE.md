@@ -1,140 +1,65 @@
 # JobApplier Usage Guide
 
-## Quick Start
+## Start the local app
 
 ```bash
-# Navigate to the project folder
-cd /Users/malpari/Desktop/JobApplier/JobApplier
-
-# Run the main workflow
 python3 run.py
 ```
 
----
+Open <http://127.0.0.1:5000>. JobApplier refuses a non-loopback host in the supported launchers because the dashboard contains private profile and CRM data and has no network authentication.
 
-## Commands Reference
+## Configure Mustafa's profile
 
-### Resume Management
-```bash
-# Set your default resume (do this once)
-python3 run.py --set-resume "/path/to/your/resume.pdf"
+Open **Settings & profile**. The built-in source of truth already contains the approved identity, education, eligibility, experience, projects, skills, targets, May 2029 graduation default, and automation level 3. Saving creates the gitignored `data/candidate_profile.json`; partial updates preserve fields not shown or changed.
 
-# Check which resume is currently set
-python3 run.py --show-resume
+Automation levels are enforced:
 
-# Use a different resume for just one run
-python3 run.py --resume "/path/to/other_resume.pdf"
-```
+- 0: manual tracking;
+- 1: parse and score;
+- 2: resume and answer drafts;
+- 3: package preparation;
+- 4: user-confirmed reviewed link-and-checklist handoff; no protected-board field automation is included;
+- 5: unavailable.
 
-### Running the App
-```bash
-# Full workflow: Search → Match → Generate Materials → Apply (with confirmation)
-python3 run.py
+## Add and rank a job
 
-# Launch the web dashboard instead
-python3 run.py --dashboard
-# Then open: http://localhost:5000
-```
+Use **Add job** to enter structured fields and paste the complete public posting. **Preview score** shows the 0–100 breakdown, matched and missing skills, strategy, and safety flags. **Add & score job** stores it in local SQLite.
 
----
+CSV import accepts owned data and preserves tracker fields such as status and dates. JSON restore accepts only a JobApplier backup. The app does not search or scrape LinkedIn, Workday, Indeed, Glassdoor, or another protected board.
 
-## How It Works
+## Prepare an application
 
-### 1. LinkedIn Auto-Login
-- The app uses your Chrome profile with saved passwords
-- First time: A browser will open, you may need to log in manually once
-- After that: It auto-logs in using your saved credentials
-- If issues occur, set `USE_CHROME_PROFILE=false` in `.env`
+Open a job or use **Resume tailor**:
 
-### 2. Workday/Company Portals
-When applying to Workday sites, the app will:
-1. Open the job page
-2. Click "Apply"
-3. **If login is required**: Pause and prompt you to log in/create account
-4. **You handle the login** in the browser
-5. Press ENTER to continue
-6. App fills out the form automatically
-7. **Final check**: You review the form, then confirm submission
+1. Generate resume suggestions at level 2 or higher.
+2. Review supported skills, gaps, factual bullets, selected project, and claim-safety report.
+3. Generate editable cover-letter and short-answer drafts.
+4. At level 3, prepare the combined package, edit and save answers, and review the checklist and claim-safety result.
+5. Compile the versioned `.tex` file yourself and visually inspect the one-page PDF.
+6. At optional level 4, create a reviewed handoff that exposes the official link and a manual-action checklist.
+7. Open, complete, and submit the official portal application yourself.
+8. Return to the tracker. Marking `applied` requires an explicit confirmation and creates one local application record plus a follow-up reminder.
 
-### 3. Final Confirmation
-Before any application is submitted:
-```
-📋 FINAL CHECK - Review the application
------------------------------------------
-   Please review the form in the browser.
-   Make any final edits if needed.
------------------------------------------
->>> Submit this application? [y/n]: _
-```
+The supplied base PDF is reference-only because its factual wording does not fully match the configured profile. Do not upload it without resolving the warnings in `docs/USER_PROFILE.md`.
 
----
+## Contacts and follow-ups
 
-## Dashboard Usage
+Contacts store recruiter context, relationship strength, last contact, and follow-up state. Message templates are editable drafts only. Follow-ups can target a job or contact, use business-day defaults, and be marked completed. Nothing is emailed or posted.
 
-Launch: `python3 run.py --dashboard`
+## Export and restore
 
-### Features:
-- **Search for Jobs**: Click the button, wait for progress bar
-- **Review Matches**: See all jobs sorted by match score
-- **Select & Apply**: Check the jobs you want, click "Apply to Selected"
-- **Track Status**: See which applications succeeded
+- **Export CSV** creates a spreadsheet-friendly tracker.
+- **Backup JSON** includes jobs, profile, contacts, follow-ups, draft records and safe `.tex` contents, and application events.
+- **Summary** exports current analytics as JSON.
+- **Restore JSON backup** restores local data and keeps existing jobs with the same application URL.
 
----
+Private exports can contain sensitive notes and must be stored accordingly.
 
-## Configuration
-
-Edit `.env` file (copy from `.env.example` if needed):
+## Test
 
 ```bash
-# Key settings:
-USE_CHROME_PROFILE=true          # Use saved Chrome passwords
-WAIT_FOR_LOGIN=true              # Wait for manual login if needed
-MIN_MATCH_SCORE=60               # Only show jobs scoring 60+
+python3 -m pytest -q
+python3 -m py_compile config.py database/models.py job_os/profile.py job_os/parser.py job_os/scoring.py job_os/tailoring.py dashboard/app.py
 ```
 
----
-
-## Workflow Summary
-
-```
-1. Set Resume    →  python3 run.py --set-resume ~/resume.pdf
-2. Run Search    →  python3 run.py
-3. Review Jobs   →  See list, type 'yes' or 'select 1,3,5'
-4. Login Prompts →  Handle in browser, press ENTER to continue
-5. Final Review  →  Check each form, type 'y' to submit
-6. Done!         →  Check dashboard for results
-```
-
----
-
-## Tips
-
-- **First run**: Keep browser visible to handle any login prompts
-- **LinkedIn**: Log in once, credentials are saved in Chrome profile
-- **Workday**: Each company may need separate account - handle once, then it's saved
-- **Materials**: Cover letters and tailored resumes are saved in `cover_letters/` and `tailored_resumes/`
-
----
-
-## File Locations
-
-```
-/Users/malpari/Desktop/JobApplier/JobApplier/
-├── run.py                    # Main entry point
-├── user_settings.json        # Your saved resume path
-├── cover_letters/            # Generated cover letters
-├── tailored_resumes/         # Job-specific resumes
-├── job_applications.db       # Database of all jobs
-└── chrome_profile/           # Saved browser session
-```
-
----
-
-## Troubleshooting
-
-| Problem | Solution |
-|---------|----------|
-| LinkedIn won't auto-login | Close Chrome completely, then run again |
-| Form fields not filling | Review manually, the app will pause for you |
-| "No resume set" error | Run `python3 run.py --set-resume /path/to/resume.pdf` |
-| Dashboard won't start | Check if port 5000 is free, or change in `.env` |
+See [README.md](README.md) and [docs/ETHICAL_AUTOMATION_POLICY.md](docs/ETHICAL_AUTOMATION_POLICY.md).

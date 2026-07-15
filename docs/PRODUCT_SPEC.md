@@ -6,7 +6,7 @@ JobApplier reduces repetitive job-search work while Mustafa retains control of e
 
 ## Product flow
 
-1. **Ingest:** manual form, pasted text, owned CSV, or a terms-compliant official API.
+1. **Ingest:** manual form, pasted text, owned CSV, JobApplier JSON backup, or a terms-compliant official API.
 2. **Parse and score:** extract requirements and compute an explainable 0–100 fit score.
 3. **Decide:** show strengths, missing skills, safety flags, resume profile, project emphasis, and strategy.
 4. **Prepare:** generate truthful resume and answer drafts plus a checklist.
@@ -33,12 +33,12 @@ Categories are `strong_apply` (82+), `apply` (68–81), `maybe` (52–67), `low_
 
 ## Data model
 
-SQLite stores jobs, application records, drafts, contacts, follow-ups, saved links, and the user profile. Existing databases are upgraded with additive local SQLite columns. Generated drafts and private profile overrides live under gitignored `data/` paths.
+SQLite stores jobs, application events, drafts, contacts, follow-ups, saved links, and the user profile. Existing databases are upgraded with additive local SQLite columns. Generated drafts and private profile overrides live under gitignored `data/` paths. User-triggered JSON backup/restore covers jobs, profile, contacts, reminders, draft records, safe `.tex` draft content, and application events.
 
 ## Screens
 
 - Dashboard: metrics, priority queue, warnings and next actions.
-- Add Job: paste/preview/add and CSV import.
+- Add Job: paste/preview/add, CSV import, and JSON restore.
 - Job Detail: score, explanation, gaps, safety, checklist, notes, and official link.
 - Resume Tailor: profile selection, suggestions, LaTeX draft, answers, package.
 - Application Tracker: filters, statuses, deadlines, next actions, exports.
@@ -56,10 +56,10 @@ SQLite stores jobs, application records, drafts, contacts, follow-ups, saved lin
 - inferred or fabricated candidate facts;
 - claims that a score guarantees an interview.
 
-## Future, only if safe
+## Safe extensions
 
 - bookmarklet/extension for user-selected public text;
 - official employer/ATS APIs with documented permission;
 - local PDF compilation and render preview;
 - encrypted local backups;
-- user-approved Level 4 field-filling helpers that stop before final submission.
+- optional enhancements to the existing Level-4 reviewed link-and-checklist handoff; protected-board field automation remains out of scope.

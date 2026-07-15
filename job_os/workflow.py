@@ -29,6 +29,8 @@ def can_transition(current: str | None, target: str) -> bool:
 
 
 def business_days_after(start: datetime, days: int) -> datetime:
+    if days < 0:
+        raise ValueError("Business-day offset cannot be negative.")
     result = start
     remaining = days
     while remaining:

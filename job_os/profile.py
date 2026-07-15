@@ -91,7 +91,7 @@ DEFAULT_PROFILE: Dict[str, Any] = {
             "dates": "August 2025 - April 2026",
             "facts": [
                 "Supported technical and community events with executives, volunteers, and attendees.",
-                "Helped support a 24-hour event with more than 50 participants.",
+                "Helped support a 24-hour event with 50+ participants.",
             ],
         },
     ],
@@ -101,7 +101,7 @@ DEFAULT_PROFILE: Dict[str, Any] = {
             "facts": [
                 "Python algorithmic trading research platform with paper-only execution.",
                 "Includes setup-based signal filtering, risk gates, PnL-after-fees reporting, structured logs, dashboards, dataset export, and ML-readiness reports.",
-                "Has more than 500 pytest tests.",
+                "Has 500+ pytest tests.",
             ],
             "prohibited_claims": ["live trading", "profitable", "broker orders", "real-money deployment"],
         },
@@ -132,18 +132,36 @@ def load_profile(path: str | None = None) -> Dict[str, Any]:
     profile = copy.deepcopy(DEFAULT_PROFILE)
     profile_path = Path(path or Config.PROFILE_PATH)
     if profile_path.exists():
-        with profile_path.open(encoding="utf-8") as handle:
-            override = json.load(handle)
-        profile.update(override)
+        try:
+            with profile_path.open(encoding="utf-8") as handle:
+                override = json.load(handle)
+            if isinstance(override, dict):
+                profile.update(override)
+        except (OSError, json.JSONDecodeError):
+            # A malformed private override must not replace the built-in source of truth.
+            pass
     return profile
 
 
 def save_profile(data: Dict[str, Any], path: str | None = None) -> Dict[str, Any]:
-    """Save profile settings locally; the target directory is gitignored."""
-    profile = copy.deepcopy(DEFAULT_PROFILE)
-    profile.update(data)
-    profile["automation_level"] = min(4, max(0, int(profile.get("automation_level", 3))))
+    """Merge and save profile settings locally; omitted private fields are preserved."""
+    if not isinstance(data, dict):
+        raise ValueError("Profile update must be a JSON object.")
     profile_path = Path(path or Config.PROFILE_PATH)
+    profile = load_profile(str(profile_path))
+    profile.update(data)
+    try:
+        profile["automation_level"] = min(4, max(0, int(profile.get("automation_level", 3))))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Automation level must be an integer from 0 through 4.") from exc
+    if not isinstance(profile.get("skills"), list) or not all(isinstance(item, str) for item in profile["skills"]):
+        raise ValueError("Skills must be a list of strings.")
+    if not isinstance(profile.get("target_roles"), list) or not all(isinstance(item, str) for item in profile["target_roles"]):
+        raise ValueError("Target roles must be a list of strings.")
+    if not isinstance(profile.get("target_locations"), list) or not all(isinstance(item, str) for item in profile["target_locations"]):
+        raise ValueError("Target locations must be a list of strings.")
+    if data.get("graduation") and profile.get("education"):
+        profile["education"][0]["expected_graduation"] = str(data["graduation"])
     profile_path.parent.mkdir(parents=True, exist_ok=True)
     temporary = profile_path.with_suffix(profile_path.suffix + ".tmp")
     with temporary.open("w", encoding="utf-8") as handle:

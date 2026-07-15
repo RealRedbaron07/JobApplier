@@ -15,3 +15,22 @@ def test_parser_extracts_structured_fields():
     assert parsed["salary_min"] == 24
     assert parsed["coop_eligible"] is True
     assert "transcript" in parsed["required_documents"]
+
+
+def test_multiline_sections_boolean_and_single_salary():
+    parsed = parse_job_description(
+        """Fall 2026 co-op.
+Required:
+Python
+SQL
+AWS
+Preferred:
+Power BI
+Pay $17.75 per hour.""",
+        {"coop_eligible": "false"},
+    )
+    assert parsed["start_date"] == "Fall 2026"
+    assert parsed["required_skills"] == ["AWS", "Python", "SQL"]
+    assert parsed["preferred_skills"] == ["Power BI"]
+    assert parsed["coop_eligible"] is False
+    assert parsed["salary_min"] == parsed["salary_max"] == 17.75

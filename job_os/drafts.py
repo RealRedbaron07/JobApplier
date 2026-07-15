@@ -12,17 +12,26 @@ def generate_application_answers(job: Dict[str, Any], profile: Dict[str, Any] | 
     company = job.get("company") or "your company"
     role = job.get("title") or "this role"
     project = job.get("suggested_project") or "JobApplier"
+    education = (profile.get("education") or [{}])[0]
+    institution = education.get("institution") or "my university"
+    degree = education.get("degree") or "Computer Science"
+    minor = education.get("minor")
+    study = f"{degree} student at {institution}" + (f" with a {minor} minor" if minor else "")
+    known_skills = profile.get("skills", [])
+    highlighted = [skill for skill in ("Next.js", "TypeScript", "Express.js", "MySQL", "React Native", "Git") if skill in known_skills]
+    tools = ", ".join(highlighted)
+    name = profile.get("name") or "Mustafa Alp ARI"
     return {
-        "cover_letter": f"Dear Hiring Team,\n\nI'm applying for the {role} opportunity at {company}. I'm a Computer Science honours student at York University with an Economics minor, and my recent Riipen work has included web development, debugging, QA, and fintech application workflows. I have worked with tools including Next.js, TypeScript, Express.js, MySQL, React Native, Git branches, pull requests, and documented testing.\n\nThe role interests me because it would let me contribute practical technical work while continuing to learn from an experienced team. I would bring a careful approach to implementation, testing, and clear documentation. Before using this draft, I would add one verified sentence about {company}'s product, team, or mission from an official source.\n\nThank you for considering my application. I would welcome the opportunity to discuss how my experience and current studies could support the team.\n\nSincerely,\nMustafa Alp ARI",
+        "cover_letter": f"Dear Hiring Team,\n\nI'm applying for the {role} opportunity at {company}. I'm a {study}, and my recent Riipen work has included web development, debugging, QA, and fintech application workflows. I have worked with tools including {tools}.\n\nThe role interests me because it would let me contribute practical technical work while continuing to learn from an experienced team. I would bring a careful approach to implementation, testing, and clear documentation. Before using this draft, I will add one verified sentence about {company}'s product, team, or mission from an official source.\n\nThank you for considering my application. I would welcome the opportunity to discuss how my experience and current studies could support the team.\n\nSincerely,\n{name}",
         "why_company": f"I'm interested in {company} because this {role} opportunity connects practical technology work with a real team and product. Before using this answer, I would add one specific fact from {company}'s official website or the posting.",
         "why_role": f"The {role} position fits the kind of work I want to deepen: building, testing, debugging, and improving software with a team. My recent Riipen projects gave me hands-on experience with development workflows and documenting issues clearly.",
-        "tell_us_about_yourself": "I'm a Computer Science honours student at York University with an Economics minor. Through Riipen projects, I've worked on web, fintech, and mobile applications using tools including Next.js, TypeScript, Express.js, MySQL, and React Native. I also enjoy building practical automation and accessibility projects, and I'm looking for an internship where I can contribute while continuing to learn.",
+        "tell_us_about_yourself": f"I'm a {study}. Through Riipen projects, I've worked on web, fintech, and mobile applications using tools including {tools}. I also enjoy building practical automation and accessibility projects, and I'm looking for an internship where I can contribute while continuing to learn.",
         "salary_expectation": "I'm open to the employer's established range for this internship/co-op and would consider the full scope, term, location, and learning opportunity. I would be happy to discuss the budgeted range.",
-        "availability": profile["availability"],
-        "work_authorization": "I am a Canadian Permanent Resident, legally authorized to work in Canada, and do not require sponsorship in Canada.",
-        "relocation": profile["relocation"],
+        "availability": profile.get("availability", "Please confirm availability before using this draft."),
+        "work_authorization": str(profile.get("work_authorization") or "Please confirm work authorization before using this draft."),
+        "relocation": profile.get("relocation", "Please confirm relocation preferences before using this draft."),
         "new_opportunities": "I'm looking for an opportunity to apply my coursework and recent project experience in a professional team, take on meaningful technical work, and grow through feedback and mentorship.",
-        "star_example": "Situation: During a recent software project, I found behavior that did not match the intended workflow. Task: I needed to isolate the issue and make it easy for the team to act on. Action: I reproduced it locally, compared expected and actual results, documented the environment and steps, and used the team's Git and review workflow for the fix or report. Result: The team had a clearer, reproducible path to validate the issue. Customize this draft with the exact approved project details before use.",
+        "star_example": "Situation: On the Allymon fintech project, user, loan, and investor-qualification workflows needed QA validation. Task: I needed to compare the intended behavior with what the local application actually did. Action: I set up and debugged the application, exercised the relevant database, authentication, and admin flows, and documented expected versus actual behavior. Result: I produced concrete QA findings for team review. Confirm the exact interview question and keep only details you personally completed before using this draft.",
         "project_bridge": f"For this application, emphasize {project} only using the factual bullets in the tailoring plan.",
     }
 

@@ -8,25 +8,20 @@ class Config:
     # constants intentionally cannot be enabled through environment variables.
     AUTO_MODE = False
 
-    # OPTIONAL: OpenAI API Key (system works without it)
-    OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
-
-    # OPTIONAL: LinkedIn credentials (only needed for Easy Apply feature)
-    # If not provided, will still scrape jobs and apply via company websites
-    LINKEDIN_EMAIL = os.getenv('LINKEDIN_EMAIL', '')
-    LINKEDIN_PASSWORD = os.getenv('LINKEDIN_PASSWORD', '')
-    
-    # Not needed - other platforms work without login
-    INDEED_EMAIL = os.getenv('INDEED_EMAIL', '')
-    GLASSDOOR_EMAIL = os.getenv('GLASSDOOR_EMAIL', '')
-    GLASSDOOR_PASSWORD = os.getenv('GLASSDOOR_PASSWORD', '')
+    # Protected-board credentials and automation are deliberately unsupported.
+    PROTECTED_BOARD_AUTOMATION_ENABLED = False
+    LINKEDIN_EMAIL = ''
+    LINKEDIN_PASSWORD = ''
+    INDEED_EMAIL = ''
+    GLASSDOOR_EMAIL = ''
+    GLASSDOOR_PASSWORD = ''
     
     DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///job_applications.db')
+    # Retained for legacy config compatibility; no built-in scraper consumes it.
     SCRAPE_INTERVAL_MINUTES = int(os.getenv('SCRAPE_INTERVAL_MINUTES', 30))
     MIN_MATCH_SCORE = int(os.getenv('MIN_MATCH_SCORE', 60))  # Lower for internships
     
-    # AUTO-APPLY SETTINGS
-    # If True, automatically applies to jobs above MIN_MATCH_SCORE without review
+    # Hard-disabled legacy switch. Environment variables cannot enable it.
     AUTO_APPLY_ENABLED = False
 
     # Only apply to internship roles
@@ -35,12 +30,7 @@ class Config:
     # Hard safety boundary: browser assistance must stop before final submit.
     STOP_BEFORE_SUBMIT = True
 
-    # Chrome profile login may assist a local user but never changes the submit boundary.
-    _wait_for_login = os.getenv('WAIT_FOR_LOGIN', '').lower()
-    if _wait_for_login == '':
-        WAIT_FOR_LOGIN = True
-    else:
-        WAIT_FOR_LOGIN = _wait_for_login == 'true'
+    WAIT_FOR_LOGIN = False
 
     # Prefer jobs posted/discovered within this many hours ("new" postings)
     NEW_JOB_HOURS = int(os.getenv('NEW_JOB_HOURS', '72'))
@@ -48,7 +38,7 @@ class Config:
     # Default resume path (used when profile DB path is missing or stale)
     DEFAULT_RESUME_PATH = os.getenv(
         'DEFAULT_RESUME_PATH',
-        '/Users/malpari/Library/Mobile Documents/com~apple~CloudDocs/Downloads/Mustafa_Alp_ARI_Resume_10.pdf'
+        ''
     )
     LOCAL_RESUME_PATH = os.getenv(
         'LOCAL_RESUME_PATH',
@@ -86,7 +76,7 @@ class Config:
     JOB_TYPES = ["internship", "intern", "entry-level", "junior", "new grad", "student", "undergraduate"]
 
     # Platforms
-    ENABLED_PLATFORMS = ["linkedin", "workday"]
+    ENABLED_PLATFORMS = []
 
     # Resume settings file path
     USER_SETTINGS_FILE = "user_settings.json"
@@ -94,7 +84,7 @@ class Config:
     EXPERIENCE_LEVELS = ['Internship', 'Entry Level', 'Student']
 
     # Safe automation levels: 0=tracking, 1=parse/score, 2=drafts,
-    # 3=package preparation, 4=human-approved browser assistance.
+    # 3=package preparation, 4=user-confirmed reviewed link/checklist handoff.
     AUTOMATION_LEVEL = min(4, max(0, int(os.getenv('AUTOMATION_LEVEL', '3'))))
     PROFILE_PATH = os.getenv('PROFILE_PATH', os.path.join('data', 'candidate_profile.json'))
     DRAFTS_DIR = os.getenv('DRAFTS_DIR', os.path.join('data', 'drafts'))

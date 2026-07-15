@@ -15,6 +15,26 @@ from logger import get_logger
 
 logger = get_logger("utils")
 
+# Internship detection keywords (used for filtering)
+INTERNSHIP_KEYWORDS = [
+    'intern', 'internship', 'co-op', 'coop', 'student', 'summer',
+    'undergraduate', 'undergrad'
+]
+
+def is_internship_job(job) -> bool:
+    """
+    Return True if a job looks like an internship based on title/description.
+    Accepts either a Job model or a dict with title/description.
+    """
+    try:
+        title = getattr(job, 'title', None) or job.get('title', '')
+        description = getattr(job, 'description', None) or job.get('description', '')
+    except Exception:
+        return False
+
+    text = f"{title} {description}".lower()
+    return any(keyword in text for keyword in INTERNSHIP_KEYWORDS)
+
 
 def parse_user_profile(user_profile_db) -> Dict:
     """
@@ -51,12 +71,66 @@ def create_job_data(job) -> Dict:
 
 
 def generate_job_materials(job, user_profile, resume_to_use, cover_letter_gen, resume_tailor, session=None):
-    # ... (rest of the function remains the same)
+    """
+    Generate cover letter and tailored resume for a job, if missing.
+    Updates the Job record in-place and optionally commits the session.
+    """
+    job_data = {
+        'title': job.title,
+        'company': job.company,
+        'location': job.location or '',
+        'description': job.description or '',
+        'requirements': job.requirements or ''
+    }
+
+    # Track original resume used for this job
+    if resume_to_use and not job.original_resume_path:
+        job.original_resume_path = resume_to_use
+
+    # Generate cover letter if missing or file missing
+    try:
+        cover_letter_missing = not job.cover_letter_path or not os.path.exists(job.cover_letter_path)
+        if cover_letter_missing:
+            cover_letter_text, cover_letter_path = cover_letter_gen.generate_cover_letter(
+                job_data, user_profile
+            )
+            job.cover_letter = cover_letter_text
+            job.cover_letter_path = cover_letter_path
+    except Exception as e:
+        logger.warning(f"Cover letter generation failed for job {job.id}: {e}")
+
+    # Generate tailored resume if missing or file missing
+    try:
+        resume_missing = not job.tailored_resume_path or not os.path.exists(job.tailored_resume_path)
+        if resume_missing:
+            if not resume_to_use or not os.path.exists(resume_to_use):
+                raise FileNotFoundError(f"Resume not found: {resume_to_use}")
+            tailored_resume_path = resume_tailor.tailor_resume(
+                resume_to_use,
+                job_data,
+                user_profile
+            )
+            job.tailored_resume_path = tailored_resume_path
+    except Exception as e:
+        logger.warning(f"Resume tailoring failed for job {job.id}: {e}")
+
     if session:
         session.commit()
 
+    return job
 
-def apply_to_job(job, user_profile, resume_path, session):
+
+def get_resume_path(user_profile_db, fallback_path: Optional[str] = None) -> Optional[str]:
+    """Get valid resume path from centralized resolver or optional fallback."""
+    path = resolve_resume_path(user_profile_db)
+    if path:
+        return path
+    if fallback_path and os.path.exists(fallback_path):
+        return fallback_path
+    return None
+
+
+def apply_to_job(job, user_profile, resume_path, session, linkedin_scraper=None, workday_scraper=None):
     """
     Legacy compatibility wrapper that records a prepared package only.
 
@@ -344,32 +418,95 @@ def sanitize_filename(name: str, max_length: int = 50) -> str:
     return safe or 'unnamed'
 
 
-def get_resume_path(user_profile_db, fallback_path: Optional[str] = None) -> Optional[str]:
+def resolve_resume_path(user_profile_db=None) -> Optional[str]:
     """
-    Get valid resume path from user profile or fallback.
-    
-    Args:
-        user_profile_db: UserProfile database object
-        fallback_path: Optional fallback path to check
-    
-    Returns:
-        Valid resume path or None
+    Resolve an explicitly configured resume path without copying or uploading it.
+
+    The profile selection wins over legacy local/default paths. The supported
+    dashboard workflow generates new drafts and never sends this file anywhere.
     """
-    # Try user profile path first
+    from config import Config
+
+    candidates = []
     if user_profile_db and user_profile_db.resume_path:
-        if os.path.exists(user_profile_db.resume_path):
-            logger.debug(f"Using resume from profile: {user_profile_db.resume_path}")
-            return user_profile_db.resume_path
-        else:
-            logger.warning(f"Resume path in profile not found: {user_profile_db.resume_path}")
-    
-    # Try fallback
-    if fallback_path and os.path.exists(fallback_path):
-        logger.debug(f"Using fallback resume: {fallback_path}")
-        return fallback_path
-    
-    logger.error("No valid resume found")
-    return None
+        candidates.append(user_profile_db.resume_path)
+    if Config.DEFAULT_RESUME_PATH:
+        candidates.append(Config.DEFAULT_RESUME_PATH)
+    if Config.LOCAL_RESUME_PATH:
+        candidates.append(Config.LOCAL_RESUME_PATH)
+
+    source = None
+    for path in candidates:
+        if path and os.path.exists(path):
+            source = os.path.abspath(path)
+            break
+
+    if not source:
+        logger.error("No valid resume found in local copy, profile, or DEFAULT_RESUME_PATH")
+        return None
+
+    return source
+
+
+def get_unapplied_new_jobs(session, scrape_started_at=None, limit: int = 10):
+    """
+    Return unapplied, high-match jobs that look like new postings.
+    Prefers jobs discovered in the current scrape session, then recent postings.
+    """
+    from config import Config
+    from database.models import Job
+    from datetime import timedelta, timezone
+    from sqlalchemy import or_, and_
+
+    cutoff_date = datetime.now(timezone.utc) - timedelta(days=Config.MAX_JOB_AGE_DAYS)
+    new_cutoff = datetime.now(timezone.utc) - timedelta(hours=Config.NEW_JOB_HOURS)
+
+    jobs = session.query(Job).filter_by(applied=False).filter(
+        Job.match_score >= Config.MIN_MATCH_SCORE
+    ).filter(
+        or_(
+            and_(Job.posted_date.isnot(None), Job.posted_date >= cutoff_date),
+            and_(Job.posted_date.is_(None), Job.discovered_date >= cutoff_date)
+        )
+    ).all()
+
+    seen = {}
+    unique_jobs = []
+    for job in jobs:
+        if Config.REQUIRE_INTERNSHIP and not is_internship_job(job):
+            continue
+        key = (job.title.strip().lower(), job.company.strip().lower())
+        if key not in seen:
+            seen[key] = job
+            unique_jobs.append(job)
+
+    def _recency_ts(job):
+        dt = job.posted_date or job.discovered_date
+        if not dt:
+            return 0
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.timestamp()
+
+    def _is_new(job):
+        if scrape_started_at:
+            discovered = job.discovered_date
+            if discovered:
+                if discovered.tzinfo is None:
+                    discovered = discovered.replace(tzinfo=timezone.utc)
+                if discovered >= scrape_started_at:
+                    return True
+        posted = job.posted_date or job.discovered_date
+        if posted:
+            if posted.tzinfo is None:
+                posted = posted.replace(tzinfo=timezone.utc)
+            return posted >= new_cutoff
+        return False
+
+    new_jobs = [j for j in unique_jobs if _is_new(j)]
+    pool = new_jobs if new_jobs else unique_jobs
+    pool.sort(key=lambda j: (_recency_ts(j), j.match_score or 0), reverse=True)
+    return pool[:limit]
 
 
 class RateLimiter:

@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
 
 from config import Config
+from .parser import extract_skills
 from .profile import load_profile
 from .scoring import choose_project, choose_resume_profile
 
@@ -30,6 +32,11 @@ PROHIBITED_PATTERNS = {
     "automatic_submission": r"\b(blind auto[- ]apply|submitted applications automatically)\b",
 }
 
+UNSAFE_LATEX_PATTERN = re.compile(
+    r"\\(?:write18|write|immediate|input|include|openin|openout|read|catcode|csname|special|directlua)\b",
+    re.I,
+)
+
 
 def _latex_escape(value: str) -> str:
     substitutions = {
@@ -46,6 +53,37 @@ def validate_draft(content: str, profile: Dict[str, Any] | None = None) -> Dict[
     for code, pattern in PROHIBITED_PATTERNS.items():
         if re.search(pattern, content, re.I):
             violations.append({"code": code, "message": f"Unsupported or prohibited claim detected: {code}."})
+
+    known_skills = {skill.lower() for skill in profile.get("skills", [])}
+    for skill in extract_skills(content):
+        claim_context = re.compile(
+            rf"(?:expert in|proficient in|skilled in|knowledge of|experience (?:with|using)|worked (?:with|using)|tools including|technical skills)[^.]{{0,220}}\b{re.escape(skill)}\b",
+            re.I,
+        )
+        if skill.lower() not in known_skills and claim_context.search(content):
+            violations.append({"code": "unsupported_skill", "message": f"Unsupported skill claim detected: {skill}."})
+
+    # Catch arbitrary technology names that are not yet part of the parser's
+    # finite catalog when the draft makes an explicit skill-ownership claim.
+    for match in re.finditer(
+        r"\b(?:expert in|proficient in|skilled in|tools including|technical skills(?: include|:))\s+([^;\n]{1,220})",
+        content,
+        re.I,
+    ):
+        fragment = re.split(r"\.(?=\s+[A-Z])|\\n", match.group(1), maxsplit=1)[0]
+        for raw_claim in re.split(r",|/|\band\b", fragment, flags=re.I):
+            claimed = re.sub(r"^(?:the|a|an)\s+", "", raw_claim.strip(" .:-()"), flags=re.I)
+            if not claimed or len(claimed.split()) > 4 or claimed.lower() in known_skills:
+                continue
+            violations.append({"code": "unsupported_skill", "message": f"Unsupported explicit skill claim detected: {claimed}."})
+
+    if re.search(r"\b(?:gpa|cgpa|grade point average)\b", content, re.I) and not re.search(r"\b(?:gpa|cgpa|grade point average)\b", json.dumps(profile), re.I):
+        violations.append({"code": "unsupported_gpa", "message": "A GPA claim is not present in the configured factual profile."})
+
+    configured_graduation = re.search(r"20\d{2}", str(profile.get("graduation", "")))
+    for claimed in re.findall(r"(?:expected|graduat(?:e|ing|ion))[^\d]{0,25}(20\d{2})", content, re.I):
+        if configured_graduation and claimed != configured_graduation.group():
+            violations.append({"code": "graduation_mismatch", "message": f"Draft graduation year {claimed} does not match configured {configured_graduation.group()}."})
 
     # Explicit experience-year claims are unsafe unless present in the factual profile.
     known_text = json.dumps(profile).lower()
@@ -84,7 +122,7 @@ def create_tailoring_plan(job: Dict[str, Any], score: Dict[str, Any], profile: D
         "project_to_emphasize": {"name": project["name"], "bullets": project.get("facts", [])},
         "experience_suggestions": experience_suggestions[:3],
         "one_page_check": {"estimated_lines": 46 + len(skills_order), "limit": 58, "passes_estimate": 46 + len(skills_order) <= 58},
-        "base_resume_warning": "The inspected base PDF says Expected May 2028; the configured truthful default is May 2029. Verify before exporting a final resume.",
+        "base_resume_warning": f"The inspected base PDF says Expected May 2028; the currently configured value is {profile.get('graduation', 'not set')}. Verify before exporting a final resume.",
         "review_status": "draft",
     }
     latex = generate_latex_draft(job, plan, profile)
@@ -101,6 +139,11 @@ def generate_latex_draft(job: Dict[str, Any], plan: Dict[str, Any], profile: Dic
         experiences.append(f"\\textbf{{{_latex_escape(suggestion['experience'])}}}\n\\begin{{itemize}}[leftmargin=*,nosep]\n{bullets}\n\\end{{itemize}}")
     project = plan["project_to_emphasize"]
     project_bullets = "\n".join(f"\\item {_latex_escape(bullet)}" for bullet in project["bullets"][:2])
+    education = (profile.get("education") or [{}])[0]
+    institution = education.get("institution") or "Education institution not configured"
+    degree = education.get("degree") or "Degree not configured"
+    minor = education.get("minor")
+    education_label = f"{degree}, Minor in {minor}" if minor else degree
     return f"""% DRAFT - HUMAN REVIEW REQUIRED. Generated only from the configured factual profile.
 \\documentclass[10pt,letterpaper]{{article}}
 \\usepackage[margin=0.58in]{{geometry}}
@@ -112,7 +155,7 @@ def generate_latex_draft(job: Dict[str, Any], plan: Dict[str, Any], profile: Dic
 {_latex_escape(profile['phone'])} $|$ {_latex_escape(profile['email'])} $|$ {_latex_escape(profile['linkedin'])} $|$ {_latex_escape(profile['github'])}
 \\end{{center}}
 \\section*{{Education}}
-\\textbf{{York University}} - BSc Honours Computer Science, Minor in Economics \\hfill Expected {_latex_escape(profile['graduation'])}
+\\textbf{{{_latex_escape(institution)}}} - {_latex_escape(education_label)} \\hfill Expected {_latex_escape(str(profile.get('graduation') or education.get('expected_graduation') or 'Confirm date'))}
 \\section*{{Relevant Experience}}
 {chr(10).join(experiences)}
 \\section*{{Selected Project}}
@@ -122,15 +165,18 @@ def generate_latex_draft(job: Dict[str, Any], plan: Dict[str, Any], profile: Dic
 \\end{{itemize}}
 \\section*{{Technical Skills}}
 {_latex_escape(', '.join(plan['skills_to_move_higher']))}
-\\vfill
-\\footnotesize Draft targeted to {_latex_escape(job.get('title', 'the role'))} at {_latex_escape(job.get('company', 'the company'))}. Review every line before use.
 \\end{{document}}
 """
 
 
 def save_latex_draft(job_id: int, latex: str, directory: str | None = None) -> str:
+    if not isinstance(latex, str) or len(latex.encode("utf-8")) > 1_000_000:
+        raise ValueError("LaTeX draft must be UTF-8 text no larger than 1 MB.")
+    if UNSAFE_LATEX_PATTERN.search(latex):
+        raise ValueError("LaTeX draft contains a file, shell, or interpreter command that JobApplier will not save.")
     target_dir = Path(directory or Config.DRAFTS_DIR)
     target_dir.mkdir(parents=True, exist_ok=True)
-    path = target_dir / f"job_{job_id}_resume_draft.tex"
+    version = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    path = target_dir / f"job_{job_id}_resume_draft_{version}.tex"
     path.write_text(latex, encoding="utf-8")
     return str(path)
