@@ -28,7 +28,10 @@ tr.row-irregular td{background:#fff7f6}
 .spark i{flex:1;background:var(--green-2);border-radius:3px 3px 0 0;min-height:3px;position:relative}
 .spark i.has-deals{background:var(--green)}
 .spark i.has-errors{background:var(--red)}
-.target-card{border:1px solid var(--line);border-radius:11px;padding:13px;display:grid;gap:6px}
+.target-card{border:1px solid var(--line);border-radius:11px;padding:13px;display:grid;gap:6px;min-width:0}
+.stack{min-width:0}
+.panel{min-width:0}
+main{min-width:0;overflow-x:hidden}
 .target-card.disabled{opacity:.55}
 .target-card header{display:flex;justify-content:space-between;align-items:center;gap:10px}
 .target-card header strong{font-size:13px}
