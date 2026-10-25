@@ -69,11 +69,39 @@ GET /api/export?format=summary
 POST /api/import/json
 ```
 
+## Pokémon card sniper (eBay + Facebook Marketplace)
+
+`snipe.py` is a separate tool in this repo (package `cardsnipe/`) that watches for newly listed Pokémon cards under your price caps, alerts you instantly, snipes eBay auctions in the last seconds, and can send the first message to Facebook Marketplace sellers.
+
+```bash
+make login        # one time: sign in to eBay + Facebook in the sniper's Chrome profile
+make list         # watchlist lives in data/cardsnipe_watchlist.json (edit by hand or use add/rm)
+make add NAME="Moonbreon" MAX=550 MIN=250 BID=600 KW="umbreon vmax 'alt art|215/203'" REGRADE=1
+make scan         # one pass, dry-run: alerts fire, bids/messages are simulated with screenshots
+make snipe        # continuous dry-run every SNIPE_POLL_SECONDS
+make live         # real snipes (up to max_bid) and real Facebook messages
+make dash         # dashboard for both tools: http://127.0.0.1:5000 (jobs) and /snipe (cards)
+make deals | make bids | make cancel ID=3 | make test
+```
+
+`make help` lists everything; `python3 snipe.py` (bare = watch) with aliases `s`/`w`/`a`/`rm`/`l`/`d`/`b` also works.
+
+How it decides: every keyword must appear (`"a|b"` = either), no exclude term may appear (whole-word, see `global_exclude` for the fakes/metal/display/novelty list), total price incl. shipping must be `min_price`–`max_price` (the floor is skipped for auctions, where a low current bid is normal), and grade rules (`graded_only`, `min_grade`) apply when set.
+
+**Crack-and-regrade lane** (`regrade: true` / `--regrade` / `REGRADE=1`): also flags graded copies between `regrade_min_grade`–`regrade_max_grade` (default 8–9.5) priced at or under `regrade_max_price` (default = `max_price`, i.e. cheaper than a raw NM copy). TAG cards whose 1000-point score is within `tag_near_margin` (15) of `tag_ten_score` (950) qualify regardless of grade range — the "TAG 9 @ 945 that came back PSA 10" case. Alerts show ♻️, the TAG score and gap, and seller "clean copy" hints (clean, pack fresh, looks like a 10, undergraded, no whitening, ...). Both TAG numbers are editable in the watchlist JSON.
+
+- **eBay**: uses the official Browse API when `EBAY_APP_ID`/`EBAY_CERT_ID` are set (fastest); otherwise reads search pages in a real Chrome window. Auction snipes open the bid-confirmation page ~30 s early, re-read the exact countdown from the item page, and confirm `SNIPE_LEAD_SECONDS` (default 6) before the end. Buy-It-Now deals are opened in your browser (max `SNIPE_MAX_OPEN_PER_SCAN` per scan); nothing is purchased automatically.
+- **Facebook Marketplace**: newest listings in `FB_CITY` under the cap; with `FB_AUTO_MESSAGE=true` and `--live` it sends `FB_MESSAGE_TEMPLATE` to the seller. Facebook's DOM changes often, so verify with a dry run (screenshots land in `data/cardsnipe_screens/`).
+- Alerts: console, macOS notification, optional `SNIPE_WEBHOOK_URL` (Discord/Slack-compatible). State is in `cardsnipe.db` (gitignored).
+- **Dashboard**: `make jobs` (or `make dash`) and open [http://127.0.0.1:5000/snipe](http://127.0.0.1:5000/snipe). Every feature stores its data and shows up there: deals (filter by deal/♻️ regrade lane and source), scheduled/placed/failed snipes (cancel from the page), the watchlist (add, pause, remove targets), every scan run (duration, counts, errors such as "Facebook not logged in"), and every listing the sniper ever looked at. It refreshes itself every 30 s while `make snipe` runs.
+
+Use your own eBay/Facebook accounts and keep the caps honest: `--live` places binding bids.
+
 ## Test
 
 ```bash
 python3 -m pytest -q
-python3 -m py_compile config.py database/models.py job_os/*.py dashboard/app.py
+python3 -m py_compile config.py database/models.py job_os/*.py dashboard/app.py cardsnipe/*.py snipe.py
 ```
 
 ## Known limits

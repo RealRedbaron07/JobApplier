@@ -11,5 +11,9 @@ flask>=3.0.0
 # Utilities
 python-dotenv>=1.0.0
 
+# Card sniper (cardsnipe/): eBay Browse API + Chrome automation for eBay/Facebook Marketplace
+requests>=2.31.0
+selenium>=4.20.0
+
 # Development / verification
 pytest>=8.0.0

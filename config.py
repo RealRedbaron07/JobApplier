@@ -33,7 +33,7 @@ class Config:
     WAIT_FOR_LOGIN = False
 
     # Prefer jobs posted/discovered within this many hours ("new" postings)
-    NEW_JOB_HOURS = int(os.getenv('NEW_JOB_HOURS', '72'))
+    NEW_JOB_HOURS = int(os.getenv('NEW_JOB_HOURS', '12'))
 
     # Default resume path (used when profile DB path is missing or stale)
     DEFAULT_RESUME_PATH = os.getenv(
@@ -49,7 +49,7 @@ class Config:
     MAX_REQUEST_DELAY = float(os.getenv('MAX_REQUEST_DELAY', '3.0'))
     
     # Add missing config
-    MAX_JOB_AGE_DAYS = int(os.getenv('MAX_JOB_AGE_DAYS', 30))
+    MAX_JOB_AGE_DAYS = int(os.getenv('MAX_JOB_AGE_DAYS', 1))
     MAX_SEARCH_TIME_MINUTES = int(os.getenv('MAX_SEARCH_TIME_MINUTES', 60))
     
     # Dashboard settings

@@ -28,8 +28,11 @@ from job_os.tailoring import PROFILE_PRIORITIES, create_tailoring_plan, save_lat
 from job_os.workflow import STATUSES, can_transition, suggested_follow_up
 
 
+from dashboard.snipe_views import snipe_bp  # noqa: E402 - needs ROOT on sys.path
+
 app = Flask(__name__)
 app.config.update(JSON_SORT_KEYS=False, MAX_CONTENT_LENGTH=4 * 1024 * 1024)
+app.register_blueprint(snipe_bp)
 
 
 @app.before_request

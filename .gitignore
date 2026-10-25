@@ -65,6 +65,8 @@ chromedriver
 chromedriver.exe
 *.crx
 chrome_profile/
+chrome_profile_cardsnipe/
+data/cardsnipe_screens/
 
 # Temporary files
 *.tmp

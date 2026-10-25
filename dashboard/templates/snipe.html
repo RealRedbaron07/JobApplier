@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Card sniper · JobApplier</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/snipe.css') }}">
+</head>
+<body data-poll-seconds="{{ poll_seconds }}">
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark">⚡</span><div><strong>Card sniper</strong><small>eBay + FB Marketplace</small></div></div>
+      <nav aria-label="Primary">
+        <button class="nav-item active" data-view="overview"><span>◫</span> Overview</button>
+        <button class="nav-item" data-view="deals"><span>🔥</span> Deals</button>
+        <button class="nav-item" data-view="bids"><span>🎯</span> Snipes</button>
+        <button class="nav-item" data-view="watchlist"><span>★</span> Watchlist</button>
+        <button class="nav-item" data-view="scans"><span>⌁</span> Scan history</button>
+        <button class="nav-item" data-view="listings"><span>▤</span> Everything seen</button>
+        <a class="nav-item nav-link" href="/"><span>←</span> Job OS</a>
+      </nav>
+      <div class="safety-card"><span class="pulse" id="live-dot"></span><div><strong id="mode-label">Reading cardsnipe.db</strong><small id="mode-sub">Start a scan with <code>make snipe</code></small></div></div>
+    </aside>
+
+    <main>
+      <header class="topbar">
+        <div><p class="eyebrow">POKÉMON CARD SNIPER</p><h1 id="page-title">Overview</h1></div>
+        <div class="top-actions"><span class="level" id="last-scan-badge">No scans yet</span><span class="level">eBay via {{ ebay_mode }} · FB {{ fb_city }}</span><button class="button secondary small" id="refresh">Refresh</button></div>
+      </header>
+
+      <section class="view active" id="view-overview">
+        <div class="metrics" id="snipe-metrics"></div>
+        <div class="grid two">
+          <article class="panel"><div class="panel-head"><div><p class="eyebrow">LATEST</p><h3>Newest deals</h3></div><button class="text-button" data-view-link="deals">View all →</button></div><div id="latest-deals" class="stack"></div></article>
+          <article class="panel"><div class="panel-head"><div><p class="eyebrow">BREAKDOWN</p><h3>Deals by target</h3></div></div><div id="by-target"></div><div class="panel-head" style="margin-top:18px"><div><p class="eyebrow">SOURCES</p><h3>Deals by source</h3></div></div><div id="by-source"></div></article>
+        </div>
+        <div class="grid two" style="margin-top:18px">
+          <article class="panel"><div class="panel-head"><div><p class="eyebrow">PENDING</p><h3>Upcoming snipes</h3></div><button class="text-button" data-view-link="bids">Manage →</button></div><div id="upcoming-bids" class="stack"></div></article>
+          <article class="panel"><div class="panel-head"><div><p class="eyebrow">HEALTH</p><h3>Recent scans</h3></div><button class="text-button" data-view-link="scans">History →</button></div><div id="scan-spark"></div><div id="scan-errors" class="stack"></div></article>
+        </div>
+      </section>
+
+      <section class="view" id="view-deals">
+        <article class="panel">
+          <div class="toolbar"><label class="compact-control">Lane<select id="deal-lane"><option value="">All</option><option value="deal">Deal</option><option value="regrade">♻️ Regrade</option></select></label><label class="compact-control">Source<select id="deal-source"><option value="">All</option><option value="ebay">eBay</option><option value="facebook">Facebook</option></select></label><label class="compact-control">Search<input id="deal-search" class="search" placeholder="title, target, grade"></label></div>
+          <div class="table-wrap"><table><thead><tr><th>When</th><th>Lane</th><th>Listing</th><th>Grade</th><th>Price</th><th>Under cap</th><th>Target</th><th>Action</th></tr></thead><tbody id="deals-table"></tbody></table></div>
+        </article>
+      </section>
+
+      <section class="view" id="view-bids">
+        <article class="panel">
+          <div class="panel-head"><div><p class="eyebrow">AUCTION SNIPES</p><h3>Scheduled, fired and finished</h3></div></div>
+          <div class="table-wrap"><table><thead><tr><th>#</th><th>Status</th><th>Listing</th><th>Max bid</th><th>Ends</th><th>Fires</th><th>Result</th><th></th></tr></thead><tbody id="bids-table"></tbody></table></div>
+        </article>
+      </section>
+
+      <section class="view" id="view-watchlist">
+        <div class="grid two">
+          <article class="panel">
+            <div class="panel-head"><div><p class="eyebrow">TARGETS</p><h3>What you're hunting</h3></div></div>
+            <div id="watchlist" class="stack"></div>
+            <p class="detail-meta" id="watchlist-meta"></p>
+          </article>
+          <article class="panel">
+            <div class="panel-head"><div><p class="eyebrow">ADD TARGET</p><h3>New card</h3></div></div>
+            <form id="target-form">
+              <label>Name<input name="name" required placeholder="Umbreon VMAX Alt Art"></label>
+              <label>Keywords (one per line, use a|b for alternatives)<textarea name="keywords" rows="3" required placeholder="umbreon&#10;vmax&#10;alt art|215/203"></textarea></label>
+              <div class="form-grid"><label>Max price (incl. shipping)<input name="max_price" type="number" step="0.01" required></label><label>Min price (fake floor)<input name="min_price" type="number" step="0.01"></label></div>
+              <div class="form-grid"><label>Max auction bid<input name="max_bid" type="number" step="0.01"></label><label>Exclude words (comma)<input name="exclude" placeholder="japanese, lot, bundle"></label></div>
+              <div class="form-grid"><label class="check-control"><input name="regrade" type="checkbox"> ♻️ Crack & regrade lane</label><label class="check-control"><input name="graded_only" type="checkbox"> Graded only</label></div>
+              <div class="form-grid"><label>Regrade grades low–high<input name="regrade_grades" placeholder="8 9.5"></label><label>Regrade max price<input name="regrade_max_price" type="number" step="0.01" placeholder="defaults to max"></label></div>
+              <div class="form-grid"><label>Min grade<input name="min_grade" type="number" step="0.5"></label><label>Sources<select name="sources"><option value="ebay,facebook">eBay + Facebook</option><option value="ebay">eBay only</option><option value="facebook">Facebook only</option></select></label></div>
+              <button class="button" type="submit">Add target</button>
+            </form>
+          </article>
+        </div>
+      </section>
+
+      <section class="view" id="view-scans">
+        <article class="panel">
+          <div class="panel-head"><div><p class="eyebrow">EVERY PASS</p><h3>Scan history</h3></div></div>
+          <div class="table-wrap"><table><thead><tr><th>Started</th><th>Mode</th><th>Sources</th><th>Took</th><th>Scanned</th><th>New</th><th>Deals</th><th>♻️</th><th>Bids</th><th>Errors</th></tr></thead><tbody id="scans-table"></tbody></table></div>
+        </article>
+      </section>
+
+      <section class="view" id="view-listings">
+        <article class="panel">
+          <div class="toolbar"><label class="compact-control">Source<select id="listing-source"><option value="">All</option><option value="ebay">eBay</option><option value="facebook">Facebook</option></select></label><label class="compact-control">Search<input id="listing-search" class="search" placeholder="title"></label><span class="detail-meta">Every listing the sniper has looked at, matched or not.</span></div>
+          <div class="table-wrap"><table><thead><tr><th>Seen</th><th>Source</th><th>Listing</th><th>Type</th><th>Price</th><th>Matched</th></tr></thead><tbody id="listings-table"></tbody></table></div>
+        </article>
+      </section>
+    </main>
+  </div>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script src="{{ url_for('static', filename='js/snipe.js') }}"></script>
+</body>
+</html>
