@@ -241,5 +241,6 @@ $('#refresh').addEventListener('click', () => refreshAll().then(() => toast('Ref
 
 const initial = location.hash.replace('#', '');
 if (TITLES[initial]) switchView(initial);
+window.addEventListener('hashchange', () => { const view = location.hash.replace('#', ''); if (TITLES[view]) switchView(view); });
 refreshAll();
 setInterval(() => { loadOverview().catch(() => {}); const active = document.querySelector('.view.active')?.id.replace('view-', ''); if (active && active !== 'overview') LOADERS[active]?.().catch(() => {}); }, 30000);

@@ -14,6 +14,7 @@ DEFAULT_GLOBAL_EXCLUDE = [
     # fakes / novelty / display items
     "proxy", "custom", "custom card", "custom made", "replica", "fake", "reprint", "novelty",
     "fan art", "fan-art", "fan made", "fan-made", "metal", "metal card", "gold foil", "gold plated",
+    "gold card", "gold charizard", "gold pokemon", "golden", "24k",
     "black foil", "silver foil", "vinyl", "display card", "display only", "for display",
     "extended art", "extended artwork", "no card", "case only", "frame", "framed",
     # not cards
