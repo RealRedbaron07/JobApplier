@@ -27,6 +27,14 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name, "").strip()
+    try:
+        return float(raw) if raw else default
+    except ValueError:
+        return default
+
+
 def _abs(path: str) -> str:
     return path if os.path.isabs(path) else os.path.join(ROOT_DIR, path)
 
@@ -55,6 +63,11 @@ class SnipeSettings:
     max_notifications_per_scan: int
     webhook_url: str
     screenshot_dir: str
+    # Market valuation
+    price_ttl_hours: float = 6.0
+    usd_rate_fallback: float = 1.38
+    ebay_sold_comps: bool = True
+    collectr_showcase_url: str = ""
     # Set by the CLI. False = simulate bids/messages, alerts still fire.
     live: bool = False
 
@@ -90,4 +103,8 @@ class SnipeSettings:
             max_notifications_per_scan=max(0, _env_int("SNIPE_MAX_NOTIFY_PER_SCAN", 5)),
             webhook_url=os.getenv("SNIPE_WEBHOOK_URL", "").strip(),
             screenshot_dir=_abs(os.getenv("SNIPE_SCREENSHOT_DIR", os.path.join("data", "cardsnipe_screens"))),
+            price_ttl_hours=max(0.5, _env_float("SNIPE_PRICE_TTL_HOURS", 6.0)),
+            usd_rate_fallback=_env_float("SNIPE_USD_RATE", 1.38),
+            ebay_sold_comps=_env_bool("SNIPE_EBAY_SOLD_COMPS", True),
+            collectr_showcase_url=os.getenv("COLLECTR_SHOWCASE_URL", "").strip(),
         )

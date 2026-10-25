@@ -3,7 +3,10 @@
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money = (currency, value) => value == null ? '—' : `${currency || ''} ${Number(value).toFixed(2)}`.trim();
-const TITLES = {overview:'Overview', deals:'Deals', bids:'Snipes', watchlist:'Watchlist', scans:'Scan history', listings:'Everything seen'};
+const TITLES = {overview:'Overview', deals:'Deals', bids:'Snipes', values:'Market values', collection:'My collection', watchlist:'Watchlist', scans:'Scan history', listings:'Everything seen'};
+const BUCKETS = ['raw', '7', '8', '9', '9.5', '10'];
+const BUCKET_LABEL = {raw: 'Raw NM', '7': 'Grade 7', '8': 'Grade 8', '9': 'Grade 9', '9.5': 'Grade 9.5', '10': 'PSA 10'};
+let portfolioValue = null; // in listing currency, set by loadCollection
 
 async function api(url, options = {}) {
   const response = await fetch(url, {headers: {'Content-Type': 'application/json', ...(options.headers || {})}, ...options});
@@ -49,9 +52,20 @@ document.querySelectorAll('[data-view], [data-view-link]').forEach(el => el.addE
 function lanePill(row) {
   const bits = [];
   bits.push(row.lane === 'regrade' ? '<span class="lane-pill regrade">♻️ regrade</span>' : '<span class="lane-pill">deal</span>');
+  if (row.irregular) bits.push(`<span class="lane-pill irregular" title="Verify before buying">⚠️ ${esc(row.irregular_reason || 'irregular')}</span>`);
   if (row.listing_type === 'auction') bits.push('<span class="lane-pill auction">auction</span>');
   if (row.source === 'facebook') bits.push('<span class="lane-pill facebook">facebook</span>');
   return bits.join(' ');
+}
+
+function valueText(row) {
+  if (!row.market_value) return '<span class="detail-meta">cap only</span>';
+  return `${esc(money(row.currency, row.market_value))}<span class="sub">${esc(BUCKET_LABEL[row.value_bucket] || row.value_bucket)} · ${esc(row.value_source)}</span>`;
+}
+
+function underText(row) {
+  const pct = Math.round(row.savings_pct || 0);
+  return row.market_value ? `${pct}% under value` : `${pct}% under cap`;
 }
 
 function gradeText(row) {
@@ -83,8 +97,13 @@ async function loadOverview() {
   $('#snipe-metrics').innerHTML = [
     metric('Deals (24h)', summary.deals_24h, `${summary.deals_total} all time`),
     metric('♻️ Regrade candidates', summary.regrade_total, 'lower grade / TAG near-miss'),
+    metric('⚠️ Irregular', summary.irregular_total || 0, 'too far under value — verify'),
     metric('Pending snipes', pending, `${placed} placed`),
+  ].join('');
+  $('#snipe-metrics-2').innerHTML = [
     metric('Listings checked', summary.listings_seen_24h, `${summary.listings_seen} all time · ${summary.scans_total} scans`),
+    metric('Cards valued', summary.valuations || 0, 'TCGPlayer · PriceCharting · eBay sold'),
+    metric('Portfolio (Collectr)', portfolioValue != null ? money(summary.settings.currency || '', portfolioValue) : '—', 'sync on My collection'),
   ].join('');
 
   const last = summary.last_scan;
@@ -101,7 +120,7 @@ async function loadOverview() {
   $('#latest-deals').innerHTML = deals.deals.length ? deals.deals.map(row => `
     <div class="deal-row">
       <div><a href="${esc(row.url)}" target="_blank" rel="noopener">${esc(row.title)}</a><small>${lanePill(row)} ${esc(gradeText(row))} · ${esc(row.matched_target)} · ${ago(row.first_seen)}</small></div>
-      <div class="deal-price">${esc(money(row.currency, row.total_price))}<small>${Math.round(row.savings_pct || 0)}% under cap</small></div>
+      <div class="deal-price">${esc(money(row.currency, row.total_price))}<small>${esc(underText(row))}${row.market_value ? ` (${esc(money(row.currency, row.market_value))})` : ''}</small></div>
     </div>`).join('') : '<div class="empty compact-empty">No deals yet. Run <code>make snipe</code>.</div>';
 
   bars($('#by-target'), summary.deals_by_target, 'No matches recorded yet');
@@ -124,17 +143,97 @@ async function loadOverview() {
 
 // ── deals ───────────────────────────────────────────────────────────────────
 async function loadDeals() {
-  const lane = $('#deal-lane').value, source = $('#deal-source').value, q = $('#deal-search').value.toLowerCase();
+  const lane = $('#deal-lane').value, source = $('#deal-source').value, flag = $('#deal-flag').value, q = $('#deal-search').value.toLowerCase();
   const data = await api(`/api/snipe/deals?limit=300&lane=${lane}&source=${source}`);
-  const rows = data.deals.filter(r => !q || `${r.title} ${r.matched_target} ${r.grade || ''}`.toLowerCase().includes(q));
-  $('#deals-table').innerHTML = rows.length ? rows.map(r => `<tr>
+  const rows = data.deals
+    .filter(r => flag === '' || (flag === 'irregular') === !!r.irregular)
+    .filter(r => !q || `${r.title} ${r.matched_target} ${r.grade || ''}`.toLowerCase().includes(q));
+  $('#deals-table').innerHTML = rows.length ? rows.map(r => `<tr class="${r.irregular ? 'row-irregular' : ''}">
     <td>${esc(ago(r.first_seen))}</td><td>${lanePill(r)}</td>
     <td><a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.title)}</a><span class="sub">${esc(r.source)} · ${esc(r.location || '')}${r.end_time ? ' · ends ' + untilText(r.end_time) : ''}</span></td>
     <td>${esc(gradeText(r))}</td><td>${esc(money(r.currency, r.total_price))}${r.shipping ? `<span class="sub">incl. ship ${Number(r.shipping).toFixed(2)}</span>` : ''}</td>
+    <td>${valueText(r)}</td>
     <td>${Math.round(r.savings_pct || 0)}%</td><td>${esc(r.matched_target)}</td>
     <td>${esc(r.action || 'alerted')}${r.action_detail ? `<span class="sub" title="${esc(r.action_detail)}">${esc(r.action_detail.slice(0, 60))}</span>` : ''}</td>
-  </tr>`).join('') : '<tr><td colspan="8" class="empty">No deals match.</td></tr>';
+  </tr>`).join('') : '<tr><td colspan="9" class="empty">No deals match.</td></tr>';
 }
+
+// ── market values ───────────────────────────────────────────────────────────
+async function loadValues() {
+  const data = await api('/api/snipe/valuations');
+  $('#values').innerHTML = data.valuations.length ? data.valuations.map(row => {
+    const v = row.valuation;
+    if (!row.use_market) return `<div class="target-card"><header><strong>${esc(row.target)}</strong><span class="detail-meta">market lookups off · cap ${esc(row.max_price ?? '—')}</span></header></div>`;
+    if (!v) return `<div class="target-card"><header><strong>${esc(row.target)}</strong><span class="err">no valuation yet — fetched on next scan</span></header><div class="kw">${esc(row.market_query)}</div></div>`;
+    const sources = [...new Set(v.prices.map(p => p.source))];
+    const cells = BUCKETS.map(b => {
+      const chosen = v.values[b];
+      const bySource = sources.map(s => { const p = v.prices.find(x => x.bucket === b && x.source === s); return p ? `${s.slice(0, 3)} ${Math.round(p.price_usd * v.fx)}` : null; }).filter(Boolean);
+      return `<div class="value-cell ${chosen ? '' : 'muted'}"><small>${esc(BUCKET_LABEL[b])}</small><strong>${chosen ? esc(money(v.currency, chosen.value)) : '—'}</strong><em>${chosen ? esc(`${chosen.source} · deal ≤ ${Math.round(chosen.value * (1 - row.bargain_pct / 100))}`) : 'no data'}</em>${bySource.length > 1 ? `<em class="all-sources">${esc(bySource.join(' · '))}</em>` : ''}</div>`;
+    }).join('');
+    return `<div class="target-card">
+      <header><strong>${esc(row.target)}</strong><div class="target-actions">${v.card_url ? `<a class="button secondary small" href="${esc(v.card_url)}" target="_blank" rel="noopener">Open source</a>` : ''}<button class="button secondary small" data-refresh-value="${esc(row.target)}">Refetch</button></div></header>
+      <div class="meta"><span>${esc(row.market_query)}</span><span>1 USD = ${v.fx.toFixed(3)} ${esc(v.currency)}</span><span>${esc(ago(v.fetched_at))}</span>${v.floor_usd ? `<span>lowest listed anywhere US$${Math.round(v.floor_usd)} (any condition)</span>` : ''}${row.max_price ? `<span>hard cap ${row.max_price}</span>` : ''}<span>bargain ≥ ${row.bargain_pct}% · irregular ≥ ${row.irregular_pct}%</span></div>
+      <div class="value-grid">${cells}</div>
+      ${v.notes.length ? `<div class="err">${esc(v.notes.join(' · '))}</div>` : ''}
+    </div>`;
+  }).join('') : '<div class="empty">No targets.</div>';
+  document.querySelectorAll('[data-refresh-value]').forEach(btn => btn.addEventListener('click', async () => {
+    btn.disabled = true; btn.textContent = 'Fetching…';
+    try { const r = await api(`/api/snipe/valuations/refresh?target=${encodeURIComponent(btn.dataset.refreshValue)}`, {method: 'POST'}); toast(r.refreshed.length ? 'Value refreshed' : `No data: ${r.failed.join(', ')}`, !r.refreshed.length); await loadValues(); }
+    catch (err) { toast(err.message, true); btn.disabled = false; btn.textContent = 'Refetch'; }
+  }));
+}
+$('#revalue').addEventListener('click', async () => {
+  const btn = $('#revalue'); btn.disabled = true; btn.textContent = 'Re-judging…';
+  try { const r = await api('/api/snipe/revalue', {method: 'POST'}); toast(r.message); await Promise.all([loadDeals(), loadOverview()]); }
+  catch (err) { toast(err.message, true); }
+  btn.disabled = false; btn.textContent = 'Re-judge seen listings';
+});
+$('#refresh-values').addEventListener('click', async () => {
+  const btn = $('#refresh-values'); btn.disabled = true; btn.textContent = 'Fetching…';
+  try { const r = await api('/api/snipe/valuations/refresh', {method: 'POST'}); toast(`Refreshed ${r.refreshed.length}${r.failed.length ? `, failed ${r.failed.length}` : ''}`, !!r.failed.length); await loadValues(); }
+  catch (err) { toast(err.message, true); }
+  btn.disabled = false; btn.textContent = 'Refetch all';
+});
+
+// ── collection ──────────────────────────────────────────────────────────────
+async function loadCollection() {
+  const [data, deals] = await Promise.all([api('/api/snipe/collection'), api('/api/snipe/deals?limit=300')]);
+  const snap = data.snapshot;
+  portfolioValue = snap && snap.total_value_usd != null ? snap.total_value_usd * data.fx : null;
+  const change = data.items.reduce((s, i) => s + (i.change_usd || 0) * (i.quantity || 1), 0);
+  $('#collection-metrics').innerHTML = snap ? [
+    metric('Portfolio value', money(data.currency, portfolioValue), `US$${Number(snap.total_value_usd).toFixed(2)} · ${snap.owner || 'Collectr'}`),
+    metric('Cards', snap.total_cards, `${snap.total_graded || 0} graded`),
+    metric('24h change', `${change >= 0 ? '+' : ''}US$${change.toFixed(2)}`, 'sum of Collectr daily moves'),
+    metric('Synced', ago(snap.synced_at), new Date(snap.synced_at).toLocaleString()),
+  ].join('') : metric('Portfolio', '—', data.configured_url ? 'Press "Sync now"' : 'Set COLLECTR_SHOWCASE_URL in .env');
+  $('#collection-meta').innerHTML = snap ? `<a href="${esc(snap.source_url)}" target="_blank" rel="noopener">${esc(snap.source_url)}</a>` : esc(data.configured_url || 'No showcase configured');
+  $('#collection-table').innerHTML = data.items.length ? data.items.map(i => `<tr>
+    <td><strong>${esc(i.name)}</strong>${i.rarity ? `<span class="sub">${esc(i.rarity)}${i.graded ? ' · graded' : ''}</span>` : ''}</td>
+    <td>${esc(i.set_name || '')}</td><td>${esc(i.number || '')}</td>
+    <td>US$${Number(i.value_usd || 0).toFixed(2)}<span class="sub">${esc(money(data.currency, (i.value_usd || 0) * data.fx))}</span></td>
+    <td class="${(i.change_pct || 0) >= 0 ? 'ok' : 'err'}">${i.change_pct != null ? `${i.change_pct >= 0 ? '+' : ''}${Number(i.change_pct).toFixed(1)}%` : '—'}</td>
+    <td>${i.quantity}</td>
+  </tr>`).join('') : '<tr><td colspan="6" class="empty">Nothing synced yet.</td></tr>';
+
+  const board = deals.deals.filter(d => d.market_value && d.total_price != null)
+    .map(d => ({...d, equity: d.market_value - d.total_price}))
+    .sort((a, b) => b.equity - a.equity).slice(0, 25);
+  $('#tradeup-table').innerHTML = board.length ? board.map(d => `<tr class="${d.irregular ? 'row-irregular' : ''}">
+    <td><a href="${esc(d.url)}" target="_blank" rel="noopener">${esc(d.title)}</a><span class="sub">${lanePill(d)} ${esc(gradeText(d))} · ${esc(d.matched_target)}</span></td>
+    <td>${esc(money(d.currency, d.total_price))}</td><td>${esc(money(d.currency, d.market_value))}</td>
+    <td class="ok"><strong>+${Number(d.equity).toFixed(0)}</strong><span class="sub">${Math.round(d.savings_pct || 0)}%</span></td>
+    <td>${portfolioValue == null ? '—' : d.total_price <= portfolioValue ? '<span class="lane-pill">fits</span>' : `<span class="detail-meta">+${Math.round(d.total_price - portfolioValue)} short</span>`}</td>
+  </tr>`).join('') : '<tr><td colspan="5" class="empty">No valued deals yet.</td></tr>';
+}
+$('#sync-collection').addEventListener('click', async () => {
+  const btn = $('#sync-collection'); btn.disabled = true; btn.textContent = 'Syncing (~20s)…';
+  try { const r = await api('/api/snipe/collection/sync', {method: 'POST'}); toast(r.message); await loadCollection(); }
+  catch (err) { toast(err.message, true); }
+  btn.disabled = false; btn.textContent = 'Sync now';
+});
 
 // ── bids ────────────────────────────────────────────────────────────────────
 async function loadBids() {
@@ -160,7 +259,8 @@ function renderWatchlist(data) {
       <header><strong>${esc(t.name)}</strong><div class="target-actions"><button class="button secondary small" data-toggle="${esc(t.name)}" data-enabled="${t.enabled}">${t.enabled ? 'Pause' : 'Resume'}</button><button class="button secondary small" data-remove="${esc(t.name)}">Remove</button></div></header>
       <div class="kw">${esc(t.keywords.join('  +  '))}</div>
       <div class="meta">
-        <span>${t.min_price ? `${t.min_price}–` : '≤'}${t.max_price}</span>
+        ${t.use_market && (t.card_name || t.number) ? `<span>💲 ${esc([t.card_name, t.set_name, t.number].filter(Boolean).join(' · '))} · deal ≥ ${t.bargain_pct}% under</span>` : ''}
+        <span>${t.min_price ? `${t.min_price}–` : '≤'}${t.max_price ?? 'market'}</span>
         ${t.max_bid ? `<span>bid ≤ ${t.max_bid}</span>` : '<span>alert only</span>'}
         ${t.graded_only ? `<span>graded only${t.min_grade ? ` ≥ ${t.min_grade}` : ''}</span>` : ''}
         ${t.regrade ? `<span>♻️ ${t.regrade_min_grade}–${t.regrade_max_grade} ≤ ${t.regrade_max_price || t.max_price}</span>` : ''}
@@ -190,6 +290,7 @@ $('#target-form').addEventListener('submit', async (event) => {
   const payload = {
     name: form.get('name'), keywords: String(form.get('keywords')).split('\n').map(s => s.trim()).filter(Boolean),
     max_price: form.get('max_price'), min_price: form.get('min_price'), max_bid: form.get('max_bid'),
+    card_name: form.get('card_name'), set_name: form.get('set_name'), number: form.get('number'), bargain_pct: form.get('bargain_pct'),
     exclude: String(form.get('exclude') || '').split(',').map(s => s.trim()).filter(Boolean),
     regrade: form.get('regrade') === 'on', graded_only: form.get('graded_only') === 'on', min_grade: form.get('min_grade'),
     regrade_min_grade: grades[0], regrade_max_grade: grades[1], regrade_max_price: form.get('regrade_max_price'),
@@ -225,7 +326,7 @@ async function loadListings() {
 }
 
 // ── wiring ──────────────────────────────────────────────────────────────────
-const LOADERS = {overview: loadOverview, deals: loadDeals, bids: loadBids, watchlist: loadWatchlist, scans: loadScans, listings: loadListings};
+const LOADERS = {collection: loadCollection, overview: loadOverview, deals: loadDeals, bids: loadBids, values: loadValues, watchlist: loadWatchlist, scans: loadScans, listings: loadListings};
 
 async function refreshAll() {
   for (const [name, loader] of Object.entries(LOADERS)) {
@@ -233,7 +334,7 @@ async function refreshAll() {
   }
 }
 
-['#deal-lane', '#deal-source'].forEach(sel => $(sel).addEventListener('change', loadDeals));
+['#deal-lane', '#deal-source', '#deal-flag'].forEach(sel => $(sel).addEventListener('change', loadDeals));
 $('#deal-search').addEventListener('input', loadDeals);
 $('#listing-source').addEventListener('change', loadListings);
 $('#listing-search').addEventListener('input', loadListings);

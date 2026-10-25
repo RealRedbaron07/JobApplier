@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 
 VALID_SOURCES = ("ebay", "facebook")
 
@@ -30,9 +30,20 @@ DEFAULT_GLOBAL_EXCLUDE = [
 class Target:
     name: str
     keywords: list[str]
-    max_price: float
+    # Hard ceiling on total price. None = purely market-driven (see use_market).
+    max_price: float | None = None
     # For eBay auctions: snipe up to this amount. None = alert only.
     max_bid: float | None = None
+    # Market valuation (TCGPlayer / PriceCharting / eBay sold). card_name + set_name + number
+    # identify the exact printing; the value per grade is the cheapest figure any source reports.
+    use_market: bool = True
+    card_name: str = ""
+    set_name: str = ""
+    number: str = ""
+    # A listing is a bargain at >= bargain_pct under value, and "irregular" (too good — fake,
+    # damaged, mislabelled, or a genuine mistake) at >= irregular_pct under value.
+    bargain_pct: float = 20.0
+    irregular_pct: float = 50.0
     # Buy-It-Now / Marketplace listings below this are treated as fakes or junk.
     # Not applied to auctions (a low current bid is normal).
     min_price: float | None = None
@@ -56,6 +67,19 @@ class Target:
     def search_query(self) -> str:
         # "vmax|v max" style alternatives: search with the first spelling.
         return " ".join(k.split("|")[0].strip() for k in self.keywords if k.strip())
+
+    @property
+    def market_query(self) -> str:
+        """Query for price sources: '<card name> <set name> [number]' when known, else the keywords."""
+        if self.card_name:
+            return " ".join(p for p in (self.card_name, self.set_name, self.number) if p)
+        return self.search_query
+
+    def with_ceiling(self, ceiling: float | None) -> "Target":
+        """Copy with max_price filled in (used for search price filters when market-driven)."""
+        if ceiling is None or self.max_price is not None:
+            return self
+        return replace(self, max_price=ceiling)
 
     def uses_source(self, source: str) -> bool:
         return self.enabled and source in self.sources
@@ -89,44 +113,38 @@ EXAMPLE_TARGETS = [
     Target(
         name="Charizard VMAX Rainbow (Champion's Path 074/073)",
         keywords=["charizard", "vmax", "074/073|rainbow"],
-        max_price=250,
-        max_bid=270,
-        min_price=90,
+        card_name="Charizard VMAX", set_name="Champion's Path", number="074/073",
         exclude=["japanese", "chinese", "spanish", "lot", "bundle", "pack"],
         regrade=True,
-        note="Example caps. Set your own numbers. regrade=True also flags PSA/CGC/BGS/TAG 8–9.5 copies under the cap.",
+        note="Market-driven: alerts at 20%+ under the cheapest TCGPlayer/PriceCharting value for the grade. "
+             "regrade=True also flags PSA/CGC/BGS/TAG 8–9.5 copies priced under the raw value.",
     ),
     Target(
         name="Rayquaza V Alt Art (Evolving Skies 194/203)",
         keywords=["rayquaza", "v", "194/203|alt art|alternate art"],
-        max_price=350,
-        max_bid=380,
-        min_price=120,
+        card_name="Rayquaza V (Alternate Full Art)", set_name="Evolving Skies", number="194/203",
         exclude=["vmax", "japanese", "korean", "lot", "bundle", "pack"],
         regrade=True,
         regrade_min_grade=8.5,
         regrade_max_grade=9.5,
-        note="Crack-and-regrade example: a TAG 9 (945) under the raw NM price is a PSA 10 lottery ticket.",
+        note="Crack-and-regrade example: a TAG 9 (945) under the raw NM value is a PSA 10 lottery ticket.",
     ),
     Target(
         name="Umbreon VMAX Alt Art (Evolving Skies 215/203)",
         keywords=["umbreon", "vmax", "215/203|alt art|alternate art"],
-        max_price=600,
-        max_bid=None,
-        min_price=250,
+        card_name="Umbreon VMAX (Alternate Art Secret)", set_name="Evolving Skies", number="215/203",
         exclude=["japanese", "chinese", "lot", "bundle", "pack"],
-        note="Alert only (no max_bid).",
+        note="Alert only (no max_bid). Set max_bid to snipe auctions.",
     ),
     Target(
         name="PSA 10 Base Set Charizard (any)",
         keywords=["charizard", "base set"],
-        max_price=5000,
-        min_price=1500,
+        card_name="Charizard", set_name="Base Set", number="4/102",
         graded_only=True,
         min_grade=10,
-        exclude=["celebrations", "30th", "lot"],
+        exclude=["celebrations", "30th", "lot", "shadowless", "1st edition"],
         sources=["ebay"],
-        note="Graded-only example.",
+        note="Graded-only example, valued against the PSA 10 bucket.",
     ),
 ]
 
@@ -135,7 +153,12 @@ def _target_from_dict(data: dict) -> Target:
     allowed = {f for f in Target.__dataclass_fields__}
     clean = {k: v for k, v in data.items() if k in allowed}
     clean["keywords"] = [str(k) for k in clean.get("keywords", []) if str(k).strip()]
-    clean["max_price"] = float(clean.get("max_price", 0))
+    clean["max_price"] = float(clean["max_price"]) if clean.get("max_price") not in (None, "", 0) else None
+    for key in ("bargain_pct", "irregular_pct"):
+        if clean.get(key) is not None:
+            clean[key] = float(clean[key])
+    for key in ("card_name", "set_name", "number"):
+        clean[key] = str(clean.get(key) or "")
     if clean.get("max_bid") is not None:
         clean["max_bid"] = float(clean["max_bid"])
     if clean.get("min_price") is not None:

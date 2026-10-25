@@ -76,7 +76,10 @@ POST /api/import/json
 ```bash
 make login        # one time: sign in to eBay + Facebook in the sniper's Chrome profile
 make list         # watchlist lives in data/cardsnipe_watchlist.json (edit by hand or use add/rm)
-make add NAME="Moonbreon" MAX=550 MIN=250 BID=600 KW="umbreon vmax 'alt art|215/203'" REGRADE=1
+make add NAME="Moonbreon" CARD="Umbreon VMAX (Alternate Art Secret)" SET="Evolving Skies" NUM=215/203 \
+         KW="umbreon vmax 'alt art|215/203'" REGRADE=1          # BID=600 to snipe auctions, MAX= for a hard cap
+make value        # market value ladder per target (REFRESH=1 to refetch)
+make collection   # sync your Collectr showcase
 make scan         # one pass, dry-run: alerts fire, bids/messages are simulated with screenshots
 make snipe        # continuous dry-run every SNIPE_POLL_SECONDS
 make live         # real snipes (up to max_bid) and real Facebook messages
@@ -86,14 +89,24 @@ make deals | make bids | make cancel ID=3 | make test
 
 `make help` lists everything; `python3 snipe.py` (bare = watch) with aliases `s`/`w`/`a`/`rm`/`l`/`d`/`b` also works.
 
-How it decides: every keyword must appear (`"a|b"` = either), no exclude term may appear (whole-word, see `global_exclude` for the fakes/metal/display/novelty list), total price incl. shipping must be `min_price`–`max_price` (the floor is skipped for auctions, where a low current bid is normal), and grade rules (`graded_only`, `min_grade`) apply when set.
+How it decides: every keyword must appear (`"a|b"` = either), no exclude term may appear (whole-word, see `global_exclude` for the fakes/metal/display/novelty list), total price incl. shipping must be above `min_price` (skipped for auctions, where a low current bid is normal), and grade rules (`graded_only`, `min_grade`) apply when set.
 
-**Crack-and-regrade lane** (`regrade: true` / `--regrade` / `REGRADE=1`): also flags graded copies between `regrade_min_grade`–`regrade_max_grade` (default 8–9.5) priced at or under `regrade_max_price` (default = `max_price`, i.e. cheaper than a raw NM copy). TAG cards whose 1000-point score is within `tag_near_margin` (15) of `tag_ten_score` (950) qualify regardless of grade range — the "TAG 9 @ 945 that came back PSA 10" case. Alerts show ♻️, the TAG score and gap, and seller "clean copy" hints (clean, pack fresh, looks like a 10, undergraded, no whitening, ...). Both TAG numbers are editable in the watchlist JSON.
+**Market value, not guesses.** Give a target `card_name`, `set_name` and `number` (or `--card/--set/--number`, or the fields on the dashboard form) and the sniper values the card per grade bucket (raw, 7, 8, 9, 9.5, 10) as the **cheapest** figure any source reports:
+
+- **TCGPlayer** market price (raw) via their search API, plus the lowest listed price as a reference "floor";
+- **PriceCharting** sold-comps averages for ungraded and every grade;
+- **eBay sold listings** (median of recent sales per grade) once your sniper Chrome is signed in to eBay (`make login`);
+- Card Ladder is paywalled with no public API, so it is not used.
+
+Values are USD, converted to `EBAY_CURRENCY` with a live FX rate (fallback `SNIPE_USD_RATE`), cached for `SNIPE_PRICE_TTL_HOURS` in `cardsnipe.db`. A listing is a **deal** at ≥ `bargain_pct` (default 20%) under the value for its grade, and gets flagged **⚠️ irregular** at ≥ `irregular_pct` (default 50%) under — that's the "too good" zone (fake, damaged, mislabelled, scam… or a genuine mistake worth checking). `max_price` is now an optional hard cap on top; `make value` prints every target's value ladder, `make value REFRESH=1` refetches.
+
+**Crack-and-regrade lane** (`regrade: true` / `--regrade` / `REGRADE=1`): also flags graded copies between `regrade_min_grade`–`regrade_max_grade` (default 8–9.5) priced at or under `regrade_max_price` (default = the raw NM market value, i.e. cheaper than a raw copy). TAG cards whose 1000-point score is within `tag_near_margin` (15) of `tag_ten_score` (950) qualify regardless of grade range — the "TAG 9 @ 945 that came back PSA 10" case. Alerts show ♻️, the TAG score and gap, and seller "clean copy" hints (clean, pack fresh, looks like a 10, undergraded, no whitening, ...). Both TAG numbers are editable in the watchlist JSON.
 
 - **eBay**: uses the official Browse API when `EBAY_APP_ID`/`EBAY_CERT_ID` are set (fastest); otherwise reads search pages in a real Chrome window. Auction snipes open the bid-confirmation page ~30 s early, re-read the exact countdown from the item page, and confirm `SNIPE_LEAD_SECONDS` (default 6) before the end. Buy-It-Now deals are opened in your browser (max `SNIPE_MAX_OPEN_PER_SCAN` per scan); nothing is purchased automatically.
-- **Facebook Marketplace**: newest listings in `FB_CITY` under the cap; with `FB_AUTO_MESSAGE=true` and `--live` it sends `FB_MESSAGE_TEMPLATE` to the seller. Facebook's DOM changes often, so verify with a dry run (screenshots land in `data/cardsnipe_screens/`).
+- **Facebook Marketplace**: newest listings in `FB_CITY` under the cap, linked exactly like eBay results (alerts, `make deals`, dashboard) so you open and message sellers yourself. Optional: `FB_AUTO_MESSAGE=true` plus `--live` sends `FB_MESSAGE_TEMPLATE` for you (off by default). Facebook's DOM changes often, so verify with a dry run (screenshots land in `data/cardsnipe_screens/`).
+- **Your collection (Collectr)**: set `COLLECTR_SHOWCASE_URL` to your public showcase and run `make collection` (or "Sync now" on the dashboard). The dashboard's *My collection* tab shows every card with Collectr's value and daily move, your portfolio total in your currency, and a **trade-up board**: current deals ranked by instant equity (market value − asking price) with a "fits" flag when the ask is under your whole portfolio value.
 - Alerts: console, macOS notification, optional `SNIPE_WEBHOOK_URL` (Discord/Slack-compatible). State is in `cardsnipe.db` (gitignored).
-- **Dashboard**: `make jobs` (or `make dash`) and open [http://127.0.0.1:5000/snipe](http://127.0.0.1:5000/snipe). Every feature stores its data and shows up there: deals (filter by deal/♻️ regrade lane and source), scheduled/placed/failed snipes (cancel from the page), the watchlist (add, pause, remove targets), every scan run (duration, counts, errors such as "Facebook not logged in"), and every listing the sniper ever looked at. It refreshes itself every 30 s while `make snipe` runs.
+- **Dashboard**: `make dash` and open [http://127.0.0.1:5000/snipe](http://127.0.0.1:5000/snipe) (set `DASHBOARD_PORT` if 5000 is taken by macOS AirPlay). Every feature stores its data and shows up there: deals (filter by deal/♻️ regrade lane, source and ⚠️ irregular flag, with the market value each was judged against), scheduled/placed/failed snipes (cancel from the page), market values per grade and source for every target (refetch buttons), your Collectr collection and trade-up board, the watchlist (add, pause, remove targets), every scan run (duration, counts, errors such as "Facebook not logged in"), and every listing the sniper ever looked at. It refreshes itself every 30 s while `make snipe` runs.
 
 Use your own eBay/Facebook accounts and keep the caps honest: `--live` places binding bids.
 

@@ -15,6 +15,8 @@
         <button class="nav-item active" data-view="overview"><span>◫</span> Overview</button>
         <button class="nav-item" data-view="deals"><span>🔥</span> Deals</button>
         <button class="nav-item" data-view="bids"><span>🎯</span> Snipes</button>
+        <button class="nav-item" data-view="values"><span>💲</span> Values</button>
+        <button class="nav-item" data-view="collection"><span>🗂</span> My collection</button>
         <button class="nav-item" data-view="watchlist"><span>★</span> Watchlist</button>
         <button class="nav-item" data-view="scans"><span>⌁</span> Scan history</button>
         <button class="nav-item" data-view="listings"><span>▤</span> Everything seen</button>
@@ -31,6 +33,7 @@
 
       <section class="view active" id="view-overview">
         <div class="metrics" id="snipe-metrics"></div>
+        <div class="metrics" id="snipe-metrics-2" style="margin-top:12px"></div>
         <div class="grid two">
           <article class="panel"><div class="panel-head"><div><p class="eyebrow">LATEST</p><h3>Newest deals</h3></div><button class="text-button" data-view-link="deals">View all →</button></div><div id="latest-deals" class="stack"></div></article>
           <article class="panel"><div class="panel-head"><div><p class="eyebrow">BREAKDOWN</p><h3>Deals by target</h3></div></div><div id="by-target"></div><div class="panel-head" style="margin-top:18px"><div><p class="eyebrow">SOURCES</p><h3>Deals by source</h3></div></div><div id="by-source"></div></article>
@@ -43,8 +46,8 @@
 
       <section class="view" id="view-deals">
         <article class="panel">
-          <div class="toolbar"><label class="compact-control">Lane<select id="deal-lane"><option value="">All</option><option value="deal">Deal</option><option value="regrade">♻️ Regrade</option></select></label><label class="compact-control">Source<select id="deal-source"><option value="">All</option><option value="ebay">eBay</option><option value="facebook">Facebook</option></select></label><label class="compact-control">Search<input id="deal-search" class="search" placeholder="title, target, grade"></label></div>
-          <div class="table-wrap"><table><thead><tr><th>When</th><th>Lane</th><th>Listing</th><th>Grade</th><th>Price</th><th>Under cap</th><th>Target</th><th>Action</th></tr></thead><tbody id="deals-table"></tbody></table></div>
+          <div class="toolbar"><label class="compact-control">Lane<select id="deal-lane"><option value="">All</option><option value="deal">Deal</option><option value="regrade">♻️ Regrade</option></select></label><label class="compact-control">Source<select id="deal-source"><option value="">All</option><option value="ebay">eBay</option><option value="facebook">Facebook</option></select></label><label class="compact-control">Flag<select id="deal-flag"><option value="">All</option><option value="clean">Clean only</option><option value="irregular">⚠️ Irregular only</option></select></label><label class="compact-control">Search<input id="deal-search" class="search" placeholder="title, target, grade"></label></div>
+          <div class="table-wrap"><table><thead><tr><th>When</th><th>Lane</th><th>Listing</th><th>Grade</th><th>Price</th><th>Market value</th><th>Under</th><th>Target</th><th>Action</th></tr></thead><tbody id="deals-table"></tbody></table></div>
         </article>
       </section>
 
@@ -53,6 +56,30 @@
           <div class="panel-head"><div><p class="eyebrow">AUCTION SNIPES</p><h3>Scheduled, fired and finished</h3></div></div>
           <div class="table-wrap"><table><thead><tr><th>#</th><th>Status</th><th>Listing</th><th>Max bid</th><th>Ends</th><th>Fires</th><th>Result</th><th></th></tr></thead><tbody id="bids-table"></tbody></table></div>
         </article>
+      </section>
+
+      <section class="view" id="view-values">
+        <article class="panel">
+          <div class="panel-head"><div><p class="eyebrow">MARKET VALUE PER GRADE</p><h3>Cheapest of TCGPlayer · PriceCharting · eBay sold</h3></div><div class="target-actions"><button class="button secondary small" id="revalue" title="Re-judge every listing already seen with these values">Re-judge seen listings</button><button class="button secondary small" id="refresh-values">Refetch all</button></div></div>
+          <p class="detail-meta">Value = the lowest figure any source reports for that grade bucket, converted to your currency. A listing is a <strong>deal</strong> at ≥ bargain% under value and <strong>⚠️ irregular</strong> at ≥ irregular% under (too good — verify authenticity, condition and seller before paying).</p>
+          <div id="values" class="stack"></div>
+        </article>
+      </section>
+
+      <section class="view" id="view-collection">
+        <div class="metrics" id="collection-metrics"></div>
+        <div class="grid two">
+          <article class="panel">
+            <div class="panel-head"><div><p class="eyebrow">COLLECTR SHOWCASE</p><h3>What you own</h3></div><button class="button secondary small" id="sync-collection">Sync now</button></div>
+            <p class="detail-meta" id="collection-meta"></p>
+            <div class="table-wrap"><table><thead><tr><th>Card</th><th>Set</th><th>#</th><th>Value</th><th>24h</th><th>Qty</th></tr></thead><tbody id="collection-table"></tbody></table></div>
+          </article>
+          <article class="panel">
+            <div class="panel-head"><div><p class="eyebrow">TRADE-UP BOARD</p><h3>Deals ranked by instant equity</h3></div></div>
+            <p class="detail-meta">Equity = market value − asking price. "Fits" means the asking price is under your whole portfolio value, i.e. something you could reach by trading up.</p>
+            <div class="table-wrap"><table><thead><tr><th>Listing</th><th>Ask</th><th>Value</th><th>Equity</th><th>Fits</th></tr></thead><tbody id="tradeup-table"></tbody></table></div>
+          </article>
+        </div>
       </section>
 
       <section class="view" id="view-watchlist">
@@ -65,9 +92,13 @@
           <article class="panel">
             <div class="panel-head"><div><p class="eyebrow">ADD TARGET</p><h3>New card</h3></div></div>
             <form id="target-form">
-              <label>Name<input name="name" required placeholder="Umbreon VMAX Alt Art"></label>
+              <label>Name<input name="name" required placeholder="Moonbreon"></label>
               <label>Keywords (one per line, use a|b for alternatives)<textarea name="keywords" rows="3" required placeholder="umbreon&#10;vmax&#10;alt art|215/203"></textarea></label>
-              <div class="form-grid"><label>Max price (incl. shipping)<input name="max_price" type="number" step="0.01" required></label><label>Min price (fake floor)<input name="min_price" type="number" step="0.01"></label></div>
+              <p class="eyebrow" style="margin:6px 0 0">MARKET PRICING (TCGPlayer / PriceCharting)</p>
+              <div class="form-grid"><label>Card name<input name="card_name" placeholder="Umbreon VMAX (Alternate Art Secret)"></label><label>Set<input name="set_name" placeholder="Evolving Skies"></label></div>
+              <div class="form-grid"><label>Number<input name="number" placeholder="215/203"></label><label>Bargain at % under value<input name="bargain_pct" type="number" step="1" placeholder="20"></label></div>
+              <p class="eyebrow" style="margin:6px 0 0">HARD LIMITS (optional)</p>
+              <div class="form-grid"><label>Max price (incl. shipping)<input name="max_price" type="number" step="0.01" placeholder="market-driven if empty"></label><label>Min price (fake floor)<input name="min_price" type="number" step="0.01"></label></div>
               <div class="form-grid"><label>Max auction bid<input name="max_bid" type="number" step="0.01"></label><label>Exclude words (comma)<input name="exclude" placeholder="japanese, lot, bundle"></label></div>
               <div class="form-grid"><label class="check-control"><input name="regrade" type="checkbox"> ♻️ Crack & regrade lane</label><label class="check-control"><input name="graded_only" type="checkbox"> Graded only</label></div>
               <div class="form-grid"><label>Regrade grades low–high<input name="regrade_grades" placeholder="8 9.5"></label><label>Regrade max price<input name="regrade_max_price" type="number" step="0.01" placeholder="defaults to max"></label></div>

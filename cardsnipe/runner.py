@@ -41,6 +41,28 @@ class ScanReport:
         )
 
 
+def revalue_store(store: Store, watchlist: Watchlist, pricer) -> dict:
+    """Re-judge every stored listing against current market values (best match across targets)."""
+    valuations = {}
+    for target in watchlist.targets:
+        try:
+            valuations[target.name] = pricer.valuation(target) if (pricer and target.use_market) else None
+        except Exception as exc:
+            logger.warning("valuation failed for %r during revalue: %s", target.name, exc)
+            valuations[target.name] = None
+
+    def judge(listing: Listing) -> Match | None:
+        matches = []
+        for target in watchlist.targets:
+            match = evaluate(listing, target, watchlist.global_exclude, tag_ten_score=watchlist.tag_ten_score,
+                             tag_near_margin=watchlist.tag_near_margin, valuation=valuations.get(target.name))
+            if match:
+                matches.append(match)
+        return max(matches, key=lambda m: m.savings_pct) if matches else None
+
+    return store.revalue(judge)
+
+
 def bid_fire_time(end_time: datetime, settings: SnipeSettings) -> datetime:
     """When the scheduler should start the snipe (open the page, then wait for the lead window)."""
     return end_time - timedelta(seconds=settings.snipe_lead_seconds + BID_PREP_SECONDS)
@@ -56,6 +78,7 @@ class SnipeRunner:
         notifier,
         bid_executor: Callable[[ScheduledBid], tuple[str, str]] | None = None,
         messenger: Callable[[Listing, str, bool], tuple[str, str]] | None = None,
+        pricer=None,
     ):
         self.settings = settings
         self.watchlist = watchlist
@@ -64,6 +87,7 @@ class SnipeRunner:
         self.notifier = notifier
         self.bid_executor = bid_executor
         self.messenger = messenger
+        self.pricer = pricer  # cardsnipe.pricing.PriceService or None (cap-only mode)
         self._stop = threading.Event()
 
     # ── scanning ─────────────────────────────────────────────────────────
@@ -91,13 +115,41 @@ class SnipeRunner:
                 logger.warning("could not record scan: %s", exc)
         return report
 
+    def _valuation(self, target: Target, report: ScanReport):
+        if self.pricer is None or not target.use_market:
+            return None
+        try:
+            return self.pricer.valuation(target)
+        except Exception as exc:
+            message = f"valuation failed for {target.name!r}: {exc}"
+            logger.warning(message)
+            report.errors.append(message)
+            return None
+
+    @staticmethod
+    def _search_ceiling(target: Target, valuation) -> float | None:
+        """Price filter for marketplace searches: the highest bucket value we'd ever pay for."""
+        if valuation is None:
+            return target.max_price
+        values = [v[0] for b in ("raw", "7", "8", "9", "9.5", "10") if (v := valuation.value(b))]
+        if not values:
+            return target.max_price
+        ceiling = max(values) * (1 - target.bargain_pct / 100.0)
+        return min(ceiling, target.max_price) if target.max_price else ceiling
+
     def _scan_targets(self, report: ScanReport) -> None:
         for target in self.watchlist.enabled_targets():
+            valuation = self._valuation(target, report)
+            ceiling = self._search_ceiling(target, valuation)
+            if ceiling is None:
+                report.errors.append(f"{target.name!r}: no market value and no max_price — skipped")
+                continue
+            search_target = target.with_ceiling(ceiling)
             for name, source in self.sources.items():
                 if not target.uses_source(name):
                     continue
                 try:
-                    listings = source.find(target)
+                    listings = source.find(search_target)
                 except Exception as exc:
                     message = f"{name} search failed for {target.name!r}: {exc}"
                     logger.warning(message)
@@ -105,14 +157,15 @@ class SnipeRunner:
                     continue
                 report.scanned += len(listings)
                 for listing in listings:
-                    self._handle_listing(listing, target, report)
+                    self._handle_listing(listing, target, report, valuation)
 
-    def _handle_listing(self, listing: Listing, target: Target, report: ScanReport) -> None:
+    def _handle_listing(self, listing: Listing, target: Target, report: ScanReport, valuation=None) -> None:
         if self.store.is_seen(listing):
             return
         match = evaluate(
             listing, target, self.watchlist.global_exclude,
             tag_ten_score=self.watchlist.tag_ten_score, tag_near_margin=self.watchlist.tag_near_margin,
+            valuation=valuation,
         )
         self.store.record_listing(listing, match)
         report.new_listings += 1

@@ -45,6 +45,11 @@ class SeenListing(Base):
     lane = Column(String(20))
     grade = Column(String(20))
     tag_score = Column(Integer)
+    market_value = Column(Float)          # value for the listing's grade bucket, listing currency
+    value_source = Column(String(30))     # tcgplayer / pricecharting / ebay_sold
+    value_bucket = Column(String(8))
+    irregular = Column(Boolean, default=False)
+    irregular_reason = Column(String(80))
     notified = Column(Boolean, default=False)
     action = Column(String(40))
     action_detail = Column(Text)
@@ -68,6 +73,50 @@ class ScheduledBid(Base):
     result = Column(Text)
     created = Column(DateTime, default=utcnow)
     updated = Column(DateTime, default=utcnow)
+
+
+class ValuationRow(Base):
+    """Cached market valuation per target (JSON payload from cardsnipe.pricing.Valuation)."""
+
+    __tablename__ = "valuations"
+
+    id = Column(Integer, primary_key=True)
+    target_name = Column(String(200), unique=True, nullable=False)
+    currency = Column(String(8))
+    payload = Column(Text, nullable=False)
+    fetched_at = Column(DateTime, default=utcnow)
+
+
+class CollectionItem(Base):
+    """A card in the user's Collectr showcase (what they can trade up from)."""
+
+    __tablename__ = "collection_items"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(Text, nullable=False)
+    set_name = Column(Text)
+    rarity = Column(Text)
+    number = Column(String(40))
+    value_usd = Column(Float)
+    change_usd = Column(Float)
+    change_pct = Column(Float)
+    quantity = Column(Integer, default=1)
+    graded = Column(Boolean, default=False)
+    synced_at = Column(DateTime, default=utcnow)
+
+
+class CollectionSnapshot(Base):
+    """Portfolio total per sync, so the dashboard can chart it over time."""
+
+    __tablename__ = "collection_snapshots"
+
+    id = Column(Integer, primary_key=True)
+    synced_at = Column(DateTime, default=utcnow)
+    source_url = Column(Text)
+    owner = Column(Text)
+    total_value_usd = Column(Float)
+    total_cards = Column(Integer)
+    total_graded = Column(Integer)
 
 
 class ScanRun(Base):
@@ -98,7 +147,21 @@ class Store:
         else:
             self.engine = create_engine(database_url, connect_args={"check_same_thread": False})
         Base.metadata.create_all(self.engine)
+        self._add_missing_columns()
         self._session_factory = sessionmaker(bind=self.engine, expire_on_commit=False)
+
+    def _add_missing_columns(self) -> None:
+        """SQLite-only forward migration: add columns that newer code expects on existing tables."""
+        from sqlalchemy import inspect, text
+
+        inspector = inspect(self.engine)
+        with self.engine.begin() as conn:
+            for table in Base.metadata.sorted_tables:
+                existing = {c["name"] for c in inspector.get_columns(table.name)}
+                for column in table.columns:
+                    if column.name not in existing:
+                        ddl = f'ALTER TABLE {table.name} ADD COLUMN {column.name} {column.type.compile(self.engine.dialect)}'
+                        conn.execute(text(ddl))
 
     def session(self):
         return self._session_factory()
@@ -127,14 +190,54 @@ class Store:
             row.listing_type = listing.listing_type
             row.end_time = listing.end_time
             row.location = listing.location
-            if match:
-                row.matched_target = match.target.name
-                row.savings_pct = match.savings_pct
-                row.lane = match.lane
-                row.grade = f"{match.grade[0]} {match.grade[1]:g}" if match.grade else None
-                row.tag_score = match.tag_score
+            self._apply_match(row, match)
             session.commit()
             return row
+
+    @staticmethod
+    def _apply_match(row: SeenListing, match: Match | None) -> None:
+        if match is None:
+            row.matched_target = None
+            row.savings_pct = row.lane = row.grade = row.tag_score = None
+            row.market_value = row.value_source = row.value_bucket = row.irregular_reason = None
+            row.irregular = False
+            return
+        row.matched_target = match.target.name
+        row.savings_pct = match.under_value_pct if match.market_value else match.savings_pct
+        row.lane = match.lane
+        row.grade = f"{match.grade[0]} {match.grade[1]:g}" if match.grade else None
+        row.tag_score = match.tag_score
+        row.market_value = match.market_value
+        row.value_source = match.value_source or None
+        row.value_bucket = match.value_bucket or None
+        row.irregular = match.irregular
+        row.irregular_reason = match.irregular_reason or None
+
+    def revalue(self, evaluate_fn) -> dict:
+        """Re-judge every stored listing with `evaluate_fn(listing) -> Match | None`.
+
+        Used after valuations change so old cap-based matches get market numbers (or drop
+        out). Alerts/actions already taken are left untouched.
+        """
+        from datetime import datetime as _dt
+
+        stats = {"checked": 0, "matched": 0, "unmatched": 0, "changed": 0}
+        with self.session() as session:
+            for row in session.query(SeenListing).all():
+                listing = Listing(
+                    source=row.source, listing_id=row.listing_id, title=row.title or "", price=row.price,
+                    currency=row.currency or "", url=row.url or "", listing_type=row.listing_type or "bin",
+                    shipping=row.shipping, end_time=_aware(row.end_time), location=row.location or "",
+                )
+                before = (row.matched_target, row.market_value, row.lane, row.irregular)
+                match = evaluate_fn(listing)
+                self._apply_match(row, match)
+                stats["checked"] += 1
+                stats["matched" if match else "unmatched"] += 1
+                if before != (row.matched_target, row.market_value, row.lane, row.irregular):
+                    stats["changed"] += 1
+            session.commit()
+        return stats
 
     def mark_action(self, listing: Listing, action: str, detail: str = "", notified: bool | None = None) -> None:
         with self.session() as session:
@@ -165,6 +268,68 @@ class Store:
             if source:
                 query = query.filter(SeenListing.source == source)
             return query.order_by(SeenListing.first_seen.desc()).limit(limit).all()
+
+    # ── valuations ───────────────────────────────────────────────────────
+    def save_valuation(self, valuation) -> None:
+        import json
+
+        with self.session() as session:
+            row = session.query(ValuationRow).filter_by(target_name=valuation.target_name).first()
+            if row is None:
+                row = ValuationRow(target_name=valuation.target_name)
+                session.add(row)
+            row.currency = valuation.currency
+            row.payload = json.dumps(valuation.to_dict())
+            row.fetched_at = valuation.fetched_at
+            session.commit()
+
+    def load_valuation(self, target_name: str) -> dict | None:
+        import json
+
+        with self.session() as session:
+            row = session.query(ValuationRow).filter_by(target_name=target_name).first()
+            return json.loads(row.payload) if row else None
+
+    def all_valuations(self) -> list[dict]:
+        import json
+
+        with self.session() as session:
+            rows = session.query(ValuationRow).order_by(ValuationRow.target_name).all()
+            return [json.loads(r.payload) for r in rows]
+
+    # ── collection (Collectr) ────────────────────────────────────────────
+    def replace_collection(self, items: list[dict], total_value_usd: float | None, source_url: str,
+                           owner: str = "", total_graded: int | None = None) -> CollectionSnapshot:
+        now = utcnow()
+        with self.session() as session:
+            session.query(CollectionItem).delete()
+            for item in items:
+                session.add(CollectionItem(
+                    name=item["name"], set_name=item.get("set_name"), rarity=item.get("rarity"),
+                    number=item.get("number"), value_usd=item.get("value_usd"), change_usd=item.get("change_usd"),
+                    change_pct=item.get("change_pct"), quantity=int(item.get("quantity") or 1),
+                    graded=bool(item.get("graded")), synced_at=now,
+                ))
+            snapshot = CollectionSnapshot(
+                synced_at=now, source_url=source_url, owner=owner,
+                total_value_usd=total_value_usd if total_value_usd is not None
+                else sum((i.get("value_usd") or 0) * int(i.get("quantity") or 1) for i in items),
+                total_cards=sum(int(i.get("quantity") or 1) for i in items),
+                total_graded=total_graded if total_graded is not None else sum(1 for i in items if i.get("graded")),
+            )
+            session.add(snapshot)
+            session.commit()
+            return snapshot
+
+    def collection(self) -> tuple[list[CollectionItem], CollectionSnapshot | None]:
+        with self.session() as session:
+            items = session.query(CollectionItem).order_by(CollectionItem.value_usd.desc()).all()
+            latest = session.query(CollectionSnapshot).order_by(CollectionSnapshot.synced_at.desc()).first()
+            return items, latest
+
+    def collection_history(self, limit: int = 90) -> list[CollectionSnapshot]:
+        with self.session() as session:
+            return session.query(CollectionSnapshot).order_by(CollectionSnapshot.synced_at.desc()).limit(limit).all()
 
     # ── scan history ─────────────────────────────────────────────────────
     def record_scan(self, started: datetime, finished: datetime, sources: list[str], live: bool,
@@ -216,6 +381,8 @@ class Store:
                 "deals_total": deals_q.count(),
                 "deals_24h": deals_q.filter(SeenListing.first_seen >= day_ago).count(),
                 "regrade_total": deals_q.filter(SeenListing.lane == "regrade").count(),
+                "irregular_total": deals_q.filter(SeenListing.irregular.is_(True)).count(),
+                "valuations": session.query(func.count(ValuationRow.id)).scalar() or 0,
                 "messages_sent": session.query(func.count(SeenListing.id))
                 .filter(SeenListing.action == "message_sent").scalar() or 0,
                 "deals_by_source": by_source,

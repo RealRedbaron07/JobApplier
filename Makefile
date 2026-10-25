@@ -4,12 +4,12 @@ PY ?= python3
 SNIPE := $(PY) snipe.py
 
 .DEFAULT_GOAL := help
-.PHONY: help setup test jobs dash login snipe live scan deals bids list add rm cancel
+.PHONY: help setup test jobs dash login snipe live scan deals bids list value collection add rm cancel
 
 help: ## show this list
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
 	@echo
-	@echo "  add example: make add NAME=\"Moonbreon\" MAX=550 MIN=250 BID=600 KW=\"umbreon vmax 'alt art|215/203'\" REGRADE=1"
+	@echo "  add example: make add NAME=\"Moonbreon\" CARD=\"Umbreon VMAX (Alternate Art Secret)\" SET=\"Evolving Skies\" NUM=215/203 KW=\"umbreon vmax 'alt art|215/203'\" REGRADE=1"
 
 setup: ## install dependencies
 	$(PY) -m pip install -r requirements.txt
@@ -43,9 +43,16 @@ bids: ## scheduled / finished snipes
 list: ## show the watchlist
 	$(SNIPE) list
 
-add: ## add a target: NAME= MAX= [MIN=] [BID=] [KW="..."] [REGRADE=1] [GRADED=1]
-	@test -n "$(NAME)" -a -n "$(MAX)" || (echo 'usage: make add NAME="..." MAX=550 [MIN=250] [BID=600] [KW="a b \"c|d\""] [REGRADE=1]'; exit 1)
-	$(SNIPE) add "$(NAME)" --max $(MAX) $(if $(MIN),--min $(MIN)) $(if $(BID),--max-bid $(BID)) \
+value: ## market values per grade (TCGPlayer / PriceCharting / eBay sold); REFRESH=1 to refetch
+	$(SNIPE) value $(if $(NAME),"$(NAME)") $(if $(REFRESH),--refresh)
+
+collection: ## sync + show your Collectr showcase (COLLECTR_SHOWCASE_URL)
+	$(SNIPE) collection
+
+add: ## add a target: NAME= CARD= SET= NUM= [MAX=] [MIN=] [BID=] [KW="..."] [REGRADE=1] [GRADED=1] [BARGAIN=20]
+	@test -n "$(NAME)" || (echo 'usage: make add NAME="Moonbreon" CARD="Umbreon VMAX (Alternate Art Secret)" SET="Evolving Skies" NUM=215/203 [MAX=550] [BID=600] [KW="a b \"c|d\""] [REGRADE=1]'; exit 1)
+	$(SNIPE) add "$(NAME)" $(if $(CARD),--card "$(CARD)") $(if $(SET),--set "$(SET)") $(if $(NUM),--number "$(NUM)") \
+		$(if $(MAX),--max $(MAX)) $(if $(MIN),--min $(MIN)) $(if $(BID),--max-bid $(BID)) $(if $(BARGAIN),--bargain $(BARGAIN)) \
 		$(if $(KW),--keywords $(KW)) $(if $(REGRADE),--regrade) $(if $(GRADED),--graded-only)
 
 rm: ## remove a target: NAME=

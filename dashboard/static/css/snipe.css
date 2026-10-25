@@ -3,6 +3,15 @@
 .lane-pill.regrade{background:#f3ecff;color:#5b3fa6}
 .lane-pill.auction{background:#fff3dc;color:#8a5a00}
 .lane-pill.facebook{background:#e3ecff;color:#2b4fa0}
+.lane-pill.irregular{background:#ffe3e0;color:#a73d37}
+tr.row-irregular td{background:#fff7f6}
+.value-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-top:4px}
+.value-cell{border:1px solid var(--line);border-radius:9px;padding:9px 10px;display:grid;gap:2px}
+.value-cell small{color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.04em}
+.value-cell strong{font-size:15px}
+.value-cell em{font-style:normal;color:var(--muted);font-size:10px}
+.value-cell .all-sources{color:#8a5a00}
+.value-cell.muted{opacity:.5}
 .status-pill{display:inline-flex;border-radius:99px;padding:4px 8px;font-size:10px;font-weight:700;background:#eef1ee;color:#4a5551}
 .status-pill.pending{background:#fff3dc;color:#8a5a00}
 .status-pill.firing{background:#ffe3e0;color:#a73d37}
