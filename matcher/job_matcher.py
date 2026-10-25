@@ -1,5 +1,6 @@
 from typing import Dict
 import re
+import os
 
 class JobMatcher:
     def __init__(self, user_profile: Dict):
@@ -11,7 +12,8 @@ class JobMatcher:
             'aws', 'docker', 'api', 'software', 'developer', 'engineer',
             'data', 'machine learning', 'ai', 'web development', 'backend',
             'frontend', 'full stack', 'mobile', 'android', 'ios', 'c++', 'c#',
-            'typescript', 'cloud', 'devops', 'cybersecurity'
+            'typescript', 'cloud', 'devops', 'cybersecurity', 'kubernetes',
+            'django', 'flask', 'spring', 'angular', 'vue', 'mongodb', 'postgresql'
         ]
         
         self.fintech_keywords = [
@@ -22,17 +24,38 @@ class JobMatcher:
         ]
         
         self.internship_keywords = [
-            'intern', 'internship', 'co-op', 'summer', 'undergraduate',
-            'student', 'entry level', 'junior', 'trainee', 'associate'
+            'intern', 'internship', 'co-op', 'co op', 'coop', 'summer', 'undergraduate',
+            'student', 'entry level', 'entry-level', 'junior', 'trainee', 'associate', 'graduate'
         ]
         
         self.red_flags = [
             'senior', '5+ years', '10+ years', 'phd required', 'graduate degree required',
-            'extensive experience', 'lead', 'principal', 'staff engineer', 'architect'
+            'extensive experience', 'lead', 'principal', 'staff engineer', 'architect',
+            '7+ years', '8+ years', 'masters required'
         ]
+        
+        # Get preferred locations from environment or config (for flexible scoring)
+        self.preferred_locations = self._get_preferred_locations()
+    
+    def _get_preferred_locations(self) -> list:
+        """Get preferred locations from environment variable or config."""
+        # Check if user profile has location preferences
+        if self.user_profile.get('preferred_locations'):
+            return [loc.lower() for loc in self.user_profile['preferred_locations']]
+        
+        # Fallback to environment variable
+        env_locations = os.getenv('PREFERRED_LOCATIONS', '')
+        if env_locations:
+            return [loc.strip().lower() for loc in env_locations.split(',')]
+        
+        # Default: remote and hybrid are universally preferred
+        return ['remote', 'hybrid']
     
     def calculate_match_score(self, job: Dict) -> int:
-        """Calculate match score between user profile and job (0-100)."""
+        """Calculate match score between user profile and job (0-100).
+        
+        Improved algorithm that is more generalizable and less aggressive with penalties.
+        """
         job_title = job.get('title', '').lower()
         job_description = job.get('description', '').lower()
         job_location = job.get('location', '').lower()
@@ -48,56 +71,55 @@ class JobMatcher:
         
         score = 0
         
-        # 1. Check if it's an internship (30 points)
+        # 1. Entry-level/Internship position check (40 points max)
+        # Less aggressive - give partial credit for entry-level keywords
         internship_matches = sum(1 for keyword in self.internship_keywords if keyword in combined_text)
         if internship_matches > 0:
-            score += min(30, internship_matches * 10)
+            score += min(40, internship_matches * 10)
+        elif 'entry' in combined_text or 'junior' in combined_text or 'new grad' in combined_text:
+            # Partial credit for entry-level roles without explicit "intern" keyword
+            score += 20
         else:
-            # If no internship keywords, heavily penalize
-            score -= 20
+            # Only minor penalty for missing internship keywords (not -20)
+            score -= 5
         
         # 2. Check for tech keywords (25 points)
         tech_matches = sum(1 for keyword in self.tech_keywords if keyword in combined_text)
-        score += min(25, tech_matches * 3)
+        score += min(25, tech_matches * 2)
         
-        # 3. Check for fintech keywords (20 points)
+        # 3. Check for fintech keywords (15 points) - optional bonus
         fintech_matches = sum(1 for keyword in self.fintech_keywords if keyword in combined_text)
-        score += min(20, fintech_matches * 4)
+        score += min(15, fintech_matches * 3)
         
-        # 4. User skills match (15 points)
+        # 4. User skills match (25 points) - most important
         user_skills = [skill.lower() for skill in self.user_profile.get('skills', [])]
         if user_skills:
             skill_matches = sum(1 for skill in user_skills if skill in combined_text)
-            score += min(15, skill_matches * 5)
+            # More generous scoring for skill matches
+            score += min(25, skill_matches * 3)
         else:
-            # Default skills for CS student if profile is empty
-            default_skills = ['python', 'java', 'sql', 'javascript']
-            skill_matches = sum(1 for skill in default_skills if skill in combined_text)
-            score += min(15, skill_matches * 4)
+            # Default skills if profile is empty - use tech keywords as proxy
+            skill_matches = sum(1 for keyword in self.tech_keywords[:8] if keyword in combined_text)
+            score += min(20, skill_matches * 3)
         
-        # 5. Location bonus (15 points)
-        if 'toronto' in job_location:
-            score += 15
-        elif 'canada' in job_location:
-            score += 10
-        elif any(city in job_location for city in ['istanbul', 'istanbul', 'ankara', 'antalya']):
-            score += 8
-        elif 'turkey' in job_location or 'türkiye' in job_location:
-            score += 5
-        elif 'remote' in job_location or 'hybrid' in job_location:
-            score += 5
+        # 5. Location scoring (10 points) - flexible based on preferences
+        location_score = 0
+        for preferred_loc in self.preferred_locations:
+            if preferred_loc in job_location:
+                location_score = 10
+                break
+        # Always give partial credit for remote/hybrid
+        if location_score == 0 and ('remote' in job_location or 'hybrid' in job_location):
+            location_score = 5
+        score += location_score
         
-        # 5b. Field hybrid bonus (CS + Econ)
-        if ('computer science' in combined_text or 'software' in combined_text) and \
-           ('economics' in combined_text or 'finance' in combined_text or 'econometrics' in combined_text):
-            score += 10
-        
-        # 6. Red flags (deductions)
+        # 6. Red flags (deductions) - less aggressive
         red_flag_count = sum(1 for flag in self.red_flags if flag in combined_text)
-        score -= red_flag_count * 15
+        # Reduced penalty from -15 to -10 per flag
+        score -= red_flag_count * 10
         
         # 7. Education level check (bonus for undergrad-friendly)
-        if any(word in combined_text for word in ['undergraduate', 'sophomore', 'junior', 'bachelor']):
+        if any(word in combined_text for word in ['undergraduate', 'sophomore', 'junior year', 'bachelor', 'pursuing degree']):
             score += 10
         
         # Ensure score is between 0 and 100
