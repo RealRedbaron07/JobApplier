@@ -345,6 +345,7 @@ let broadStatusInFlight = false;
 
 function renderDiscoveryResults() {
   const source = $('#broad-result-source').value;
+  const format = $('#broad-result-format').value;
   const query = $('#broad-result-query').value.trim().toLowerCase();
   const set = $('#broad-result-set').value.trim().toLowerCase();
   const type = $('#broad-result-type').value.trim().toLowerCase();
@@ -360,12 +361,13 @@ function renderDiscoveryResults() {
   maxField.setAttribute('aria-invalid', String(!!invalidMax || reversed));
   const priceActive = min != null || max != null;
   const rows = discoveryResultData.listings.filter(row => !priceError && (!source || row.source === source)
+    && (!format || row.listing_type === format)
     && (!priceActive || (Number.isFinite(row.total_price) && (min == null || row.total_price >= min) && (max == null || row.total_price <= max)))
     && (!set || row.title.toLowerCase().includes(set))
     && (!type || row.title.toLowerCase().includes(type))
     && (!query || `${row.title} ${row.condition} ${row.promotion} ${row.discovery_routes.join(' ')}`.toLowerCase().includes(query)));
   const scan = discoveryResultData.scan;
-  $('#broad-price-help').textContent = priceError || `Price filters${scan?.currency ? ` (${scan.currency})` : ''} include reported shipping, before tax. Unknown totals are hidden while a price range is set. Set and type match listing titles only; verify on the seller page. Filters do not start a scan.`;
+  $('#broad-price-help').textContent = priceError || `Price filters${scan?.currency ? ` (${scan.currency})` : ''} include reported shipping, before tax. Unknown totals are hidden while a price range is set. Marketplace listings count as fixed price. Set and type match listing titles only; verify on the seller page. Filters do not start a scan.`;
   $('#broad-result-count').textContent = scan ? `${rows.length} of ${discoveryResultData.listings.length} candidates` : 'No scan yet';
   $('#broad-result-meta').textContent = scan
     ? `Scanned ${new Date(scan.started).toLocaleString()} · ${scan.scanned} rows read · ${scan.errors.length} source errors${scan.budget != null ? ` · older scan capped at ${money(scan.currency, scan.budget)} listed price; scan again to include higher prices` : ''}. Seller promotions and bids are leads, without an independently verified market price.`
@@ -436,6 +438,7 @@ for (const [id, path] of [['#facebook-login', ''], ['#facebook-finish', '/finish
   });
 }
 $('#broad-result-source').addEventListener('change', renderDiscoveryResults);
+$('#broad-result-format').addEventListener('change', renderDiscoveryResults);
 ['#broad-result-query', '#broad-result-set', '#broad-result-type'].forEach(selector => $(selector).addEventListener('input', renderDiscoveryResults));
 ['#broad-min-price', '#broad-max-price'].forEach(selector => $(selector).addEventListener('input', renderDiscoveryResults));
 $('#broad-price-clear').addEventListener('click', () => {

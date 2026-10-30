@@ -79,6 +79,8 @@ The scan covers promotions/coupons, newest listings, ending auctions, offers, lo
 
 Filter imported candidates using **Min price** and **Max price** together under **Scan results**. Bounds include reported shipping, before tax and other charges; unknown totals are hidden while either bound is set. Blank bounds leave that side open. Optional **Set in title** and **Type in title** fields combine with the price, site and keyword filters. They match seller titles, not verified card metadata. **Clear price** resets only the price range. Filters update immediately and do not trigger scans or judge whether a card is a value play.
 
+**Buying format** filters the same saved candidates to auctions, Buy Now/fixed-price listings, or both. Marketplace listings count as fixed price. The filter combines with price, site, set, type and keywords. Auction prices are current bids, not final prices.
+
 `Config.BROWSER_SCANS_ENABLED` permits these explicit read-only Chrome scans and scanner sign-in. `Config.EXTERNAL_ACCESS_ENABLED` stays hard-disabled: no eBay API, TCGplayer/PriceCharting calls, exchange-rate requests, Collectr sync, career-board fetches or paid AI services run from this workflow. Existing API keys are stripped from the broad scanner settings. The old scanner CLI and targeted network/valuation endpoints remain disabled. The app never bids, buys, or sends seller messages.
 
 The scanner uses a persistent, separate Chrome profile. Your normal browser's Facebook login is not copied into it. If Marketplace asks for authentication, expand **Marketplace scanner sign-in**, sign in once, and click **Finish scanner sign-in**. The sign-in window stays open until you finish or cancel. Do not enter credentials into a short-lived scan window.

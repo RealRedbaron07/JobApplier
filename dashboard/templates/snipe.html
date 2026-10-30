@@ -56,6 +56,7 @@
           <p id="broad-result-meta" class="detail-meta">Promotions and asking prices are leads. Below-market value is not independently verified.</p>
           <div class="toolbar candidate-filters">
             <label class="compact-control">Site<select id="broad-result-source"><option value="">All sites</option><option value="ebay">eBay</option><option value="facebook">Marketplace</option></select></label>
+            <label class="compact-control">Buying format<select id="broad-result-format"><option value="">Auctions + fixed price</option><option value="auction">Auctions</option><option value="bin">Buy Now / fixed price</option></select></label>
             <label class="compact-control">Search results<input id="broad-result-query" class="search" placeholder="Filter any card, lot, condition or promotion"></label>
             <label class="compact-control">Set in title<input id="broad-result-set" class="search" placeholder="e.g. Evolving Skies"></label>
             <label class="compact-control">Type in title<input id="broad-result-type" class="search" placeholder="e.g. PSA, lot, sealed"></label>
@@ -63,7 +64,7 @@
             <label class="compact-control price-filter">Max price<input id="broad-max-price" type="number" min="0" step="0.01" inputmode="decimal" placeholder="No maximum" aria-describedby="broad-price-help"></label>
             <button class="button secondary small" id="broad-price-clear" type="button">Clear price</button>
           </div>
-          <p id="broad-price-help" class="detail-meta" role="status" aria-live="polite">Price includes reported shipping, before tax. Unknown totals are hidden while a price range is set. Set and type match listing titles only; check the seller page.</p>
+          <p id="broad-price-help" class="detail-meta" role="status" aria-live="polite">Price includes reported shipping, before tax. Unknown totals are hidden while a price range is set. Marketplace listings count as fixed price. Set and type match listing titles only; check the seller page.</p>
           <div class="table-wrap"><table><thead><tr><th>Listing</th><th>Why it surfaced</th><th>Ask / bid + shipping</th><th>Condition</th><th>Seen</th><th></th></tr></thead><tbody id="broad-results-table"><tr><td colspan="6" class="empty">Click Scan all cards automatically to collect listings here.</td></tr></tbody></table></div>
         </article>
         <details class="manual-browse"><summary>Open searches manually (optional)</summary>

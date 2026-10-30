@@ -215,13 +215,13 @@ test('one click starts a broad scan and completion imports visible results witho
 
 function priceFilterPage() {
   const listings = [
-    ['shipping-included Evolving Skies PSA', 8, 15, 'ebay'], ['upper-boundary Evolving Skies raw', 20, 20, 'ebay'],
+    ['shipping-included Evolving Skies PSA', 8, 15, 'ebay', 'bin'], ['upper-boundary Evolving Skies raw', 20, 20, 'ebay', 'auction'],
     ['above-with-shipping Base Set PSA', 16, 25, 'ebay'], ['unknown-shipping', 12, null, 'ebay'],
     ['unknown-price', null, null, 'ebay'], ['free-pickup', 0, 0, 'facebook'],
-  ].map(([title, price, total_price, source], id) => ({
+  ].map(([title, price, total_price, source, listing_type = 'bin'], id) => ({
     id, title, price, total_price, source, currency: 'CAD',
     shipping: total_price == null ? null : total_price - price,
-    url: 'https://www.ebay.ca/itm/12345678901', listing_type: 'bin', condition: '',
+    url: 'https://www.ebay.ca/itm/12345678901', listing_type, condition: '',
     promotion: '', discovery_routes: [], last_seen: '2026-10-29T16:00:00Z',
   }));
   return boot({respond(url) {
@@ -293,6 +293,29 @@ test('set and type title filters combine with the high and low price limits with
   page.element('#broad-price-clear').click();
   assert.equal(page.element('#broad-result-set').value, 'Evolving Skies');
   assert.equal(page.element('#broad-result-type').value, 'PSA');
+  assert.equal(page.requests.length, 1);
+});
+
+test('auction and fixed-price filters combine with price and site without starting a scan', async () => {
+  const page = priceFilterPage();
+  await page.context.loadDiscoveryResults();
+  page.element('#broad-min-price').value = '15';
+  page.element('#broad-max-price').value = '20';
+  page.element('#broad-result-format').value = 'auction';
+  page.element('#broad-result-format').listeners.change();
+  assert.equal(page.element('#broad-result-count').textContent, '1 of 6 candidates');
+  assert.match(page.element('#broad-results-table').innerHTML, /upper-boundary/);
+  assert.doesNotMatch(page.element('#broad-results-table').innerHTML, /shipping-included/);
+  page.element('#broad-result-format').value = 'bin';
+  page.element('#broad-result-format').listeners.change();
+  assert.equal(page.element('#broad-result-count').textContent, '1 of 6 candidates');
+  assert.match(page.element('#broad-results-table').innerHTML, /shipping-included/);
+  page.element('#broad-result-source').value = 'facebook';
+  page.element('#broad-result-source').listeners.change();
+  assert.equal(page.element('#broad-result-count').textContent, '0 of 6 candidates');
+  page.element('#broad-price-clear').click();
+  assert.equal(page.element('#broad-result-count').textContent, '1 of 6 candidates');
+  assert.match(page.element('#broad-results-table').innerHTML, /free-pickup/);
   assert.equal(page.requests.length, 1);
 });
 
