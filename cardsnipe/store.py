@@ -417,10 +417,29 @@ class Store:
             return session.query(ScanRun).order_by(ScanRun.started.desc()).limit(limit).all()
 
     def discovery_results(self):
+        import json
+
         with self.session() as session:
             latest = session.query(ScanRun).filter_by(kind="broad").order_by(ScanRun.started.desc()).first()
             rows = (session.query(SeenListing).filter_by(discovery_at=latest.started, dismissed=False)
                     .order_by(SeenListing.promotion.desc(), SeenListing.price.asc()).limit(500).all()) if latest else []
+            if latest:
+                try:
+                    errors = json.loads(latest.errors or "[]")
+                except ValueError:
+                    errors = []
+                for source in ("ebay", "facebook"):
+                    if (source not in (latest.sources or "").split(",") or any(row.source == source for row in rows)
+                            or not any(error.startswith(source + " ") for error in errors)):
+                        continue
+                    previous = (session.query(SeenListing.discovery_at)
+                                .filter(SeenListing.source == source, SeenListing.dismissed.isnot(True),
+                                        SeenListing.discovery_at.isnot(None), SeenListing.discovery_at < latest.started)
+                                .order_by(SeenListing.discovery_at.desc()).first())
+                    if previous:
+                        rows += (session.query(SeenListing)
+                                 .filter_by(source=source, discovery_at=previous[0], dismissed=False)
+                                 .order_by(SeenListing.promotion.desc(), SeenListing.price.asc()).limit(500).all())
             return rows, latest
 
     def summary(self) -> dict:

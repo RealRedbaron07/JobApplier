@@ -342,6 +342,16 @@ document.querySelectorAll('[data-discovery-query]').forEach(link => link.addEven
 let discoveryResultData = {listings: [], scan: null};
 let completedBroadScan = null;
 let broadStatusInFlight = false;
+const CANDIDATE_REFERENCES_KEY = 'cardsnipe_candidate_references_v1';
+let candidateReferences = {};
+try { candidateReferences = JSON.parse(localStorage.getItem(CANDIDATE_REFERENCES_KEY)) || {}; } catch (_) {}
+const candidateKey = row => `${row.source}:${row.listing_id}:${row.currency}`;
+function candidateDiscount(row) {
+  if (row.source === 'facebook' && row.price != null && row.price <= 1) return null;
+  const reference = Number(candidateReferences[candidateKey(row)]);
+  return Number.isFinite(reference) && reference > 0 && Number.isFinite(row.total_price)
+    ? (reference - row.total_price) / reference * 100 : null;
+}
 
 function renderDiscoveryResults() {
   const source = $('#broad-result-source').value;
@@ -365,20 +375,37 @@ function renderDiscoveryResults() {
     && (!priceActive || (Number.isFinite(row.total_price) && (min == null || row.total_price >= min) && (max == null || row.total_price <= max)))
     && (!set || row.title.toLowerCase().includes(set))
     && (!type || row.title.toLowerCase().includes(type))
-    && (!query || `${row.title} ${row.condition} ${row.promotion} ${row.discovery_routes.join(' ')}`.toLowerCase().includes(query)));
+    && (!query || `${row.title} ${row.condition} ${row.promotion} ${row.discovery_routes.join(' ')}`.toLowerCase().includes(query)))
+    .sort((a, b) => Math.max(candidateDiscount(b) || 0, 0) - Math.max(candidateDiscount(a) || 0, 0));
   const scan = discoveryResultData.scan;
+  for (const [id, site, label] of [['#broad-all-leads', '', 'All'], ['#broad-ebay-leads', 'ebay', 'eBay'], ['#broad-facebook-leads', 'facebook', 'Marketplace']]) {
+    const button = $(id);
+    const matching = site ? discoveryResultData.listings.filter(row => row.source === site) : discoveryResultData.listings;
+    const earlier = matching.filter(row => row.discovery_at && row.discovery_at !== scan?.started).length;
+    button.textContent = `${label} ${matching.length}${earlier ? ` (${earlier} earlier)` : ''}`;
+    button.setAttribute('aria-pressed', String(source === site));
+  }
   $('#broad-price-help').textContent = priceError || `Price filters${scan?.currency ? ` (${scan.currency})` : ''} include reported shipping, before tax. Unknown totals are hidden while a price range is set. Marketplace listings count as fixed price. Set and type match listing titles only; verify on the seller page. Filters do not start a scan.`;
   $('#broad-result-count').textContent = scan ? `${rows.length} of ${discoveryResultData.listings.length} candidates` : 'No scan yet';
   $('#broad-result-meta').textContent = scan
     ? `Scanned ${new Date(scan.started).toLocaleString()} · ${scan.scanned} rows read · ${scan.errors.length} source errors${scan.budget != null ? ` · older scan capped at ${money(scan.currency, scan.budget)} listed price; scan again to include higher prices` : ''}. Seller promotions and bids are leads, without an independently verified market price.`
     : 'Promotions and asking prices are leads. Below-market value is not independently verified.';
-  $('#broad-results-table').innerHTML = rows.length ? rows.map(row => `<tr>
-    <td><a href="${esc(row.url)}" target="_blank" rel="noopener">${esc(row.title)}</a><span class="sub">${esc(row.source)} · ${row.listing_type === 'auction' ? 'Auction, current bid can rise' : 'Listed asking price'}${row.location ? ` · ${esc(row.location)}` : ''}</span></td>
+  $('#broad-results-table').innerHTML = rows.length ? rows.map(row => {
+    const key = candidateKey(row), reference = candidateReferences[key] ?? '', discount = candidateDiscount(row);
+    const comparison = discount == null ? (row.source === 'facebook' && row.price != null && row.price <= 1
+      ? 'Free / $1 may be a placeholder; confirm seller price'
+      : row.total_price == null ? 'Total unknown; check shipping first' : 'Enter your reference to compare')
+      : discount > 0 ? `Possible bargain: ${discount.toFixed(1)}% below your reference`
+      : discount < 0 ? `${Math.abs(discount).toFixed(1)}% above your reference` : 'At your reference';
+    return `<tr class="${discount > 0 ? 'candidate-bargain' : ''}">
+    <td><a href="${esc(row.url)}" target="_blank" rel="noopener">${esc(row.title)}</a><span class="sub">${esc(row.source)} · ${row.listing_type === 'auction' ? 'Auction, current bid can rise' : 'Listed asking price'}${row.location ? ` · ${esc(row.location)}` : ''}</span>${row.discovery_at && row.discovery_at !== scan?.started ? `<span class="sub over-budget">Earlier scan ${esc(new Date(row.discovery_at).toLocaleString())}; open listing to confirm availability</span>` : ''}</td>
     <td>${row.promotion ? `<div class="candidate-promotion">${esc(row.promotion)}</div>` : ''}${row.discovery_routes.map(route => `<span class="sub">${esc(route)}</span>`).join('')}</td>
     <td><strong>${row.price == null ? 'Price varies / unavailable' : esc(listingPrice(row))}</strong>${row.shipping != null && row.shipping > 0 ? `<span class="sub">Includes ${esc(money(row.currency, row.shipping))} shipping</span>` : ''}<span class="sub">Before tax and other charges</span></td>
+    <td><label class="compact-control">Your reference (${esc(row.currency)})<input class="candidate-reference" data-reference="${esc(key)}" aria-label="Your reference price for ${esc(row.title)}" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="Enter price" value="${esc(reference)}"></label><span class="sub">${esc(comparison)}</span></td>
     <td>${esc(row.condition || 'Not verified')}</td><td>${esc(ago(row.last_seen))}</td>
     <td><button class="button secondary small" data-dismiss="${row.id}">Remove</button></td>
-  </tr>`).join('') : `<tr><td colspan="6" class="empty">${priceError || (scan ? 'No candidates to show for the latest scan and filters. Check the source errors above.' : 'Click Scan all cards automatically to collect listings here.')}</td></tr>`;
+  </tr>`;
+  }).join('') : `<tr><td colspan="7" class="empty">${priceError || (scan ? 'No candidates to show for the latest scan and filters. Check the source errors above.' : 'Click Scan all cards automatically to collect listings here.')}</td></tr>`;
   bindDismiss('#broad-results-table', loadDiscoveryResults);
 }
 
@@ -438,12 +465,29 @@ for (const [id, path] of [['#facebook-login', ''], ['#facebook-finish', '/finish
   });
 }
 $('#broad-result-source').addEventListener('change', renderDiscoveryResults);
+for (const [id, source] of [['#broad-all-leads', ''], ['#broad-ebay-leads', 'ebay'], ['#broad-facebook-leads', 'facebook']]) {
+  $(id).addEventListener('click', () => { $('#broad-result-source').value = source; renderDiscoveryResults(); });
+}
 $('#broad-result-format').addEventListener('change', renderDiscoveryResults);
 ['#broad-result-query', '#broad-result-set', '#broad-result-type'].forEach(selector => $(selector).addEventListener('input', renderDiscoveryResults));
 ['#broad-min-price', '#broad-max-price'].forEach(selector => $(selector).addEventListener('input', renderDiscoveryResults));
 $('#broad-price-clear').addEventListener('click', () => {
   $('#broad-min-price').value = '';
   $('#broad-max-price').value = '';
+  renderDiscoveryResults();
+});
+$('#broad-results-table').addEventListener('change', event => {
+  const key = event.target?.dataset?.reference;
+  if (!key || !discoveryResultData.listings.some(row => candidateKey(row) === key)) return;
+  const value = event.target.value.trim();
+  if (value && (!Number.isFinite(Number(value)) || Number(value) <= 0)) {
+    toast('Enter a positive reference price, or leave it blank.', true);
+    renderDiscoveryResults();
+    return;
+  }
+  if (value) candidateReferences[key] = Number(value);
+  else delete candidateReferences[key];
+  try { localStorage.setItem(CANDIDATE_REFERENCES_KEY, JSON.stringify(candidateReferences)); } catch (_) {}
   renderDiscoveryResults();
 });
 

@@ -15,7 +15,21 @@ from cardsnipe.watchlist import Target
 logger = logging.getLogger("cardsnipe.facebook")
 
 ITEM_RE = re.compile(r"/marketplace/item/(\d+)")
-PRICE_LINE_RE = re.compile(r"^(?:(?:CA|C|US|AU)?\s*\$\s*\d|free(?:\s|$))", re.I)
+PRICE_LINE_RE = re.compile(r"^(?:(?:CA|C|US|AU)?\s*\$\s*\d|free(?:\s|$)|ücretsiz(?:\s|$))", re.I)
+DOT_THOUSANDS_RE = re.compile(r"\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?")
+
+
+def _price(text: str) -> float | None:
+    if text.casefold().startswith("ücretsiz"):
+        return 0.0
+    match = re.search(r"\$\s*(\d[\d.,]*)", text)
+    if match:
+        amount = match.group(1)
+        if DOT_THOUSANDS_RE.fullmatch(amount):
+            return float(amount.replace(".", "").replace(",", "."))
+        if re.fullmatch(r"\d+,\d{1,2}", amount):
+            return float(amount.replace(",", "."))
+    return parse_price(text)
 
 
 def _no_results(text: str) -> bool:
@@ -152,11 +166,14 @@ class FacebookMarketplace:
         if not lines:
             return None
         price_idx = next((i for i, ln in enumerate(lines) if PRICE_LINE_RE.search(ln) and len(ln) < 40), None)
-        price = parse_price(lines[price_idx]) if price_idx is not None else None
+        price = _price(lines[price_idx]) if price_idx is not None else None
         if price_idx is not None and re.search(r"\bto\b|\s[-–]\s", lines[price_idx], re.I):
             return None
-        remaining = [ln for ln in lines if not PRICE_LINE_RE.search(ln) and ln.lower() not in {"just listed", "new listing", "sponsored"}]
-        title = remaining[0] if remaining else lines[0]
+        remaining = [ln for ln in lines if not PRICE_LINE_RE.search(ln) and ln.casefold() not in
+                     {"just listed", "new listing", "sponsored", "az önce ilan verildi"}]
+        if not remaining:
+            return None
+        title = remaining[0]
         location = remaining[1] if len(remaining) > 1 else ""
         from cardsnipe.ebay import EbayWeb
 

@@ -153,6 +153,23 @@ def test_empty_new_scan_does_not_present_old_results_as_fresh(browser_scan, monk
     assert store.discovery_results()[0] == []
 
 
+def test_failed_source_keeps_earlier_candidates_with_their_original_scan_time(browser_scan, monkeypatch):
+    settings, store, _ = browser_scan
+    monkeypatch.setattr(discovery.EbayWeb, "search_page", lambda *a: [listing(item="ebay-one")])
+    discovery.DiscoveryScanner(settings, store).scan("ebay")
+    previous = store.discovery_results()[0][0].discovery_at
+    def blocked(*args):
+        raise discovery.SourceUnavailable("eBay unavailable")
+
+    monkeypatch.setattr(discovery.EbayWeb, "search_page", blocked)
+    monkeypatch.setattr(discovery.FacebookMarketplace, "find", lambda *a, **kw: [listing("facebook", "fb-one")])
+    discovery.DiscoveryScanner(settings, store).scan()
+    rows, latest = store.discovery_results()
+    assert {row.source for row in rows} == {"ebay", "facebook"}
+    assert next(row for row in rows if row.source == "ebay").discovery_at == previous < latest.started
+    assert next(row for row in rows if row.source == "facebook").discovery_at == latest.started
+
+
 def test_server_error_retries_via_real_homepage_search_bar_without_claiming_sale_filters(monkeypatch):
     class SearchBox:
         def clear(self):

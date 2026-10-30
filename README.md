@@ -81,6 +81,12 @@ Filter imported candidates using **Min price** and **Max price** together under 
 
 **Buying format** filters the same saved candidates to auctions, Buy Now/fixed-price listings, or both. Marketplace listings count as fixed price. The filter combines with price, site, set, type and keywords. Auction prices are current bids, not final prices.
 
+The result shortcuts show saved eBay and Marketplace counts and open either source in one click. In **Potential bargain**, enter a reference price you have checked for that exact listing, condition and currency. The app compares its reported price plus shipping against your reference, shows the percentage above or below it, and moves positive comparisons to the top. References stay in this browser. Listings without a reference or a known total are not called bargains. This does not fetch market prices or make a claim that the seller's discount is independently verified.
+
+Marketplace results use the scanner profile's Facebook locale. Turkish "just listed" text is ignored as a title, "Ücretsiz" is read as free, and dot-grouped amounts such as `CA$4.000` are read as CAD 4,000. Free and $1 Marketplace asks are never highlighted as bargain percentages because they may be placeholder prices; verify the seller page. A new scan is needed to replace older misparsed results.
+
+If a source fails during a combined scan, Scan results retains that source's last saved candidates with an **Earlier scan** timestamp and availability warning. Current results from the working source still appear. Previous results are never silently presented as fresh.
+
 `Config.BROWSER_SCANS_ENABLED` permits these explicit read-only Chrome scans and scanner sign-in. `Config.EXTERNAL_ACCESS_ENABLED` stays hard-disabled: no eBay API, TCGplayer/PriceCharting calls, exchange-rate requests, Collectr sync, career-board fetches or paid AI services run from this workflow. Existing API keys are stripped from the broad scanner settings. The old scanner CLI and targeted network/valuation endpoints remain disabled. The app never bids, buys, or sends seller messages.
 
 The scanner uses a persistent, separate Chrome profile. Your normal browser's Facebook login is not copied into it. If Marketplace asks for authentication, expand **Marketplace scanner sign-in**, sign in once, and click **Finish scanner sign-in**. The sign-in window stays open until you finish or cancel. Do not enter credentials into a short-lived scan window.

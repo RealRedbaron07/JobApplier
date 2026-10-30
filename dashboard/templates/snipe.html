@@ -54,6 +54,7 @@
         <article class="panel candidates-panel">
           <div class="panel-head"><div><p class="eyebrow">COLLECTED FOR YOUR REVIEW</p><h3>Scan results</h3></div><span class="level" id="broad-result-count">No scan yet</span></div>
           <p id="broad-result-meta" class="detail-meta">Promotions and asking prices are leads. Below-market value is not independently verified.</p>
+          <div class="toolbar candidate-source-shortcuts" aria-label="Review candidates by site"><button class="button secondary small" id="broad-all-leads" type="button">All candidates</button><button class="button secondary small" id="broad-ebay-leads" type="button">eBay</button><button class="button secondary small" id="broad-facebook-leads" type="button">Marketplace</button></div>
           <div class="toolbar candidate-filters">
             <label class="compact-control">Site<select id="broad-result-source"><option value="">All sites</option><option value="ebay">eBay</option><option value="facebook">Marketplace</option></select></label>
             <label class="compact-control">Buying format<select id="broad-result-format"><option value="">Auctions + fixed price</option><option value="auction">Auctions</option><option value="bin">Buy Now / fixed price</option></select></label>
@@ -65,7 +66,8 @@
             <button class="button secondary small" id="broad-price-clear" type="button">Clear price</button>
           </div>
           <p id="broad-price-help" class="detail-meta" role="status" aria-live="polite">Price includes reported shipping, before tax. Unknown totals are hidden while a price range is set. Marketplace listings count as fixed price. Set and type match listing titles only; check the seller page.</p>
-          <div class="table-wrap"><table><thead><tr><th>Listing</th><th>Why it surfaced</th><th>Ask / bid + shipping</th><th>Condition</th><th>Seen</th><th></th></tr></thead><tbody id="broad-results-table"><tr><td colspan="6" class="empty">Click Scan all cards automatically to collect listings here.</td></tr></tbody></table></div>
+          <p class="detail-meta">Enter a checked reference price for the exact item, condition and currency to see a possible bargain percentage. References stay in this browser. No reference means no bargain claim.</p>
+          <div class="table-wrap"><table><thead><tr><th>Listing</th><th>Why it surfaced</th><th>Ask / bid + shipping</th><th>Potential bargain</th><th>Condition</th><th>Seen</th><th></th></tr></thead><tbody id="broad-results-table"><tr><td colspan="7" class="empty">Click Scan all cards automatically to collect listings here.</td></tr></tbody></table></div>
         </article>
         <details class="manual-browse"><summary>Open searches manually (optional)</summary>
         <article class="panel search-panel">

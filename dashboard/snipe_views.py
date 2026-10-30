@@ -61,6 +61,7 @@ def _listing_dict(row: SeenListing) -> dict:
         "id": row.id, "source": row.source, "listing_id": row.listing_id, "title": row.title,
         "price": row.price, "shipping": row.shipping, "total_price": row.total_price, "currency": row.currency,
         "url": row.url, "listing_type": row.listing_type, "end_time": _iso(row.end_time), "location": row.location,
+        "discovery_at": _iso(row.discovery_at),
         "first_seen": _iso(row.first_seen), "matched_target": row.matched_target, "savings_pct": row.savings_pct,
         "last_seen": _iso(row.last_seen),
         "condition": row.condition or "",

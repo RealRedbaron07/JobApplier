@@ -924,6 +924,20 @@ def test_marketplace_sale_prices_do_not_become_the_title_or_wrong_currency():
     assert listing.location == "Toronto, ON"
 
 
+@pytest.mark.parametrize("price_line,expected", [("CA$4.000", 4000), ("CA$1.700", 1700),
+                                                  ("CA$12,50", 12.5), ("CA$12.50", 12.5),
+                                                  ("Ücretsiz", 0)])
+def test_marketplace_turkish_locale_keeps_real_title_and_price(price_line, expected):
+    from cardsnipe.facebook import FacebookMarketplace
+
+    row = {"id": "987", "href": "https://www.facebook.com/marketplace/item/987/",
+           "text": f"Az önce ilan verildi\n{price_line}\nPokemon Ultra Premium Collection\nToronto, ON"}
+    listing = FacebookMarketplace(_settings(), None)._parse_card(row)
+    assert listing.title == "Pokemon Ultra Premium Collection"
+    assert listing.location == "Toronto, ON"
+    assert listing.price == expected and listing.currency == "CAD"
+
+
 def test_missing_facebook_login_stops_repeating_the_same_source_error():
     from cardsnipe.browser import SourceUnavailable
 

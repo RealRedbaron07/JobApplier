@@ -4,7 +4,7 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 
-function boot({respond} = {}) {
+function boot({respond, storage = new Map()} = {}) {
   const opened = [];
   const requests = [];
   const elements = new Map();
@@ -65,6 +65,7 @@ function boot({respond} = {}) {
   });
   const context = vm.createContext({
     URL, console, setTimeout() { return 1; }, clearTimeout() {},
+    localStorage: {getItem(key) { return storage.get(key) ?? null; }, setItem(key, value) { storage.set(key, value); }},
     document: {
       querySelector: element,
       querySelectorAll(selector) {
@@ -90,7 +91,7 @@ function boot({respond} = {}) {
   const startup = source.indexOf('const initial =');
   assert.ok(startup > 0);
   vm.runInContext(source.slice(0, startup), context);
-  return {context, element, query, ebay, facebook, presets, modes, opened, requests, setBudget(value) { budget = value; }};
+  return {context, element, query, ebay, facebook, presets, modes, opened, requests, storage, setBudget(value) { budget = value; }};
 }
 
 test('custom search opens synchronously with the typed query and saved cap', () => {
@@ -213,17 +214,19 @@ test('one click starts a broad scan and completion imports visible results witho
     'Status polling must not start another external scan');
 });
 
-function priceFilterPage() {
+function priceFilterPage(includePricedMarketplace = false) {
   const listings = [
     ['shipping-included Evolving Skies PSA', 8, 15, 'ebay', 'bin'], ['upper-boundary Evolving Skies raw', 20, 20, 'ebay', 'auction'],
     ['above-with-shipping Base Set PSA', 16, 25, 'ebay'], ['unknown-shipping', 12, null, 'ebay'],
     ['unknown-price', null, null, 'ebay'], ['free-pickup', 0, 0, 'facebook'],
   ].map(([title, price, total_price, source, listing_type = 'bin'], id) => ({
-    id, title, price, total_price, source, currency: 'CAD',
+    id, listing_id: String(id), title, price, total_price, source, currency: 'CAD',
     shipping: total_price == null ? null : total_price - price,
     url: 'https://www.ebay.ca/itm/12345678901', listing_type, condition: '',
     promotion: '', discovery_routes: [], last_seen: '2026-10-29T16:00:00Z',
   }));
+  if (includePricedMarketplace) listings.push({...listings[5], id: 6, listing_id: '6',
+    title: 'Pikachu card', price: 30, total_price: 30});
   return boot({respond(url) {
     assert.equal(url, '/api/snipe/discovery/results');
     return {listings, scan: {started: '2026-10-29T16:00:00Z', scanned: listings.length,
@@ -316,6 +319,55 @@ test('auction and fixed-price filters combine with price and site without starti
   page.element('#broad-price-clear').click();
   assert.equal(page.element('#broad-result-count').textContent, '1 of 6 candidates');
   assert.match(page.element('#broad-results-table').innerHTML, /free-pickup/);
+  assert.equal(page.requests.length, 1);
+});
+
+test('Marketplace leads are visible and a checked reference shows a percentage without inventing market value', async () => {
+  const page = priceFilterPage(true);
+  await page.context.loadDiscoveryResults();
+  assert.equal(page.element('#broad-facebook-leads').textContent, 'Marketplace 2');
+  assert.equal(page.element('#broad-ebay-leads').textContent, 'eBay 5');
+  assert.doesNotMatch(page.element('#broad-results-table').innerHTML, /Possible bargain:/);
+  page.element('#broad-facebook-leads').click();
+  assert.equal(page.element('#broad-result-source').value, 'facebook');
+  assert.equal(page.element('#broad-result-count').textContent, '2 of 7 candidates');
+  assert.match(page.element('#broad-results-table').innerHTML, /free-pickup/);
+  page.element('#broad-results-table').listeners.change({target: {dataset: {reference: 'facebook:5:CAD'}, value: '20'}});
+  assert.match(page.element('#broad-results-table').innerHTML, /Free \/ \$1 may be a placeholder/);
+  assert.doesNotMatch(page.element('#broad-results-table').innerHTML, /Possible bargain:/);
+  page.element('#broad-results-table').listeners.change({target: {dataset: {reference: 'facebook:6:CAD'}, value: '60'}});
+  assert.match(page.element('#broad-results-table').innerHTML, /Possible bargain: 50\.0% below your reference/);
+  assert.match(page.element('#broad-results-table').innerHTML, /class="candidate-bargain"/);
+  assert.equal(JSON.parse(page.storage.get('cardsnipe_candidate_references_v1'))['facebook:6:CAD'], 60);
+  await page.context.loadDiscoveryResults();
+  assert.match(page.element('#broad-results-table').innerHTML, /Possible bargain: 50\.0% below your reference/);
+  assert.equal(page.requests.length, 2, 'Only explicit saved-result reloads may fetch');
+});
+
+test('a reference above the listing gives a possible bargain, but unknown totals and lower references do not', async () => {
+  const page = priceFilterPage();
+  await page.context.loadDiscoveryResults();
+  const change = (key, value) => page.element('#broad-results-table').listeners.change({target: {dataset: {reference: key}, value}});
+  change('ebay:0:CAD', '30');
+  assert.match(page.element('#broad-results-table').innerHTML, /Possible bargain: 50\.0% below your reference/);
+  change('ebay:0:CAD', '10');
+  assert.match(page.element('#broad-results-table').innerHTML, /50\.0% above your reference/);
+  change('ebay:3:CAD', '20');
+  assert.match(page.element('#broad-results-table').innerHTML, /Total unknown; check shipping first/);
+  change('ebay:0:CAD', '');
+  assert.equal(JSON.parse(page.storage.get('cardsnipe_candidate_references_v1'))['ebay:0:CAD'], undefined);
+  assert.equal(page.requests.length, 1);
+});
+
+test('earlier source results stay visible with their older scan time after that source fails', async () => {
+  const page = priceFilterPage();
+  await page.context.loadDiscoveryResults();
+  vm.runInContext("discoveryResultData.listings[0].discovery_at = '2026-10-28T16:00:00Z'", page.context);
+  page.context.renderDiscoveryResults();
+  assert.equal(page.element('#broad-ebay-leads').textContent, 'eBay 5 (1 earlier)');
+  assert.match(page.element('#broad-results-table').innerHTML, /Earlier scan/);
+  page.element('#broad-ebay-leads').click();
+  assert.equal(page.element('#broad-result-source').value, 'ebay');
   assert.equal(page.requests.length, 1);
 });
 
