@@ -7,9 +7,9 @@ import logging
 import re
 import time
 from datetime import datetime, timezone
-from urllib.parse import quote_plus
+from urllib.parse import parse_qsl, quote_plus, urlencode, urlsplit, urlunsplit
 
-from cardsnipe.browser import Browser
+from cardsnipe.browser import Browser, SourceUnavailable
 from cardsnipe.matcher import Listing, extract_time_left_line, parse_price, parse_time_left
 from cardsnipe.settings import SnipeSettings
 from cardsnipe.watchlist import Target
@@ -69,6 +69,7 @@ class EbayBrowseAPI:
         sort = "newlyListed" if buying_option == "bin" else "endingSoonest"
         params = {
             "q": query,
+            "category_ids": "183454",
             "limit": str(limit),
             "sort": sort,
             "filter": f"buyingOptions:{{{buying}}},price:[..{max_price:.2f}],priceCurrency:{self.settings.ebay_currency}",
@@ -93,13 +94,16 @@ class EbayBrowseAPI:
         price_block = price_block or item.get("price") or {}
         shipping = None
         for option in item.get("shippingOptions", []) or []:
-            cost = (option.get("shippingCost") or {}).get("value")
-            if cost is not None:
-                shipping = float(cost)
-                break
+            cost = option.get("shippingCost") or {}
+            if cost.get("value") is not None and cost.get("currency") == price_block.get("currency"):
+                amount = float(cost["value"])
+                shipping = min(shipping, amount) if shipping is not None else amount
         location = item.get("itemLocation") or {}
         raw_id = item.get("itemId", "")
         legacy = item.get("legacyItemId") or (LEGACY_ID_RE.search(raw_id).group(1) if LEGACY_ID_RE.search(raw_id) else raw_id)
+        condition = item.get("condition", "")
+        for descriptor in item.get("conditionDescriptors", []) or []:
+            condition += " " + " ".join(v.get("content", "") for v in descriptor.get("values", []) if isinstance(v, dict))
         return Listing(
             source="ebay",
             listing_id=str(legacy),
@@ -111,11 +115,32 @@ class EbayBrowseAPI:
             shipping=shipping,
             end_time=_iso_to_dt(item.get("itemEndDate")),
             location=", ".join(v for v in (location.get("city"), location.get("country")) if v),
-            condition=item.get("condition", ""),
+            condition=condition.strip(),
             image_url=(item.get("image") or {}).get("imageUrl", ""),
             bid_count=item.get("bidCount"),
             raw=item,
         )
+
+    def details(self, listing: Listing) -> Listing:
+        import requests
+
+        response = requests.get(
+            "https://api.ebay.com/buy/browse/v1/item/get_item_by_legacy_id",
+            params={"legacy_item_id": listing.listing_id},
+            headers={"Authorization": f"Bearer {self._get_token()}",
+                     "X-EBAY-C-MARKETPLACE-ID": self.settings.ebay_marketplace}, timeout=15,
+        )
+        response.raise_for_status()
+        item = response.json()
+        detailed = self._to_listing(item)
+        detailed.listing_id = listing.listing_id
+        if not detailed.condition:
+            detailed.condition = "unverified"
+        if item.get("estimatedAvailabilities") and not any(
+            a.get("estimatedAvailabilityStatus") == "IN_STOCK" for a in item["estimatedAvailabilities"]
+        ):
+            detailed.price = None
+        return detailed
 
 
 class EbayWeb:
@@ -132,8 +157,11 @@ class EbayWeb:
       seen.add(m[1]);
       const img = card ? card.querySelector('img') : null;
       const timeEl = card ? card.querySelector("[class*='time-left'], [class*='time_left']") : null;
+      const titleEl = card ? card.querySelector(".s-card__title, .s-item__title, [role='heading']") : null;
+      const priceEl = card ? card.querySelector(".s-card__price, .s-item__price") : null;
       out.push({id: m[1], href: a.href.split('?')[0], text, img: img ? img.src : '',
-                timeLeft: timeEl ? timeEl.innerText : ''});
+                timeLeft: timeEl ? timeEl.innerText : '', title: titleEl ? titleEl.innerText : '',
+                price: priceEl ? priceEl.innerText : ''});
     }
     return out;
     """
@@ -142,54 +170,155 @@ class EbayWeb:
         self.settings = settings
         self.browser = browser
 
-    def search(self, query: str, max_price: float, buying_option: str, limit: int) -> list[Listing]:
+    def search_url(self, query: str, max_price: float | None, buying_option: str = "bin", limit: int | None = 60) -> str:
         sort = "10" if buying_option == "bin" else "1"  # newly listed / ending soonest
         kind = "LH_BIN=1" if buying_option == "bin" else "LH_Auction=1"
-        url = (
+        return (
             f"https://www.{self.settings.ebay_domain}/sch/i.html?_nkw={quote_plus(query)}"
-            f"&_sop={sort}&{kind}&_udhi={max_price:.0f}&_ipg={min(limit, 120)}"
+            f"&_sop={sort}&{kind}"
+            + (f"&_ipg={min(limit, 120)}" if limit is not None else "")
+            + (f"&_udhi={max_price:.2f}" if max_price is not None else "")
         )
-        self.browser.get(url)
-        self.browser.wait_until(
-            lambda: self.browser.js("return document.querySelectorAll(\"a[href*='/itm/']\").length > 0"),
-            timeout=12,
-        )
-        rows = self.browser.js(self.EXTRACT_JS) or []
+
+    def search(self, query: str, max_price: float, buying_option: str, limit: int) -> list[Listing]:
+        url = self.search_url(query, max_price, buying_option, limit)
+        return self.search_page(url, buying_option, limit)
+
+    def search_page(self, url: str, buying_option: str, limit: int) -> list[Listing]:
+        self.used_home_search = False
+        query = dict(parse_qsl(urlsplit(url).query)).get("_nkw", "")
+        for attempt in range(2):
+            if attempt and callable(getattr(self.browser, "find_first", None)):
+                self.browser.get(f"https://www.{self.settings.ebay_domain}/")
+                search_box = None
+
+                def search_ready():
+                    nonlocal search_box
+                    search_box = self.browser.find_first([("css selector", "input#gh-ac, input[name='_nkw']")])
+                    return search_box is not None
+
+                if not self.browser.wait_until(search_ready, timeout=10):
+                    raise RuntimeError("eBay's homepage search bar did not load. This search was not completed.")
+                search_box.clear()
+                search_box.send_keys(query)
+                search_box.send_keys("\ue007")  # Enter submits eBay's normal search form.
+                self.used_home_search = True
+            else:
+                self.browser.get(url)
+            self.browser.wait_until(
+                lambda: self.browser.js("return document.querySelectorAll(\"a[href*='/itm/']\").length > 0 || "
+                                        "/something went wrong on our end|no exact matches|no results|0 results|verify you are|security check|captcha/i.test(document.body?.innerText || '')"),
+                timeout=12,
+            )
+            rows = self.browser.js(self.EXTRACT_JS) or []
+            body = " ".join(self.browser.page_text().lower().split()) if not rows else ""
+            if rows or "something went wrong on our end" not in body or attempt == 1:
+                break
+            logger.warning("Temporary eBay server error; retrying the same query through the normal search bar once")
+            # Budgets are still enforced by the matcher when eBay's optional filters fail.
+            parts = urlsplit(url)
+            params = dict(parse_qsl(parts.query))
+            params.pop("_ipg", None)
+            params.pop("_udhi", None)
+            url = urlunsplit(parts._replace(query=urlencode(params)))
+            time.sleep(2)
+        if not rows:
+            if not any(marker in body for marker in ("0 results", "no results", "no exact matches")):
+                title = self.browser.js("return document.title") or ""
+                current = self.browser.current_url()
+                self.browser.screenshot("ebay_search_unreadable")
+                logger.warning("Unreadable eBay search: title=%r url=%s body=%r", title, current, body[:700])
+                if "something went wrong on our end" in body:
+                    raise RuntimeError("eBay server error persisted after one retry. This search was not completed.")
+                if any(word in body for word in ("verify you're", "verify you are", "security check", "captcha")):
+                    raise SourceUnavailable("eBay requires verification in the scanner Chrome window. This search was not completed.")
+                if "sign in" in title.lower() or "signin" in current.lower():
+                    raise SourceUnavailable("eBay sign-in is required in the scanner Chrome profile. Use the scanner sign-in controls.")
+                raise RuntimeError(f"eBay page did not expose readable results ({title or 'untitled page'}). This search was not completed.")
         listings = []
         for row in rows[:limit]:
             listing = self._parse_card(row, buying_option)
-            if listing:
-                listings.append(listing)
+            if listing is None:
+                continue
+            # A Buy-It-Now search still picks up auctions that also show a bid count.
+            # Those are watched only when an auction search was requested, and never bid on from here.
+            if buying_option == "bin" and listing.listing_type == "auction":
+                continue
+            listings.append(listing)
         return listings
+
+    @staticmethod
+    def price_currency(text: str, default: str) -> str:
+        for pattern, currency in ((r"\b(?:US\s*\$|USD\b)", "USD"),
+                                  (r"\b(?:C\s*\$|CA\s*\$|CAD\b)", "CAD"),
+                                  (r"\b(?:AU\s*\$|A\s*\$|AUD\b)", "AUD"),
+                                  (r"£|\bGBP\b", "GBP"), (r"€|\bEUR\b", "EUR")):
+            if re.search(pattern, text, re.I):
+                return currency
+        return default
 
     def _parse_card(self, row: dict, buying_option: str) -> Listing | None:
         lines = [ln.strip() for ln in row["text"].split("\n") if ln.strip()]
         if not lines:
             return None
-        title = next((ln for ln in lines if ln.lower() not in {"new listing", "sponsored", "opens in a new window or tab"}
-                      and not ln.startswith(("C $", "US $", "$"))), lines[0])
-        price_line = next((ln for ln in lines if re.search(r"(C\s?\$|US\s?\$|\$)\s?\d", ln)), "")
+        title_lines = (row.get("title") or row["text"]).splitlines()
+        title = next((ln.strip() for ln in title_lines if ln.strip().lower() not in {
+            "new listing", "sponsored", "opens in a new window or tab"
+        } and not ln.startswith(("C $", "US $", "$"))), lines[0])
+        price_line = row.get("price") or next((ln for ln in lines if re.search(r"(C\s?\$|US\s?\$|\$|£|€)\s?\d", ln)), "")
+        # A variation range does not identify the asking price of the requested card.
+        ranged_price = bool(re.search(r"\bto\b|\s[-–]\s", price_line, re.I))
+        if ranged_price and buying_option != "all":
+            return None
+        currency = self.price_currency(price_line, self.settings.ebay_currency)
         shipping_line = next((ln for ln in lines if "shipping" in ln.lower() or "delivery" in ln.lower()), "")
         time_line = row.get("timeLeft") or extract_time_left_line(lines)
         bids_line = next((ln for ln in lines if re.search(r"\b\d+\s+bids?\b", ln.lower())), "")
         shipping = None
         if shipping_line:
-            shipping = 0.0 if "free" in shipping_line.lower() else parse_price(shipping_line)
+            amount = r"((?:(?:US|CA|C|AU|A)\s*)?[$£€]\s*\d[\d,]*(?:\.\d{1,2})?)"
+            charge = re.search(amount + r"\s*(?:shipping|delivery)", shipping_line, re.I)
+            charge = charge or re.search(r"(?:shipping|delivery)\s*:?\s*" + amount, shipping_line, re.I)
+            if charge and self.price_currency(charge.group(1), currency) == currency:
+                shipping = parse_price(charge.group(1))
+            elif re.search(r"\bfree(?:\s+[\w-]+){0,3}\s+(?:shipping|delivery)\b", shipping_line, re.I):
+                shipping = 0.0
         bid_count = int(re.search(r"(\d+)\s+bids?", bids_line.lower()).group(1)) if bids_line else None
         return Listing(
             source="ebay",
             listing_id=row["id"],
             title=title,
-            price=parse_price(price_line),
-            currency=self.settings.ebay_currency,
+            price=None if ranged_price else parse_price(price_line),
+            currency=currency,
             url=row["href"],
             listing_type="auction" if (buying_option == "auction" or bids_line) else "bin",
             shipping=shipping,
             end_time=parse_time_left(time_line),
             image_url=row.get("img", ""),
+            condition=next((ln for ln in lines if re.match(
+                r"(?:condition\s*:?\s*)?(near mint|lightly played|moderately played|heavily played|damaged|pre-owned)\b",
+                ln, re.I)), ""),
             bid_count=bid_count,
             raw=row,
         )
+
+    def details(self, listing: Listing) -> Listing:
+        """Read the seller's condition, which search cards often reduce to 'Pre-Owned'."""
+        self.browser.get(listing.url)
+        self.browser.wait_until(lambda: bool(self.browser.js(
+            "return document.querySelector('.x-item-condition-text') || document.querySelector('.x-item-title');"
+        )), timeout=10)
+        condition = self.browser.js(
+            "return document.querySelector('.x-item-condition-text')?.innerText || '';"
+        ) or ""
+        body = self.browser.page_text()
+        if not condition:
+            found = re.search(r"(?:^|\n)Condition:\s*\n([^\n]+)", body, re.I)
+            condition = found.group(1).strip() if found else ""
+        listing.condition = condition.strip() or "unverified"
+        if re.search(r"this listing (?:has ended|sold)|this item is no longer available|the item you selected is unavailable", body, re.I):
+            listing.price = None
+        return listing
 
 
 class EbaySource:
@@ -209,12 +338,11 @@ class EbaySource:
             self.mode = "web"
 
     def find(self, target: Target) -> list[Listing]:
-        limit = self.settings.ebay_max_results
-        price_ceiling = max(target.max_price, target.max_bid or 0)
-        results = self.client.search(target.search_query, target.max_price, "bin", limit)
-        if target.max_bid:
-            results += self.client.search(target.search_query, price_ceiling, "auction", limit)
-        return results
+        # Buy-It-Now only. Auctions are not searched and are never bid on.
+        return self.client.search(target.search_query, target.max_price, "bin", self.settings.ebay_max_results)
+
+    def details(self, listing: Listing) -> Listing:
+        return self.client.details(listing)
 
 
 # ── bidding ──────────────────────────────────────────────────────────────────
@@ -265,8 +393,11 @@ def place_snipe(browser: Browser, settings: SnipeSettings, item_id: str, max_bid
                 end_time: datetime | None, live: bool, refine_end_time: bool = True) -> tuple[str, str]:
     """Open the bid confirmation page early, then confirm `snipe_lead_seconds` before the end.
 
-    Returns (status, detail). status: placed | dry_run | failed.
+    Returns (status, detail). status: placed | skipped | failed.
+    Dry-run never opens the bid page.
     """
+    if not live:
+        return "skipped", "dry-run does not open or confirm a bid"
     if refine_end_time:
         exact = refresh_end_time(browser, settings, item_id)
         if exact is not None:

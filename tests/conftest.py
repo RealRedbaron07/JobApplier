@@ -9,6 +9,15 @@ from config import Config
 from database.models import Base
 
 
+@pytest.fixture(autouse=True)
+def no_external_services_in_tests(monkeypatch):
+    def blocked(*args, **kwargs):
+        pytest.fail("Tests must use fakes instead of external network or browser services")
+
+    monkeypatch.setattr("requests.sessions.Session.request", blocked)
+    monkeypatch.setattr("selenium.webdriver.Chrome", blocked)
+
+
 @pytest.fixture
 def dashboard_client(tmp_path, monkeypatch):
     import dashboard.app as dashboard_app

@@ -5,9 +5,9 @@ from __future__ import annotations
 import logging
 import re
 import time
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlsplit
 
-from cardsnipe.browser import Browser
+from cardsnipe.browser import Browser, SourceUnavailable
 from cardsnipe.matcher import Listing, parse_price
 from cardsnipe.settings import SnipeSettings
 from cardsnipe.watchlist import Target
@@ -15,7 +15,19 @@ from cardsnipe.watchlist import Target
 logger = logging.getLogger("cardsnipe.facebook")
 
 ITEM_RE = re.compile(r"/marketplace/item/(\d+)")
-PRICE_LINE_RE = re.compile(r"(CA\$|C\$|\$|free)", re.I)
+PRICE_LINE_RE = re.compile(r"^(?:(?:CA|C|US|AU)?\s*\$\s*\d|free(?:\s|$))", re.I)
+
+
+def _no_results(text: str) -> bool:
+    # Match Facebook's Turkish dotted and dotless I consistently.
+    text = " ".join(text.casefold().replace("\u0307", "").replace("ı", "i").split())
+    if any(marker in text for marker in ("security check", "captcha", "something went wrong", "temporarily blocked")):
+        return False
+    return any(marker in text for marker in (
+        "no results", "no listings found", "couldn't find any results",
+        "ilan bulunamadi", "sonuç bulunamadi",
+    ))
+
 
 EXTRACT_JS = """
 const seen = new Set(); const out = [];
@@ -57,15 +69,23 @@ class FacebookMarketplace:
         self.settings = settings
         self.browser = browser
         self._login_failed_at: float | None = None
+        self._login_failed_message = ""
 
     # ── auth ─────────────────────────────────────────────────────────────
     def is_logged_in(self) -> bool:
-        url = self.browser.current_url().lower()
-        if "login" in url or "checkpoint" in url:
+        url = urlsplit(self.browser.current_url())
+        host = (url.hostname or "").lower()
+        if url.scheme != "https" or not (host == "facebook.com" or host.endswith(".facebook.com")):
             return False
-        return not self.browser.js(
-            "return !!document.querySelector(\"input[name='email'], form[action*='login']\");"
-        )
+        if any(part in url.path.lower() for part in ("login", "checkpoint", "two_factor", "two_step", "auth_platform", "recover", "confirmemail")):
+            return False
+        if not self.browser.has_cookie("c_user") or not self.browser.has_cookie("xs"):
+            return False
+        return bool(self.browser.js("""
+            return document.readyState === 'complete'
+                && !!document.querySelector("[role='navigation'], nav")
+                && !document.querySelector("input[name='email'], input[name='pass'], form[action*='login'], form[action*='checkpoint']");
+        """))
 
     def ensure_logged_in(self, wait_seconds: int = 300) -> bool:
         if self.is_logged_in():
@@ -79,35 +99,51 @@ class FacebookMarketplace:
         return ok
 
     # ── search ───────────────────────────────────────────────────────────
-    def search_url(self, target: Target) -> str:
+    def search_url(self, target: Target, *, all_dates: bool = False) -> str:
         return (
             f"https://www.facebook.com/marketplace/{self.settings.fb_city}/search"
-            f"?query={quote_plus(target.search_query)}&maxPrice={int(target.max_price)}"
-            f"&daysSinceListed={self.settings.fb_days_since_listed}"
-            f"&sortBy=creation_time_descend&exact=false"
+            f"?query={quote_plus(target.search_query)}"
+            + (f"&daysSinceListed={self.settings.fb_days_since_listed}" if not all_dates else "")
+            + "&sortBy=creation_time_descend&exact=false"
+            + (f"&maxPrice={target.max_price:.2f}" if target.max_price is not None else "")
         )
 
     def _require_login(self) -> None:
         """Fail fast (no 5-minute wait) so eBay scanning keeps going; `snipe.py login` does the sign-in."""
         if self._login_failed_at and time.time() - self._login_failed_at < self.LOGIN_RETRY_SECONDS:
-            raise RuntimeError("Facebook not logged in — run `make login` (retrying every 10 min)")
-        if not self.is_logged_in():
-            self._login_failed_at = time.time()
-            raise RuntimeError("Facebook not logged in — run `make login` (retrying every 10 min)")
-        self._login_failed_at = None
+            raise SourceUnavailable(self._login_failed_message)
+        if not self.browser.has_cookie("c_user") or not self.browser.has_cookie("xs"):
+            message = "No Facebook login is saved in the scanner's separate Chrome profile. Use Sign in to separate scanner profile, then Finish scanner sign-in. Your regular browser login is separate."
+        elif not self.browser.wait_until(self.is_logged_in, timeout=12, interval=0.5):
+            message = "Facebook session cookies are saved, but the scanner could not verify a loaded signed-in page. Check that window for a login, security check, or loading error."
+        else:
+            self._login_failed_at = None
+            self._login_failed_message = ""
+            return
+        self._login_failed_at = time.time()
+        self._login_failed_message = message
+        raise SourceUnavailable(message)
 
-    def find(self, target: Target) -> list[Listing]:
+    def find(self, target: Target, *, all_dates: bool = False) -> list[Listing]:
         if self._login_failed_at and time.time() - self._login_failed_at < self.LOGIN_RETRY_SECONDS:
-            raise RuntimeError("Facebook not logged in — run `make login` (retrying every 10 min)")
-        self.browser.get(self.search_url(target))
+            raise SourceUnavailable(self._login_failed_message)
+        self.browser.get(self.search_url(target, all_dates=all_dates))
         self._require_login()
         self.browser.wait_until(
-            lambda: self.browser.js("return document.querySelectorAll(\"a[href*='/marketplace/item/']\").length > 0"),
+            lambda: self.browser.js("return document.querySelectorAll(\"a[href*='/marketplace/item/']\").length > 0")
+                    or _no_results(self.browser.page_text()),
             timeout=10,
         )
         self.browser.js("window.scrollTo(0, 1200);")
         time.sleep(0.8)
         rows = self.browser.js(EXTRACT_JS) or []
+        if not rows:
+            self._require_login()
+            body = self.browser.page_text()
+            if not _no_results(body):
+                self.browser.screenshot("facebook_search_unreadable")
+                logger.warning("Unreadable Marketplace search: url=%s body=%r", self.browser.current_url(), body[:1200])
+                raise RuntimeError("Marketplace did not return readable listings. Check Facebook access in the scanner Chrome profile.")
         listings = [l for l in (self._parse_card(row) for row in rows) if l]
         return listings
 
@@ -117,15 +153,19 @@ class FacebookMarketplace:
             return None
         price_idx = next((i for i, ln in enumerate(lines) if PRICE_LINE_RE.search(ln) and len(ln) < 40), None)
         price = parse_price(lines[price_idx]) if price_idx is not None else None
-        remaining = [ln for i, ln in enumerate(lines) if i != price_idx]
+        if price_idx is not None and re.search(r"\bto\b|\s[-–]\s", lines[price_idx], re.I):
+            return None
+        remaining = [ln for ln in lines if not PRICE_LINE_RE.search(ln) and ln.lower() not in {"just listed", "new listing", "sponsored"}]
         title = remaining[0] if remaining else lines[0]
         location = remaining[1] if len(remaining) > 1 else ""
+        from cardsnipe.ebay import EbayWeb
+
         return Listing(
             source="facebook",
             listing_id=row["id"],
             title=title,
             price=price,
-            currency="CAD",
+            currency=EbayWeb.price_currency(lines[price_idx], "CAD") if price_idx is not None else "CAD",
             url=row["href"],
             listing_type="bin",
             location=location,

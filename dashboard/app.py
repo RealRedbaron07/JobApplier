@@ -51,6 +51,18 @@ def local_request_boundary():
             parsed = urlparse(origin)
             if parsed.scheme not in {"http", "https"} or parsed.netloc != request.host:
                 return jsonify({"error": "Cross-origin changes to local JobApplier data are blocked."}), 403
+    external_action = request.endpoint in {
+        "boards_refresh", "snipe.snipe_valuations_refresh",
+        "snipe.snipe_collection_sync", "snipe.snipe_collection_revalue",
+    } or (request.endpoint == "snipe.snipe_scan" and request.method == "POST")
+    browser_action = request.endpoint == "snipe.snipe_facebook_login" or (
+        request.endpoint == "snipe.snipe_facebook_login_action" and request.view_args.get("action") == "finish"
+    )
+    if browser_action and not (Config.BROWSER_SCANS_ENABLED or Config.EXTERNAL_ACCESS_ENABLED):
+        return jsonify({"error": "Browser access is disabled", "local_only": True}), 403
+    if external_action and not Config.EXTERNAL_ACCESS_ENABLED:
+        return jsonify({"error": "External APIs and price-provider fetching are disabled. Use the browser-only broad scanner for listings.",
+                        "local_only": not Config.BROWSER_SCANS_ENABLED}), 403
 
 
 def _is_loopback_peer(value: str | None) -> bool:
@@ -298,7 +310,10 @@ def index():
 
 @app.get("/api/health")
 def health():
-    return jsonify({"status": "ok", "local_first": True, "auto_submit": False, "automation_level": _automation_level()})
+    return jsonify({"status": "ok", "local_first": True, "local_only": not (Config.EXTERNAL_ACCESS_ENABLED or Config.BROWSER_SCANS_ENABLED),
+                    "external_access_enabled": Config.EXTERNAL_ACCESS_ENABLED, "auto_submit": False,
+                    "browser_scans_enabled": Config.BROWSER_SCANS_ENABLED,
+                    "automation_level": _automation_level()})
 
 
 @app.route("/api/profile", methods=["GET", "PUT"])
