@@ -27,9 +27,11 @@ function boot({respond} = {}) {
       this.dataset = {};
       this.value = '';
       this.style = {};
+      this.attributes = {};
       this.classList = {add() {}, remove() {}};
     }
     addEventListener(name, handler) { this.listeners[name] = handler; }
+    setAttribute(name, value) { this.attributes[name] = value; }
     click() {
       const event = {prevented: false, preventDefault() { this.prevented = true; }};
       this.listeners.click?.(event);
@@ -209,4 +211,105 @@ test('one click starts a broad scan and completion imports visible results witho
   assert.match(page.element('#broad-results-table').innerHTML, /shipping unknown/);
   assert.equal(page.requests.filter(request => request.options.method === 'POST').length, 1,
     'Status polling must not start another external scan');
+});
+
+function priceFilterPage() {
+  const listings = [
+    ['shipping-included Evolving Skies PSA', 8, 15, 'ebay'], ['upper-boundary Evolving Skies raw', 20, 20, 'ebay'],
+    ['above-with-shipping Base Set PSA', 16, 25, 'ebay'], ['unknown-shipping', 12, null, 'ebay'],
+    ['unknown-price', null, null, 'ebay'], ['free-pickup', 0, 0, 'facebook'],
+  ].map(([title, price, total_price, source], id) => ({
+    id, title, price, total_price, source, currency: 'CAD',
+    shipping: total_price == null ? null : total_price - price,
+    url: 'https://www.ebay.ca/itm/12345678901', listing_type: 'bin', condition: '',
+    promotion: '', discovery_routes: [], last_seen: '2026-10-29T16:00:00Z',
+  }));
+  return boot({respond(url) {
+    assert.equal(url, '/api/snipe/discovery/results');
+    return {listings, scan: {started: '2026-10-29T16:00:00Z', scanned: listings.length,
+      errors: [], budget: 45, currency: 'CAD'}};
+  }});
+}
+
+test('price bounds include shipping and endpoints, exclude unknown totals, and never start a scan', async () => {
+  const page = priceFilterPage();
+  await page.context.loadDiscoveryResults();
+  assert.equal(page.element('#broad-result-count').textContent, '6 of 6 candidates');
+  page.element('#broad-min-price').value = '15.00';
+  page.element('#broad-max-price').value = '20.00';
+  page.element('#broad-max-price').listeners.input();
+  assert.equal(page.element('#broad-result-count').textContent, '2 of 6 candidates');
+  const html = page.element('#broad-results-table').innerHTML;
+  assert.match(html, /shipping-included/);
+  assert.match(html, /upper-boundary/);
+  assert.doesNotMatch(html, /above-with-shipping|unknown-shipping|unknown-price|free-pickup/);
+  assert.match(page.element('#broad-price-help').textContent, /CAD/);
+  assert.match(page.element('#broad-result-meta').textContent, /older scan capped at CAD 45\.00/);
+  assert.equal(page.requests.length, 1, 'Filtering must not make any network requests');
+  await page.context.loadDiscoveryResults();
+  assert.equal(page.element('#broad-min-price').value, '15.00');
+  assert.equal(page.element('#broad-max-price').value, '20.00');
+  assert.equal(page.element('#broad-result-count').textContent, '2 of 6 candidates');
+});
+
+test('one-sided bounds, zero and clearing work with existing source and keyword filters', async () => {
+  const page = priceFilterPage();
+  await page.context.loadDiscoveryResults();
+  page.element('#broad-max-price').value = '20';
+  page.context.renderDiscoveryResults();
+  assert.equal(page.element('#broad-result-count').textContent, '3 of 6 candidates');
+  page.element('#broad-min-price').value = '0';
+  page.element('#broad-max-price').value = '0';
+  page.context.renderDiscoveryResults();
+  assert.equal(page.element('#broad-result-count').textContent, '1 of 6 candidates');
+  assert.match(page.element('#broad-results-table').innerHTML, /free-pickup/);
+  page.element('#broad-min-price').value = '15';
+  page.element('#broad-max-price').value = '';
+  page.context.renderDiscoveryResults();
+  assert.equal(page.element('#broad-result-count').textContent, '3 of 6 candidates');
+  page.element('#broad-result-source').value = 'ebay';
+  page.element('#broad-result-query').value = 'unknown';
+  page.context.renderDiscoveryResults();
+  assert.equal(page.element('#broad-result-count').textContent, '0 of 6 candidates');
+  page.element('#broad-price-clear').click();
+  assert.equal(page.element('#broad-result-count').textContent, '2 of 6 candidates');
+  assert.equal(page.element('#broad-result-source').value, 'ebay');
+  assert.equal(page.element('#broad-result-query').value, 'unknown');
+  assert.equal(page.requests.length, 1);
+});
+
+test('set and type title filters combine with the high and low price limits without deciding value', async () => {
+  const page = priceFilterPage();
+  await page.context.loadDiscoveryResults();
+  page.element('#broad-min-price').value = '15';
+  page.element('#broad-max-price').value = '25';
+  page.element('#broad-result-set').value = 'Evolving Skies';
+  page.element('#broad-result-type').value = 'PSA';
+  page.element('#broad-result-type').listeners.input();
+  assert.equal(page.element('#broad-result-count').textContent, '1 of 6 candidates');
+  assert.match(page.element('#broad-results-table').innerHTML, /shipping-included/);
+  assert.doesNotMatch(page.element('#broad-results-table').innerHTML, /upper-boundary|above-with-shipping/);
+  assert.doesNotMatch(page.element('#broad-results-table').innerHTML, /under value|worth buying|value play/);
+  page.element('#broad-price-clear').click();
+  assert.equal(page.element('#broad-result-set').value, 'Evolving Skies');
+  assert.equal(page.element('#broad-result-type').value, 'PSA');
+  assert.equal(page.requests.length, 1);
+});
+
+test('invalid and reversed price ranges show an error instead of misleading results', async () => {
+  const page = priceFilterPage();
+  await page.context.loadDiscoveryResults();
+  for (const [min, max] of [['21', '20'], ['-1', '20'], ['', 'Infinity'], ['NaN', '']]) {
+    page.element('#broad-min-price').value = min;
+    page.element('#broad-max-price').value = max;
+    page.context.renderDiscoveryResults();
+    assert.equal(page.element('#broad-result-count').textContent, '0 of 6 candidates');
+    assert.match(page.element('#broad-price-help').textContent, /cannot exceed|non-negative/);
+  }
+  page.element('#broad-min-price').value = '';
+  page.element('#broad-max-price').value = '';
+  page.element('#broad-min-price').validity = {badInput: true};
+  page.context.renderDiscoveryResults();
+  assert.equal(page.element('#broad-min-price').attributes['aria-invalid'], 'true');
+  assert.equal(page.element('#broad-result-count').textContent, '0 of 6 candidates');
 });

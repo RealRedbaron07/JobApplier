@@ -45,7 +45,7 @@
             <button class="button" id="broad-scan">Scan all cards automatically</button>
             <button class="button secondary" id="broad-stop" hidden>Stop after current page</button>
           </div>
-          <p class="detail-meta">Up to 8 broad searches and 60 results per search. One pass per click, with a 60-second cooldown. No paid API, price-provider calls, purchases or messages.</p>
+          <p class="detail-meta">Up to 8 broad searches and 60 results per search. One pass per click, with a 60-second cooldown. The shared card budget does not limit this scan. No paid API, price-provider calls, purchases or messages.</p>
           <progress id="broad-progress" max="8" value="0" hidden aria-label="Broad scan progress"></progress>
           <p id="broad-status" role="status" aria-live="polite">Ready to scan.</p>
           <div id="broad-errors" role="status"></div>
@@ -54,7 +54,16 @@
         <article class="panel candidates-panel">
           <div class="panel-head"><div><p class="eyebrow">COLLECTED FOR YOUR REVIEW</p><h3>Scan results</h3></div><span class="level" id="broad-result-count">No scan yet</span></div>
           <p id="broad-result-meta" class="detail-meta">Promotions and asking prices are leads. Below-market value is not independently verified.</p>
-          <div class="toolbar"><label class="compact-control">Site<select id="broad-result-source"><option value="">All sites</option><option value="ebay">eBay</option><option value="facebook">Marketplace</option></select></label><label class="compact-control">Search results<input id="broad-result-query" class="search" placeholder="Filter any card, lot, condition or promotion"></label></div>
+          <div class="toolbar candidate-filters">
+            <label class="compact-control">Site<select id="broad-result-source"><option value="">All sites</option><option value="ebay">eBay</option><option value="facebook">Marketplace</option></select></label>
+            <label class="compact-control">Search results<input id="broad-result-query" class="search" placeholder="Filter any card, lot, condition or promotion"></label>
+            <label class="compact-control">Set in title<input id="broad-result-set" class="search" placeholder="e.g. Evolving Skies"></label>
+            <label class="compact-control">Type in title<input id="broad-result-type" class="search" placeholder="e.g. PSA, lot, sealed"></label>
+            <label class="compact-control price-filter">Min price<input id="broad-min-price" type="number" min="0" step="0.01" inputmode="decimal" placeholder="No minimum" aria-describedby="broad-price-help"></label>
+            <label class="compact-control price-filter">Max price<input id="broad-max-price" type="number" min="0" step="0.01" inputmode="decimal" placeholder="No maximum" aria-describedby="broad-price-help"></label>
+            <button class="button secondary small" id="broad-price-clear" type="button">Clear price</button>
+          </div>
+          <p id="broad-price-help" class="detail-meta" role="status" aria-live="polite">Price includes reported shipping, before tax. Unknown totals are hidden while a price range is set. Set and type match listing titles only; check the seller page.</p>
           <div class="table-wrap"><table><thead><tr><th>Listing</th><th>Why it surfaced</th><th>Ask / bid + shipping</th><th>Condition</th><th>Seen</th><th></th></tr></thead><tbody id="broad-results-table"><tr><td colspan="6" class="empty">Click Scan all cards automatically to collect listings here.</td></tr></tbody></table></div>
         </article>
         <details class="manual-browse"><summary>Open searches manually (optional)</summary>

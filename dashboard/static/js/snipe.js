@@ -346,20 +346,37 @@ let broadStatusInFlight = false;
 function renderDiscoveryResults() {
   const source = $('#broad-result-source').value;
   const query = $('#broad-result-query').value.trim().toLowerCase();
-  const rows = discoveryResultData.listings.filter(row => (!source || row.source === source)
+  const set = $('#broad-result-set').value.trim().toLowerCase();
+  const type = $('#broad-result-type').value.trim().toLowerCase();
+  const minField = $('#broad-min-price'), maxField = $('#broad-max-price');
+  const min = minField.value.trim() === '' ? null : Number(minField.value);
+  const max = maxField.value.trim() === '' ? null : Number(maxField.value);
+  const invalidMin = minField.validity?.badInput || (min != null && (!Number.isFinite(min) || min < 0));
+  const invalidMax = maxField.validity?.badInput || (max != null && (!Number.isFinite(max) || max < 0));
+  const reversed = min != null && max != null && min > max;
+  const priceError = invalidMin || invalidMax ? 'Enter non-negative prices, or leave either limit blank.'
+    : reversed ? 'Minimum price cannot exceed maximum price.' : '';
+  minField.setAttribute('aria-invalid', String(!!invalidMin || reversed));
+  maxField.setAttribute('aria-invalid', String(!!invalidMax || reversed));
+  const priceActive = min != null || max != null;
+  const rows = discoveryResultData.listings.filter(row => !priceError && (!source || row.source === source)
+    && (!priceActive || (Number.isFinite(row.total_price) && (min == null || row.total_price >= min) && (max == null || row.total_price <= max)))
+    && (!set || row.title.toLowerCase().includes(set))
+    && (!type || row.title.toLowerCase().includes(type))
     && (!query || `${row.title} ${row.condition} ${row.promotion} ${row.discovery_routes.join(' ')}`.toLowerCase().includes(query)));
   const scan = discoveryResultData.scan;
+  $('#broad-price-help').textContent = priceError || `Price filters${scan?.currency ? ` (${scan.currency})` : ''} include reported shipping, before tax. Unknown totals are hidden while a price range is set. Set and type match listing titles only; verify on the seller page. Filters do not start a scan.`;
   $('#broad-result-count').textContent = scan ? `${rows.length} of ${discoveryResultData.listings.length} candidates` : 'No scan yet';
   $('#broad-result-meta').textContent = scan
-    ? `Scanned ${new Date(scan.started).toLocaleString()} · ${scan.scanned} rows read · ${scan.errors.length} source errors${scan.budget != null ? ` · listed-price cap ${money(scan.currency, scan.budget)}` : ''}. Seller promotions and bids are leads, without an independently verified market price.`
+    ? `Scanned ${new Date(scan.started).toLocaleString()} · ${scan.scanned} rows read · ${scan.errors.length} source errors${scan.budget != null ? ` · older scan capped at ${money(scan.currency, scan.budget)} listed price; scan again to include higher prices` : ''}. Seller promotions and bids are leads, without an independently verified market price.`
     : 'Promotions and asking prices are leads. Below-market value is not independently verified.';
   $('#broad-results-table').innerHTML = rows.length ? rows.map(row => `<tr>
     <td><a href="${esc(row.url)}" target="_blank" rel="noopener">${esc(row.title)}</a><span class="sub">${esc(row.source)} · ${row.listing_type === 'auction' ? 'Auction, current bid can rise' : 'Listed asking price'}${row.location ? ` · ${esc(row.location)}` : ''}</span></td>
     <td>${row.promotion ? `<div class="candidate-promotion">${esc(row.promotion)}</div>` : ''}${row.discovery_routes.map(route => `<span class="sub">${esc(route)}</span>`).join('')}</td>
-    <td><strong>${row.price == null ? 'Price varies / unavailable' : esc(listingPrice(row))}</strong>${row.shipping != null && row.shipping > 0 ? `<span class="sub">Includes ${esc(money(row.currency, row.shipping))} shipping</span>` : ''}${scan?.budget != null && row.total_price != null && row.total_price > scan.budget ? '<span class="sub over-budget">Above cap with shipping</span>' : ''}<span class="sub">Before tax and other charges</span></td>
+    <td><strong>${row.price == null ? 'Price varies / unavailable' : esc(listingPrice(row))}</strong>${row.shipping != null && row.shipping > 0 ? `<span class="sub">Includes ${esc(money(row.currency, row.shipping))} shipping</span>` : ''}<span class="sub">Before tax and other charges</span></td>
     <td>${esc(row.condition || 'Not verified')}</td><td>${esc(ago(row.last_seen))}</td>
     <td><button class="button secondary small" data-dismiss="${row.id}">Remove</button></td>
-  </tr>`).join('') : `<tr><td colspan="6" class="empty">${scan ? 'No candidates to show for the latest scan and filters. Check the source errors above.' : 'Click Scan all cards automatically to collect listings here.'}</td></tr>`;
+  </tr>`).join('') : `<tr><td colspan="6" class="empty">${priceError || (scan ? 'No candidates to show for the latest scan and filters. Check the source errors above.' : 'Click Scan all cards automatically to collect listings here.')}</td></tr>`;
   bindDismiss('#broad-results-table', loadDiscoveryResults);
 }
 
@@ -419,7 +436,13 @@ for (const [id, path] of [['#facebook-login', ''], ['#facebook-finish', '/finish
   });
 }
 $('#broad-result-source').addEventListener('change', renderDiscoveryResults);
-$('#broad-result-query').addEventListener('input', renderDiscoveryResults);
+['#broad-result-query', '#broad-result-set', '#broad-result-type'].forEach(selector => $(selector).addEventListener('input', renderDiscoveryResults));
+['#broad-min-price', '#broad-max-price'].forEach(selector => $(selector).addEventListener('input', renderDiscoveryResults));
+$('#broad-price-clear').addEventListener('click', () => {
+  $('#broad-min-price').value = '';
+  $('#broad-max-price').value = '';
+  renderDiscoveryResults();
+});
 
 async function loadDiscover() {
   await Promise.all([loadDiscovery(), loadDiscoveryResults(), loadBroadStatus()]);

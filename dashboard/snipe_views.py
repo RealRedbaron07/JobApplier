@@ -300,14 +300,14 @@ def snipe_scan():
                                       "local_only": not (Config.EXTERNAL_ACCESS_ENABLED or Config.BROWSER_SCANS_ENABLED)}), 202 if request.method == "POST" else 200
 
 
-def _run_broad_scan(settings, budget, source):
+def _run_broad_scan(settings, source):
     def progress(**state):
         with _scan_lock:
             _scan_state.update(state)
 
     try:
         with scanner_session(settings):
-            result = DiscoveryScanner(settings, get_store(), budget, stop=_discovery_stop, progress=progress).scan(source)
+            result = DiscoveryScanner(settings, get_store(), stop=_discovery_stop, progress=progress).scan(source)
     except Exception as exc:
         result = {"message": "Broad scan failed. " + str(exc), "errors": [str(exc)]}
     with _scan_lock:
@@ -345,13 +345,12 @@ def snipe_discovery_scan():
                     pass
             except ValueError as exc:
                 return jsonify({"error": str(exc)}), 409
-            budget = load_watchlist(settings.watchlist_path).budget
             _discovery_stop.clear()
             _scan_state.update(running=True, operation="broad", source=source, errors=[], candidates=0,
                                scanned=0, pages_done=0, page_limit=len(plan), tcgplayer=None, login_waiting=False,
                                started=_iso(datetime.now(timezone.utc)), finished=None,
                                message="Starting broad browser searches. No card list or paid API is used…")
-            threading.Thread(target=_run_broad_scan, args=(settings, budget, source), daemon=True).start()
+            threading.Thread(target=_run_broad_scan, args=(settings, source), daemon=True).start()
         return jsonify(_discovery_status()), 202 if request.method == "POST" else 200
 
 

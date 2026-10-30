@@ -54,21 +54,22 @@ def test_broad_scan_is_bounded_and_imports_without_targets_prices_or_condition_f
         searches.append(url)
         assert limit == 60
         assert "LH_BIN" not in parse_qs(urlsplit(url).query)
+        assert "_udhi" not in parse_qs(urlsplit(url).query)
         return [listing(item=str(len(searches) * 1000 + i), condition="Lightly Played") for i in range(100)]
 
     def facebook_search(self, target, *, all_dates):
         searches.append(target.search_query)
-        assert all_dates and target.card_name == "" and not target.use_market
+        assert all_dates and target.card_name == "" and not target.use_market and target.max_price is None
         return [listing("facebook", str(len(searches) * 1000 + i)) for i in range(100)]
 
     monkeypatch.setattr(discovery.EbayWeb, "search_page", ebay_search)
     monkeypatch.setattr(discovery.FacebookMarketplace, "find", facebook_search)
-    report = discovery.DiscoveryScanner(settings, store, 45).scan()
+    report = discovery.DiscoveryScanner(settings, store).scan()
     rows, scan = store.discovery_results()
     assert len(searches) == report["pages_done"] == 8
     assert len(rows) == report["candidates"] == report["scanned"] == 480
     assert report["new_listings"] == 480 and report["errors"] == []
-    assert scan.kind == "broad" and scan.budget == 45 and scan.currency == "CAD"
+    assert scan.kind == "broad" and scan.budget is None and scan.currency == "CAD"
     assert scan.deals == 0 and scan.bids_scheduled == 0 and not scan.live
     assert all(row.market_value is None and row.matched_target is None for row in rows)
     assert any(row.condition == "Lightly Played" and row.shipping is None for row in rows)
@@ -79,7 +80,7 @@ def test_broad_scan_is_bounded_and_imports_without_targets_prices_or_condition_f
 def test_broad_scan_deduplicates_and_preserves_routes_without_fake_discount_math(browser_scan, monkeypatch):
     settings, store, _ = browser_scan
     monkeypatch.setattr(discovery.EbayWeb, "search_page", lambda *a: [listing()])
-    report = discovery.DiscoveryScanner(settings, store, 45).scan("ebay")
+    report = discovery.DiscoveryScanner(settings, store).scan("ebay")
     rows, _ = store.discovery_results()
     assert report["scanned"] == 6 and report["candidates"] == report["new_listings"] == 1
     assert len(rows) == 1 and len(json.loads(rows[0].discovery_routes)) == 6
@@ -96,7 +97,7 @@ def test_one_blocked_source_does_not_repeat_or_discard_other_source_results(brow
 
     monkeypatch.setattr(discovery.EbayWeb, "search_page", blocked)
     monkeypatch.setattr(discovery.FacebookMarketplace, "find", lambda *a, **kw: [listing("facebook")])
-    report = discovery.DiscoveryScanner(settings, store, 45).scan()
+    report = discovery.DiscoveryScanner(settings, store).scan()
     assert attempts == ["ebay"] and report["pages_done"] == 3
     assert len(report["errors"]) == 1 and report["candidates"] == 1
     assert store.discovery_results()[0][0].source == "facebook"
@@ -113,11 +114,11 @@ def test_transient_query_error_does_not_drop_other_categories_but_two_failures_s
         return [listing()]
 
     monkeypatch.setattr(discovery.EbayWeb, "search_page", search)
-    report = discovery.DiscoveryScanner(settings, store, 45).scan("ebay")
+    report = discovery.DiscoveryScanner(settings, store).scan("ebay")
     assert len(attempts) == 4 and report["candidates"] == 1 and len(report["errors"]) == 3
 
 
-def test_stop_and_budget_are_enforced_without_hiding_unknown_prices(browser_scan, monkeypatch):
+def test_stop_keeps_all_prices_without_shared_budget_cap(browser_scan, monkeypatch):
     settings, store, opened = browser_scan
     stop = threading.Event()
 
@@ -126,10 +127,11 @@ def test_stop_and_budget_are_enforced_without_hiding_unknown_prices(browser_scan
         return [listing(item="1", price=46), listing(item="2", price=None), listing(item="3", currency="USD")]
 
     monkeypatch.setattr(discovery.EbayWeb, "search_page", search)
-    report = discovery.DiscoveryScanner(settings, store, 45, stop=stop).scan()
+    report = discovery.DiscoveryScanner(settings, store, stop=stop).scan()
     rows, _ = store.discovery_results()
-    assert report["stopped"] and report["pages_done"] == 1 and len(rows) == 1
-    assert rows[0].listing_id == "2" and rows[0].price is None
+    assert report["stopped"] and report["pages_done"] == 1 and len(rows) == 2
+    assert {row.listing_id for row in rows} == {"1", "2"}
+    assert next(row for row in rows if row.listing_id == "2").price is None
     assert opened[0].closed
 
 
@@ -137,17 +139,17 @@ def test_browser_scan_flag_blocks_all_work(browser_scan, monkeypatch):
     settings, store, opened = browser_scan
     monkeypatch.setattr(Config, "BROWSER_SCANS_ENABLED", False)
     with pytest.raises(ValueError, match="disabled"):
-        discovery.DiscoveryScanner(settings, store, 45).scan()
+        discovery.DiscoveryScanner(settings, store).scan()
     assert not opened
 
 
 def test_empty_new_scan_does_not_present_old_results_as_fresh(browser_scan, monkeypatch):
     settings, store, _ = browser_scan
     monkeypatch.setattr(discovery.EbayWeb, "search_page", lambda *a: [listing()])
-    discovery.DiscoveryScanner(settings, store, None).scan("ebay")
+    discovery.DiscoveryScanner(settings, store).scan("ebay")
     assert len(store.discovery_results()[0]) == 1
     monkeypatch.setattr(discovery.EbayWeb, "search_page", lambda *a: [])
-    discovery.DiscoveryScanner(settings, store, None).scan("ebay")
+    discovery.DiscoveryScanner(settings, store).scan("ebay")
     assert store.discovery_results()[0] == []
 
 
@@ -202,7 +204,7 @@ def test_homepage_retry_is_not_mislabelled_as_a_confirmed_promotion(browser_scan
         return [listing(raw={"text": "Pokemon card"})]
 
     monkeypatch.setattr(discovery.EbayWeb, "search_page", retry)
-    discovery.DiscoveryScanner(settings, store, 45).scan("ebay")
+    discovery.DiscoveryScanner(settings, store).scan("ebay")
     row = store.discovery_results()[0][0]
     assert row.promotion == ""
     assert all(route.startswith("search-bar retry (unfiltered):") for route in json.loads(row.discovery_routes))
@@ -224,7 +226,7 @@ def test_shipping_is_not_mistaken_for_free_returns(text, shipping):
 def test_removed_candidates_stay_removed_and_are_not_counted_as_available(browser_scan, monkeypatch):
     settings, store, _ = browser_scan
     monkeypatch.setattr(discovery.EbayWeb, "search_page", lambda *a: [listing()])
-    scanner = discovery.DiscoveryScanner(settings, store, 45)
+    scanner = discovery.DiscoveryScanner(settings, store)
     scanner.scan("ebay")
     row = store.discovery_results()[0][0]
     assert store.dismiss_listing(row.id)
@@ -241,8 +243,8 @@ def test_one_click_broad_endpoint_runs_with_an_empty_watchlist_and_cannot_launch
     started, release = threading.Event(), threading.Event()
 
     class Scanner:
-        def __init__(self, settings, actual_store, budget, *, stop, progress):
-            assert actual_store is store and budget == 45
+        def __init__(self, settings, actual_store, *, stop, progress):
+            assert actual_store is store
 
         def scan(self, source):
             assert source == "all"

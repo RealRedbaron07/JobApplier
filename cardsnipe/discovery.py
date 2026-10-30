@@ -60,12 +60,12 @@ def promotion_text(listing):
 
 
 class DiscoveryScanner:
-    def __init__(self, settings, store, budget, *, stop=None, progress=None):
+    def __init__(self, settings, store, *, stop=None, progress=None):
         # API keys and side effects are never passed to this browser-only scanner.
         self.settings = replace(settings, ebay_app_id="", ebay_cert_id="", ebay_domain="ebay.ca", live=False,
                                 fb_auto_message=False, notify_macos=False, open_in_browser=False,
                                 webhook_url="", ebay_sold_comps=False)
-        self.store, self.budget = store, budget
+        self.store = store
         self.stop = stop or threading.Event()
         self.progress = progress or (lambda **state: None)
 
@@ -94,7 +94,7 @@ class DiscoveryScanner:
                     break
                 self.progress(message=f"Searching {name}: {query} ({mode})…", pages_done=pages,
                               page_limit=len(plan), scanned=scanned, candidates=len(found))
-                target = Target(name=query, keywords=[query], max_price=self.budget, use_market=False)
+                target = Target(name=query, keywords=[query], use_market=False)
                 pages += 1
                 try:
                     if name == "ebay":
@@ -107,8 +107,6 @@ class DiscoveryScanner:
                     scanned += len(listings)
                     for listing in listings:
                         if listing.currency != self.settings.ebay_currency:
-                            continue
-                        if listing.price is not None and self.budget is not None and listing.price > self.budget:
                             continue
                         entry = found.setdefault(listing.key, {"listing": listing, "routes": []})
                         route_mode = "search-bar retry (unfiltered)" if name == "ebay" and getattr(ebay, "used_home_search", False) else mode
@@ -133,7 +131,7 @@ class DiscoveryScanner:
             self.store.record_scan(started=started, finished=datetime.now(timezone.utc),
                                    sources=sorted({name for name, _, _ in plan}), live=False,
                                    scanned=scanned, new_listings=new, deals=0, regrade_deals=0,
-                                   bids_scheduled=0, errors=errors, kind="broad", budget=self.budget,
+                                   bids_scheduled=0, errors=errors, kind="broad", budget=None,
                                    currency=self.settings.ebay_currency)
         return {"message": f"{'Stopped' if stopped else 'Finished'}: {saved} candidates saved from {pages} searches. {len(errors)} source errors.",
                 "scanned": scanned, "new_listings": new, "candidates": saved, "pages_done": pages,
