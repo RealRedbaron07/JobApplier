@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import math
 import os
+import tempfile
 from dataclasses import asdict, dataclass, field, replace
 
 VALID_SOURCES = ("ebay", "facebook")
@@ -23,6 +25,13 @@ DEFAULT_GLOBAL_EXCLUDE = [
     "keychain", "pin", "figure", "coin only", "mystery pack", "mystery box", "mystery bundle",
     # not for sale
     "wanted", "wtb", "looking for", "iso",
+    "homemade", "hand made", "hand-made", "unofficial", "counterfeit", "bootleg", "knockoff",
+    "knock-off", "jumbo", "oversized", "card lot", "art print", "postcard", "magnet",
+    "phone case", "t-shirt", "hoodie", "for decoration", "decorative", "not authentic",
+    "not official", "not real", "unlicensed", "tribute", "inspired by", "recreation",
+    "recreated", "1:1", "dupe", "clone", "nft", "acrylic", "standee", "3d printed",
+    "laminated", "blank back", "altered", "painted", "colorized", "ai generated", "ai art",
+    "fake slab", "replica slab", "lab slab",
 ]
 
 
@@ -81,6 +90,11 @@ class Target:
             return self
         return replace(self, max_price=ceiling)
 
+    def within_budget(self, budget: float | None) -> "Target":
+        if budget is None:
+            return self
+        return replace(self, max_price=min(budget, self.max_price) if self.max_price is not None else budget)
+
     def uses_source(self, source: str) -> bool:
         return self.enabled and source in self.sources
 
@@ -96,12 +110,17 @@ class Watchlist:
     global_exclude: list[str] = field(default_factory=lambda: list(DEFAULT_GLOBAL_EXCLUDE))
     tag_ten_score: int = DEFAULT_TAG_TEN_SCORE
     tag_near_margin: int = DEFAULT_TAG_NEAR_MARGIN
+    budget: float | None = None
 
     def enabled_targets(self) -> list[Target]:
         return [t for t in self.targets if t.enabled]
 
+    def scan_targets(self) -> list[Target]:
+        return [t.within_budget(self.budget) for t in self.enabled_targets()]
+
     def to_dict(self) -> dict:
         return {
+            "budget": self.budget,
             "global_exclude": self.global_exclude,
             "tag_ten_score": self.tag_ten_score,
             "tag_near_margin": self.tag_near_margin,
@@ -149,31 +168,63 @@ EXAMPLE_TARGETS = [
 ]
 
 
-def _target_from_dict(data: dict) -> Target:
+def optional_budget(value, name: str = "budget") -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} must be a positive number") from None
+    if isinstance(value, bool) or not math.isfinite(number) or number <= 0:
+        raise ValueError(f"{name} must be a positive finite number")
+    return number
+
+
+def target_from_dict(data: dict) -> Target:
+    if not isinstance(data, dict):
+        raise ValueError("Each target must be an object")
     allowed = {f for f in Target.__dataclass_fields__}
     clean = {k: v for k, v in data.items() if k in allowed}
+    if not isinstance(clean.get("name"), str) or not clean["name"].strip():
+        raise ValueError("A target name is required")
+    clean["name"] = clean["name"].strip()
+    for key in ("keywords", "exclude", "sources"):
+        if key in clean and (not isinstance(clean[key], list) or any(not isinstance(x, str) for x in clean[key])):
+            raise ValueError(f"{key} must be a list of text values")
+    for key in ("enabled", "use_market", "graded_only", "raw_ok", "regrade"):
+        if key in clean and not isinstance(clean[key], bool):
+            raise ValueError(f"{key} must be true or false")
     clean["keywords"] = [str(k) for k in clean.get("keywords", []) if str(k).strip()]
-    clean["max_price"] = float(clean["max_price"]) if clean.get("max_price") not in (None, "", 0) else None
-    for key in ("bargain_pct", "irregular_pct"):
-        if clean.get(key) is not None:
-            clean[key] = float(clean[key])
+    for key in ("max_price", "max_bid", "regrade_max_price"):
+        clean[key] = optional_budget(clean.get(key), key)
+    for key in ("bargain_pct", "irregular_pct", "min_price", "min_grade", "regrade_min_grade", "regrade_max_grade"):
+        if clean.get(key) in (None, ""):
+            clean.pop(key, None)
+            continue
+        value = clean[key]
+        try:
+            clean[key] = float(value)
+        except (TypeError, ValueError):
+            raise ValueError(f"{key} must be a number") from None
+        if isinstance(value, bool) or not math.isfinite(clean[key]) or clean[key] < 0:
+            raise ValueError(f"{key} must be a non-negative finite number")
     for key in ("card_name", "set_name", "number"):
         clean[key] = str(clean.get(key) or "")
-    if clean.get("max_bid") is not None:
-        clean["max_bid"] = float(clean["max_bid"])
-    if clean.get("min_price") is not None:
-        clean["min_price"] = float(clean["min_price"])
-    if clean.get("regrade_max_price") is not None:
-        clean["regrade_max_price"] = float(clean["regrade_max_price"])
-    for key in ("regrade_min_grade", "regrade_max_grade"):
-        if clean.get(key) is not None:
-            clean[key] = float(clean[key])
-    if clean.get("min_grade") is not None:
-        clean["min_grade"] = float(clean["min_grade"])
-    clean["sources"] = [s for s in clean.get("sources", list(VALID_SOURCES)) if s in VALID_SOURCES]
+    clean["sources"] = clean.get("sources", list(VALID_SOURCES))
+    if not clean["sources"] or any(s not in VALID_SOURCES for s in clean["sources"]):
+        raise ValueError("Choose eBay, Facebook, or both")
     if not clean["keywords"]:
         raise ValueError(f"Target {clean.get('name', '?')!r} has no keywords")
-    return Target(**clean)
+    target = Target(**clean)
+    if target.bargain_pct >= 100 or target.irregular_pct > 100:
+        raise ValueError("Discount percentages must be between 0 and 100, with bargain below 100")
+    if any(value is not None and value > 10 for value in (target.min_grade, target.regrade_min_grade, target.regrade_max_grade)):
+        raise ValueError("Grades must be between 0 and 10")
+    if target.regrade_min_grade > target.regrade_max_grade:
+        raise ValueError("Regrade minimum cannot exceed maximum")
+    if target.max_price is not None and target.min_price is not None and target.min_price > target.max_price:
+        raise ValueError("Minimum price cannot exceed the card budget")
+    return target
 
 
 def load_watchlist(path: str, create_example: bool = True) -> Watchlist:
@@ -185,23 +236,36 @@ def load_watchlist(path: str, create_example: bool = True) -> Watchlist:
         return watchlist
     with open(path, "r", encoding="utf-8") as handle:
         data = json.load(handle)
-    targets = [_target_from_dict(item) for item in data.get("targets", [])]
-    global_exclude = [str(x).lower() for x in data.get("global_exclude", DEFAULT_GLOBAL_EXCLUDE)]
+    targets = [target_from_dict(item) for item in data.get("targets", [])]
+    saved_exclude = [str(x).lower() for x in data.get("global_exclude", [])]
+    # New default fake/junk terms apply even when an older watchlist file is missing them.
+    global_exclude = list(dict.fromkeys([*saved_exclude, *DEFAULT_GLOBAL_EXCLUDE])) if saved_exclude else list(DEFAULT_GLOBAL_EXCLUDE)
     return Watchlist(
         targets=targets,
         global_exclude=global_exclude,
         tag_ten_score=int(data.get("tag_ten_score", DEFAULT_TAG_TEN_SCORE)),
         tag_near_margin=int(data.get("tag_near_margin", DEFAULT_TAG_NEAR_MARGIN)),
+        budget=optional_budget(data.get("budget")),
     )
 
 
 def save_watchlist(path: str, watchlist: Watchlist) -> None:
-    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as handle:
-        json.dump(watchlist.to_dict(), handle, indent=2, ensure_ascii=False)
+    directory = os.path.dirname(os.path.abspath(path))
+    os.makedirs(directory, exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=directory, suffix=".tmp", delete=False) as handle:
+            temporary = handle.name
+            json.dump(watchlist.to_dict(), handle, indent=2, ensure_ascii=False, allow_nan=False)
+        # A running watcher must never read a half-written budget or target list.
+        os.replace(temporary, path)
+    finally:
+        if temporary and os.path.exists(temporary):
+            os.unlink(temporary)
 
 
 def add_target(path: str, target: Target) -> Watchlist:
+    target = target_from_dict(asdict(target))
     watchlist = load_watchlist(path)
     watchlist.targets = [t for t in watchlist.targets if t.name.lower() != target.name.lower()]
     watchlist.targets.append(target)

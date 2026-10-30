@@ -10,28 +10,84 @@
 <body data-poll-seconds="{{ poll_seconds }}">
   <div class="shell">
     <aside class="sidebar">
-      <div class="brand"><span class="brand-mark">⚡</span><div><strong>Card sniper</strong><small>eBay + FB Marketplace</small></div></div>
+      <div class="brand"><span class="brand-mark">C</span><div><strong>Card desk</strong><small>Pokémon research workspace</small></div></div>
       <nav aria-label="Primary">
-        <button class="nav-item active" data-view="overview"><span>◫</span> Overview</button>
-        <button class="nav-item" data-view="deals"><span>🔥</span> Deals</button>
-        <button class="nav-item" data-view="bids"><span>🎯</span> Snipes</button>
-        <button class="nav-item" data-view="values"><span>💲</span> Values</button>
-        <button class="nav-item" data-view="collection"><span>🗂</span> My collection</button>
-        <button class="nav-item" data-view="watchlist"><span>★</span> Watchlist</button>
-        <button class="nav-item" data-view="scans"><span>⌁</span> Scan history</button>
-        <button class="nav-item" data-view="listings"><span>▤</span> Everything seen</button>
+        <button class="nav-item active" data-view="discover"><span>⌕</span> Browse cards</button>
+        <button class="nav-item" data-view="collection"><span>◫</span> My portfolio</button>
+        <button class="nav-item" data-view="watchlist"><span>★</span> Watchlist & budget</button>
+        <span class="nav-label">SAVED RESEARCH</span>
+        <button class="nav-item" data-view="overview"><span>▦</span> Overview</button>
+        <button class="nav-item" data-view="deals"><span>◇</span> Saved matches</button>
+        <button class="nav-item" data-view="values"><span>＄</span> Price references</button>
+        <button class="nav-item" data-view="listings"><span>▤</span> Saved listings</button>
+        <button class="nav-item" data-view="scans"><span>⌁</span> Past scans</button>
         <a class="nav-item nav-link" href="/"><span>←</span> Job OS</a>
       </nav>
-      <div class="safety-card"><span class="pulse" id="live-dot"></span><div><strong id="mode-label">Reading cardsnipe.db</strong><small id="mode-sub">Start a scan with <code>make snipe</code></small></div></div>
+      <div class="safety-card"><span class="pulse" id="live-dot"></span><div><strong id="mode-label">Browser-only scans</strong><small id="mode-sub">Starts when you click. No paid APIs or automatic purchases.</small></div></div>
     </aside>
 
     <main>
       <header class="topbar">
-        <div><p class="eyebrow">POKÉMON CARD SNIPER</p><h1 id="page-title">Overview</h1></div>
-        <div class="top-actions"><span class="level" id="last-scan-badge">No scans yet</span><span class="level">eBay via {{ ebay_mode }} · FB {{ fb_city }}</span><button class="button secondary small" id="refresh">Refresh</button></div>
+        <div><p class="eyebrow">YOUR CARD WORKSPACE</p><h1 id="page-title">Browse cards</h1></div>
+        <div class="top-actions"><span class="level local-status">{% if browser_scans_enabled %}Browser scans · paid APIs off{% else %}Local-only · no external calls{% endif %}</span><button class="button secondary small" id="refresh">Reload saved results</button><button class="button secondary small" id="budget-badge" data-view-link="watchlist">Set card budget</button></div>
       </header>
+      <div class="scan-controls">
+        <p id="scan-status" role="status">Click Scan all cards to search broadly and collect candidates here. No card list is needed.</p>
+      </div>
 
-      <section class="view active" id="view-overview">
+      <section class="view active" id="view-discover">
+        <article class="panel auto-scan-panel">
+          <p class="eyebrow">AUTOMATIC DISCOVERY</p>
+          <h2>Scan broadly. Choose the cards yourself.</h2>
+          <p>One click searches promotions, new listings, ending auctions, offers, lots, sealed products and Marketplace. Results appear below without adding specific card targets.</p>
+          <div class="auto-scan-actions">
+            <label>Sites<select id="broad-source"><option value="all">eBay + Marketplace</option><option value="ebay">eBay</option><option value="facebook">Marketplace</option></select></label>
+            <button class="button" id="broad-scan">Scan all cards automatically</button>
+            <button class="button secondary" id="broad-stop" hidden>Stop after current page</button>
+          </div>
+          <p class="detail-meta">Up to 8 broad searches and 60 results per search. One pass per click, with a 60-second cooldown. No paid API, price-provider calls, purchases or messages.</p>
+          <progress id="broad-progress" max="8" value="0" hidden aria-label="Broad scan progress"></progress>
+          <p id="broad-status" role="status" aria-live="polite">Ready to scan.</p>
+          <div id="broad-errors" role="status"></div>
+          <details class="scanner-signin"><summary>Marketplace scanner sign-in</summary><p class="detail-meta">The scanner has its own saved Chrome profile. Your normal browser login is separate. Sign in once here; the sign-in window stays open until you finish or cancel.</p><div class="target-actions"><button class="button secondary small" id="facebook-login">Sign in to Marketplace scanner</button><button class="button secondary small" id="facebook-finish" hidden>Finish scanner sign-in</button><button class="button secondary small" id="facebook-cancel" hidden>Cancel sign-in</button></div></details>
+        </article>
+        <article class="panel candidates-panel">
+          <div class="panel-head"><div><p class="eyebrow">COLLECTED FOR YOUR REVIEW</p><h3>Scan results</h3></div><span class="level" id="broad-result-count">No scan yet</span></div>
+          <p id="broad-result-meta" class="detail-meta">Promotions and asking prices are leads. Below-market value is not independently verified.</p>
+          <div class="toolbar"><label class="compact-control">Site<select id="broad-result-source"><option value="">All sites</option><option value="ebay">eBay</option><option value="facebook">Marketplace</option></select></label><label class="compact-control">Search results<input id="broad-result-query" class="search" placeholder="Filter any card, lot, condition or promotion"></label></div>
+          <div class="table-wrap"><table><thead><tr><th>Listing</th><th>Why it surfaced</th><th>Ask / bid + shipping</th><th>Condition</th><th>Seen</th><th></th></tr></thead><tbody id="broad-results-table"><tr><td colspan="6" class="empty">Click Scan all cards automatically to collect listings here.</td></tr></tbody></table></div>
+        </article>
+        <details class="manual-browse"><summary>Open searches manually (optional)</summary>
+        <article class="panel search-panel">
+          <p class="eyebrow">BROWSE THE WHOLE MARKET</p>
+          <h2>Find the opportunity. Pick the card later.</h2>
+          <p class="search-intro">Browse across Pokémon singles, graded cards, lots, collections and sealed products. No specific card, set, grade or watchlist is required. You choose what is worth buying.</p>
+          <form id="discovery-form" class="search-form">
+            <label>Optional keywords · leave broad to see everything<input id="discovery-query" name="query" value="pokemon cards" maxlength="160" placeholder="Leave blank for all Pokémon cards"></label>
+            <button type="submit" hidden>Search eBay</button>
+            <div id="discovery-links" class="search-actions"><a class="button ebay-button" id="discovery-ebay" data-discovery-source="ebay" href="{{ discovery.links.ebay }}" target="_blank" rel="noopener">Search eBay ↗</a><a class="button facebook-button" data-discovery-source="facebook" href="{{ discovery.links.facebook }}" target="_blank" rel="noopener">Search Marketplace ↗</a></div>
+          </form>
+          <p class="detail-meta" id="discovery-meta" role="status" aria-live="polite"></p>
+          <div class="deal-lanes">
+            {% for lane in discovery_modes %}<a data-discovery-source="ebay" data-discovery-mode="{{ lane.mode }}" href="{{ lane.links.ebay }}" target="_blank" rel="noopener"><strong>{{ lane.label }} ↗</strong><span>{{ lane.note }}</span></a>{% endfor %}
+          </div>
+          <p class="detail-meta">These are broad hunting routes, not verified below-market deals. A coupon can require multiple purchases, an auction can rise, and an offer price is not agreed. Marketplace results are broad leads for your review.</p>
+          <div class="quick-search-head"><span>OPTIONAL PRODUCT TYPES · NO SPECIFIC CARDS</span><a href="https://www.ebay.ca/" target="_blank" rel="noopener">Open eBay home ↗</a></div>
+          <div class="quick-searches">
+            {% for preset in discovery_presets %}<a class="button secondary small" data-discovery-query="{{ preset.query }}" href="{{ preset.links.ebay }}" target="_blank" rel="noopener">{{ preset.label }}</a>{% endfor %}
+          </div>
+          <a class="text-link" id="scan-now" data-discovery-query="pokemon cards" href="{{ discovery.links.ebay }}" target="_blank" rel="noopener">Search all Pokémon on eBay ↗</a>
+        </article>
+        <div class="source-notes">
+          <article><span class="source-mark ebay-mark">e</span><div><h3>eBay, as a guest</h3><p>Uses ebay.ca in this browser. No eBay account or API key. Your price cap excludes shipping and tax.</p></div></article>
+          <article><span class="source-mark facebook-mark">f</span><div><h3>Your Marketplace session</h3><p>Uses the Facebook account signed in to this browser. Check the search location and radius on Facebook.</p></div></article>
+        </div>
+        <div class="browse-footer"><p>A low asking price is a lead. Check the exact set, number, language, condition and grade before comparing values.</p><button class="text-button" data-view-link="collection">View or update your portfolio →</button></div>
+        </details>
+      </section>
+
+      <section class="view" id="view-overview">
+        <p class="detail-meta" id="last-scan-badge">No saved scans</p>
         <div class="metrics" id="snipe-metrics"></div>
         <div class="metrics" id="snipe-metrics-2" style="margin-top:12px"></div>
         <div class="grid two">
@@ -39,71 +95,93 @@
           <article class="panel"><div class="panel-head"><div><p class="eyebrow">BREAKDOWN</p><h3>Deals by target</h3></div></div><div id="by-target"></div><div class="panel-head" style="margin-top:18px"><div><p class="eyebrow">SOURCES</p><h3>Deals by source</h3></div></div><div id="by-source"></div></article>
         </div>
         <div class="grid two" style="margin-top:18px">
-          <article class="panel"><div class="panel-head"><div><p class="eyebrow">PENDING</p><h3>Upcoming snipes</h3></div><button class="text-button" data-view-link="bids">Manage →</button></div><div id="upcoming-bids" class="stack"></div></article>
-          <article class="panel"><div class="panel-head"><div><p class="eyebrow">HEALTH</p><h3>Recent scans</h3></div><button class="text-button" data-view-link="scans">History →</button></div><div id="scan-spark"></div><div id="scan-errors" class="stack"></div></article>
+          <article class="panel"><div class="panel-head"><div><p class="eyebrow">ARCHIVE</p><h3>Saved auction history</h3></div><button class="text-button" data-view-link="bids">View →</button></div><div id="upcoming-bids" class="stack"></div></article>
+          <article class="panel"><div class="panel-head"><div><p class="eyebrow">ARCHIVE</p><h3>Past scans & errors</h3></div><button class="text-button" data-view-link="scans">History →</button></div><div id="scan-spark"></div><div id="scan-errors" class="stack"></div></article>
         </div>
       </section>
 
       <section class="view" id="view-deals">
         <article class="panel">
           <div class="toolbar"><label class="compact-control">Lane<select id="deal-lane"><option value="">All</option><option value="deal">Deal</option><option value="regrade">♻️ Regrade</option></select></label><label class="compact-control">Source<select id="deal-source"><option value="">All</option><option value="ebay">eBay</option><option value="facebook">Facebook</option></select></label><label class="compact-control">Flag<select id="deal-flag"><option value="">All</option><option value="clean">Clean only</option><option value="irregular">⚠️ Irregular only</option></select></label><label class="compact-control">Search<input id="deal-search" class="search" placeholder="title, target, grade"></label></div>
-          <div class="table-wrap"><table><thead><tr><th>When</th><th>Lane</th><th>Listing</th><th>Grade</th><th>Price</th><th>Market value</th><th>Under</th><th>Target</th><th>Action</th></tr></thead><tbody id="deals-table"></tbody></table></div>
+          <p class="detail-meta">Saved matches checked within the past 24 hours. Potential eBay matches get an item-page check. Raw cards need the seller to declare Near Mint or better; unknown and played condition stay in history. Confirm photos and availability before acting. Prices include reported shipping, before tax and import charges.</p>
+          <div class="table-wrap"><table><thead><tr><th>Last checked</th><th>Lane</th><th>Listing</th><th>Grade</th><th>Price</th><th>Market reference</th><th>Under</th><th>Target</th><th>Action</th><th></th></tr></thead><tbody id="deals-table"></tbody></table></div>
         </article>
       </section>
 
       <section class="view" id="view-bids">
         <article class="panel">
-          <div class="panel-head"><div><p class="eyebrow">AUCTION SNIPES</p><h3>Scheduled, fired and finished</h3></div></div>
+          <div class="panel-head"><div><p class="eyebrow">AUCTION SNIPES</p><h3>Not used — auctions are not bid on</h3></div></div>
           <div class="table-wrap"><table><thead><tr><th>#</th><th>Status</th><th>Listing</th><th>Max bid</th><th>Ends</th><th>Fires</th><th>Result</th><th></th></tr></thead><tbody id="bids-table"></tbody></table></div>
         </article>
       </section>
 
       <section class="view" id="view-values">
         <article class="panel">
-          <div class="panel-head"><div><p class="eyebrow">MARKET VALUE PER GRADE</p><h3>Cheapest of TCGPlayer · PriceCharting · eBay sold</h3></div><div class="target-actions"><button class="button secondary small" id="revalue" title="Re-judge every listing already seen with these values">Re-judge seen listings</button><button class="button secondary small" id="refresh-values">Refetch all</button></div></div>
-          <p class="detail-meta">Value = the lowest figure any source reports for that grade bucket, converted to your currency. A listing is a <strong>deal</strong> at ≥ bargain% under value and <strong>⚠️ irregular</strong> at ≥ irregular% under (too good — verify authenticity, condition and seller before paying).</p>
+          <div class="panel-head"><div><p class="eyebrow">SAVED REFERENCES PER GRADE</p><h3>Saved market references · no live updates</h3></div><div class="target-actions"><button class="button secondary small" id="revalue" title="Re-judge saved listings using saved, unexpired prices only">Re-judge saved listings</button></div></div>
+          <p class="detail-meta">TCGplayer's product market price is a raw reference, without a verified Near Mint condition filter. Raw listings marked LP, MP, HP or damaged do not use it. Graded references use matching grade buckets; a CGC 10 or TAG 10 does not inherit PSA 10 prices. Sources and fetch times are shown below. These are estimates, not guaranteed resale proceeds.</p>
           <div id="values" class="stack"></div>
         </article>
       </section>
 
       <section class="view" id="view-collection">
+        <div class="portfolio-heading"><div><h2>Your portfolio, with a source for every figure.</h2><p>Changes on Collectr do not sync automatically. Import a new snapshot below.</p></div><span class="level">Manual updates</span></div>
         <div class="metrics" id="collection-metrics"></div>
-        <div class="grid two">
+        <details class="collection-import" id="collection-import">
+          <summary>Update portfolio from Collectr</summary>
+          <p>Open your <a href="{{ collectr_url or 'https://app.getcollectr.com/' }}" target="_blank" rel="noopener">Collectr showcase ↗</a>, choose <strong>USD</strong>, clear filters and load all cards. Select and copy the page, then paste it here. The import stays on this computer.</p>
+          <form id="collection-import-form">
+            <label>Copied Collectr page<textarea id="collection-import-text" rows="7" maxlength="1000000" required placeholder="Paste the full page, including Estimated Portfolio Value, Total Cards and each card's quantity."></textarea></label>
+            <div class="target-actions"><button class="button secondary" id="collection-preview-button" type="submit">Preview import</button></div>
+          </form>
+          <div id="collection-import-preview" hidden></div>
+          <button class="button" id="collection-import-save" hidden>Replace local snapshot</button>
+          <p class="detail-meta" id="collection-import-status" role="status" aria-live="polite"></p>
+        </details>
+        <div class="collection-layout">
           <article class="panel">
-            <div class="panel-head"><div><p class="eyebrow">COLLECTR SHOWCASE</p><h3>What you own</h3></div><button class="button secondary small" id="sync-collection">Sync now</button></div>
+            <div class="panel-head"><div><p class="eyebrow">LOCAL SNAPSHOT</p><h3>Cards you own</h3></div><button class="text-button" id="collection-reload">Reload snapshot</button></div>
             <p class="detail-meta" id="collection-meta"></p>
-            <div class="table-wrap"><table><thead><tr><th>Card</th><th>Set</th><th>#</th><th>Value</th><th>24h</th><th>Qty</th></tr></thead><tbody id="collection-table"></tbody></table></div>
+            <p class="detail-meta">Collectr prices are the source's estimates at import time. They are not verified sale proceeds. Independent references stay separate. Lightly Played and unknown raw condition do not inherit Near Mint prices.</p>
+            <div class="table-wrap"><table><thead><tr><th>Card / set</th><th>Condition / finish</th><th>Independent reference</th><th>Collectr · USD each</th><th>Change at import</th><th>Qty</th></tr></thead><tbody id="collection-table"></tbody></table></div>
           </article>
           <article class="panel">
-            <div class="panel-head"><div><p class="eyebrow">TRADE-UP BOARD</p><h3>Deals ranked by instant equity</h3></div></div>
-            <p class="detail-meta">Equity = market value − asking price. "Fits" means the asking price is under your whole portfolio value, i.e. something you could reach by trading up.</p>
-            <div class="table-wrap"><table><thead><tr><th>Listing</th><th>Ask</th><th>Value</th><th>Equity</th><th>Fits</th></tr></thead><tbody id="tradeup-table"></tbody></table></div>
+            <div class="panel-head"><div><p class="eyebrow">TRADE-UP BOARD</p><h3>Saved deals ranked by estimated spread</h3></div></div>
+            <p class="detail-meta">Spread = market reference minus listing price and reported shipping, before tax, fees, import charges and selling costs. Portfolio coverage compares estimates. It is not cash available or an agreed trade.</p>
+            <div class="table-wrap"><table><thead><tr><th>Listing</th><th>Ask + ship</th><th>Reference</th><th>Spread</th><th>Portfolio coverage</th></tr></thead><tbody id="tradeup-table"></tbody></table></div>
           </article>
         </div>
       </section>
 
       <section class="view" id="view-watchlist">
+        <article class="panel budget-panel">
+          <div class="panel-head"><div><p class="eyebrow">SPENDING LIMIT</p><h3>Shared budget per card</h3></div></div>
+          <form id="budget-form" class="budget-form">
+            <label>Maximum per card ({{ currency }})<input name="budget" id="card-budget" type="number" min="0.01" step="0.01" placeholder="No shared limit" aria-describedby="budget-help"></label>
+            <button class="button" type="submit">Save budget</button>
+          </form>
+          <p class="detail-meta" id="budget-help">Listing price + reported shipping, before tax and import charges. eBay listings with unknown shipping do not qualify as deals. Blank clears the shared limit. A lower budget on an individual card wins. Changes recheck saved matches; previous listings stay in history.</p>
+        </article>
         <div class="grid two">
           <article class="panel">
             <div class="panel-head"><div><p class="eyebrow">TARGETS</p><h3>What you're hunting</h3></div></div>
-            <div id="watchlist" class="stack"></div>
+            <div id="watchlist-targets" class="stack"></div>
             <p class="detail-meta" id="watchlist-meta"></p>
           </article>
           <article class="panel">
-            <div class="panel-head"><div><p class="eyebrow">ADD TARGET</p><h3>New card</h3></div></div>
+            <div class="panel-head"><div><p class="eyebrow">CARD SETTINGS</p><h3 id="target-form-title">Add a card</h3></div><button type="button" class="text-button" id="cancel-edit" hidden>Cancel edit</button></div>
             <form id="target-form">
               <label>Name<input name="name" required placeholder="Moonbreon"></label>
               <label>Keywords (one per line, use a|b for alternatives)<textarea name="keywords" rows="3" required placeholder="umbreon&#10;vmax&#10;alt art|215/203"></textarea></label>
               <p class="eyebrow" style="margin:6px 0 0">MARKET PRICING (TCGPlayer / PriceCharting)</p>
               <div class="form-grid"><label>Card name<input name="card_name" placeholder="Umbreon VMAX (Alternate Art Secret)"></label><label>Set<input name="set_name" placeholder="Evolving Skies"></label></div>
               <div class="form-grid"><label>Number<input name="number" placeholder="215/203"></label><label>Bargain at % under value<input name="bargain_pct" type="number" step="1" placeholder="20"></label></div>
-              <p class="eyebrow" style="margin:6px 0 0">HARD LIMITS (optional)</p>
-              <div class="form-grid"><label>Max price (incl. shipping)<input name="max_price" type="number" step="0.01" placeholder="market-driven if empty"></label><label>Min price (fake floor)<input name="min_price" type="number" step="0.01"></label></div>
-              <div class="form-grid"><label>Max auction bid<input name="max_bid" type="number" step="0.01"></label><label>Exclude words (comma)<input name="exclude" placeholder="japanese, lot, bundle"></label></div>
+              <p class="eyebrow" style="margin:6px 0 0">CARD BUDGET (optional)</p>
+              <div class="form-grid"><label>Budget for this card ({{ currency }})<input name="max_price" type="number" min="0.01" step="0.01" placeholder="Use shared budget / market value"></label><label>Min price (fake floor)<input name="min_price" type="number" min="0" step="0.01"></label></div>
+              <label>Exclude words (comma)<input name="exclude" placeholder="japanese, lot, bundle"></label>
               <div class="form-grid"><label class="check-control"><input name="regrade" type="checkbox"> ♻️ Crack & regrade lane</label><label class="check-control"><input name="graded_only" type="checkbox"> Graded only</label></div>
               <div class="form-grid"><label>Regrade grades low–high<input name="regrade_grades" placeholder="8 9.5"></label><label>Regrade max price<input name="regrade_max_price" type="number" step="0.01" placeholder="defaults to max"></label></div>
               <div class="form-grid"><label>Min grade<input name="min_grade" type="number" step="0.5"></label><label>Sources<select name="sources"><option value="ebay,facebook">eBay + Facebook</option><option value="ebay">eBay only</option><option value="facebook">Facebook only</option></select></label></div>
-              <button class="button" type="submit">Add target</button>
+              <button class="button" id="save-target" type="submit">Add card</button>
             </form>
           </article>
         </div>
@@ -112,14 +190,14 @@
       <section class="view" id="view-scans">
         <article class="panel">
           <div class="panel-head"><div><p class="eyebrow">EVERY PASS</p><h3>Scan history</h3></div></div>
-          <div class="table-wrap"><table><thead><tr><th>Started</th><th>Mode</th><th>Sources</th><th>Took</th><th>Scanned</th><th>New</th><th>Deals</th><th>♻️</th><th>Bids</th><th>Errors</th></tr></thead><tbody id="scans-table"></tbody></table></div>
+          <div class="table-wrap"><table><thead><tr><th>Started</th><th>Mode</th><th>Sources</th><th>Took</th><th>Scanned</th><th>New listings</th><th>New alerts</th><th>♻️</th><th>Bids</th><th>Errors</th></tr></thead><tbody id="scans-table"></tbody></table></div>
         </article>
       </section>
 
       <section class="view" id="view-listings">
         <article class="panel">
           <div class="toolbar"><label class="compact-control">Source<select id="listing-source"><option value="">All</option><option value="ebay">eBay</option><option value="facebook">Facebook</option></select></label><label class="compact-control">Search<input id="listing-search" class="search" placeholder="title"></label><span class="detail-meta">Every listing the sniper has looked at, matched or not.</span></div>
-          <div class="table-wrap"><table><thead><tr><th>Seen</th><th>Source</th><th>Listing</th><th>Type</th><th>Price</th><th>Matched</th></tr></thead><tbody id="listings-table"></tbody></table></div>
+          <div class="table-wrap"><table><thead><tr><th>Last checked</th><th>Source</th><th>Listing</th><th>Type</th><th>Price + shipping</th><th>Matched</th><th></th></tr></thead><tbody id="listings-table"></tbody></table></div>
         </article>
       </section>
     </main>

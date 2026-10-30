@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import re
+import math
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
 from cardsnipe.watchlist import Target
 
-GRADE_RE = re.compile(r"\b(psa|cgc|bgs|sgc|ace|tag|ags)\s*-?\s*(10|9\.5|9|8\.5|8|7|6|5|4|3|2|1)\b", re.I)
+GRADE_RE = re.compile(r"\b(psa|cgc|bgs|sgc|ace|tag|ags)\s*-?\s*(?:(?:pristine|perfect|gem\s+mint|mint|graded|grade)\s+)?"
+                      r"(10|9\.5|9|8\.5|8|7|6|5|4|3|2|1)\b", re.I)
 # TAG's 1000-point score, written near the word TAG: "TAG 9 (945)", "TAG 945/1000", "945 TAG 9".
 TAG_SCORE_AFTER_RE = re.compile(
     r"\btag\b[^0-9]{0,15}(?:(?:10|9\.5|9|8\.5|8|7)\b[^0-9]{0,12})?(\d{3,4})\b(?!\s*/\s*(?!1000)\d)", re.I
@@ -44,7 +46,9 @@ class Listing:
 
     @property
     def total_price(self) -> float | None:
-        if self.price is None:
+        if (self.price is None or not math.isfinite(self.price) or self.price < 0
+                or (self.source == "ebay" and self.shipping is None)
+                or (self.shipping is not None and (not math.isfinite(self.shipping) or self.shipping < 0))):
             return None
         return round(self.price + (self.shipping or 0.0), 2)
 
@@ -175,6 +179,9 @@ DAMAGE_RE = re.compile(
     r"peel(ing|ed)?|ink|stain(ed)?|dinged|edge wear|wear|flaw(s|ed)?|dmg)\b",
     re.I,
 )
+# Hit points follow a number ("330 HP", "215/203 HP"). A condition phrase does not: "HP condition", "HP/MP".
+HIT_POINTS_RE = re.compile(r"(?<![/\d])\b\d{2,4}\s+hp\b(?!\s*(?:/|condition\b|mp\b|lp\b))", re.I)
+ACE_GRADE_RE = re.compile(r"\bace\s*-?\s*(?:grading|graded|slab)?\s*-?\s*(10|9\.5|9|8\.5|8|7|6|5|4|3|2|1)\b", re.I)
 NO_DAMAGE_RE = re.compile(r"\b(no|zero|without|free of|minimal|little)\s+(?:\w+\s+){0,2}?(damage|whitening|scratch(es)?|wear|flaws?|crease[s]?)\b", re.I)
 
 
@@ -184,6 +191,8 @@ def detect_grade(title: str) -> tuple[str, float] | None:
     match = GRADE_RE.search(text)
     if not match:
         return None
+    text = re.sub(r"\b(?:not|no|non|un)\s*-?\s*(psa|cgc|bgs|sgc|ace|tag|ags)\b",
+                  lambda m: m.group(0) if m.group(1).lower() == match.group(1).lower() else "", text, flags=re.I)
     if UNGRADED_RE.search(text):
         return None
     return match.group(1).upper(), float(match.group(2))
@@ -194,6 +203,7 @@ def detect_condition_issue(title: str) -> str | None:
     text = title or ""
     if NO_DAMAGE_RE.search(text):
         text = NO_DAMAGE_RE.sub(" ", text)
+    text = HIT_POINTS_RE.sub(" ", text)
     match = DAMAGE_RE.search(text)
     if not match:
         return None
@@ -234,11 +244,53 @@ def _keyword_present(keyword: str, haystack: str) -> bool:
     return any(_term_present(alt, haystack, whole_word=False) for alt in keyword.split("|") if alt.strip())
 
 
+def normalize_number(number: str | None) -> str:
+    parts = re.findall(r"[A-Za-z]*\d+[A-Za-z]*", number or "")
+    return "/".join(re.sub(r"\d", "", part).upper() + str(int(re.sub(r"\D", "", part))) for part in parts)
+
+
+def same_number(have: str, want: str) -> bool:
+    if not have or not want:
+        return False
+    return have == want or ("/" not in have or "/" not in want) and have.split("/")[0] == want.split("/")[0]
+
+
+def identity_matches(title: str, target: Target) -> bool:
+    """Require the requested card number and reject other languages and same-number printings."""
+    text = normalize(title)
+    wanted = normalize(target.market_query)
+    if target.number:
+        number_text = GRADE_RE.sub(" ", text)
+        numbers = [normalize_number(n) for n in re.findall(
+            r"\b[a-z]*\d+[a-z]*(?:\s*/\s*[a-z]*\d+[a-z]*)?\b", number_text)]
+        want = normalize_number(target.number)
+        full_numbers = [n for n in numbers if "/" in n]
+        if full_numbers and "/" in want:
+            numbers = full_numbers
+        if not any(same_number(n, want) for n in numbers):
+            return False
+    name = re.sub(r"\([^)]*\)|\[[^]]*\]", " ", target.card_name)
+    if any(not _term_present(w, text, whole_word=True) for w in normalize(name).split()):
+        return False
+    for variants in (
+        "japanese|japan|jpn|jp", "korean|korea|kor|kr", "chinese|china|chn", "german|deutsch",
+        "french|francais", "italian|italiano", "spanish|espanol", "portuguese", "thai", "indonesian",
+        "1st edition|first edition", "shadowless", "reverse holo|reverse holographic|reverse holofoil|reverse foil", "cosmos holo",
+        "master ball|masterball", "poke ball|pokeball", "base set 2", "legendary collection",
+        "jumbo|oversized", "black dot error", "corocoro",
+    ):
+        found = any(_term_present(v, text, whole_word=True) for v in variants.split("|"))
+        asked = any(_term_present(v, wanted, whole_word=True) for v in variants.split("|"))
+        if found != asked:
+            return False
+    return True
+
+
 PRICE_BUCKETS = ("raw", "7", "8", "9", "9.5", "10")
 
 
 def bucket_for_grade(grade: tuple[str, float] | None) -> str:
-    """Map a detected grade to a market-price bucket. Raw -> 'raw'; 8.5 -> '8'; 9.5 -> '9.5'."""
+    """Numeric bucket for a grade. Raw -> 'raw'; 8.5 -> '8'; 9.5 -> '9.5'."""
     if grade is None:
         return "raw"
     value = grade[1]
@@ -251,6 +303,24 @@ def bucket_for_grade(grade: tuple[str, float] | None) -> str:
     if value >= 8:
         return "8"
     return "7"
+
+
+def trusted_value_bucket(grade: tuple[str, float] | None) -> str | None:
+    """Which stored price this slab may be judged against.
+
+    PriceCharting's 7/8/9/10 columns are PSA sales, and the 10 column is labeled PSA 10.
+    A CGC, ACE, AGS or TAG 10 is not a PSA 10. BGS/CGC 9.5 is the one non-PSA grade that
+    matches a column (PriceCharting's 9.5). Anything else has no trusted value.
+    """
+    if grade is None:
+        return "raw"
+    company = grade[0].upper()
+    bucket = bucket_for_grade(grade)
+    if company == "PSA":
+        return bucket if grade[1] in {7, 8, 9, 10} else None
+    if company in {"BGS", "CGC"} and bucket == "9.5":
+        return "9.5"
+    return None
 
 
 def _primary_grade_ok(target: Target, grade: tuple[str, float] | None) -> bool:
@@ -270,6 +340,7 @@ def evaluate(
     tag_ten_score: int = 950,
     tag_near_margin: int = 15,
     valuation=None,
+    allow_unverified_condition: bool = False,
 ) -> Match | None:
     """Return a Match when the listing satisfies the target, else None.
 
@@ -284,10 +355,19 @@ def evaluate(
     """
     if not target.uses_source(listing.source):
         return None
+    # Auctions are listed, never bid. A low current bid is not a deal.
+    if listing.listing_type == "auction":
+        return None
+    if listing.end_time and listing.end_time <= datetime.now(timezone.utc):
+        return None
     haystack = normalize(listing.title)
     if not haystack:
         return None
     if not all(_keyword_present(k, haystack) for k in target.keywords):
+        return None
+    if (target.card_name or target.number) and not identity_matches(listing.title, target):
+        return None
+    if valuation and (listing.currency or "").upper() != valuation.currency.upper():
         return None
     for banned in list(target.exclude) + list(global_exclude or []):
         if _term_present(banned, haystack, whole_word=True):
@@ -296,7 +376,20 @@ def evaluate(
     total = listing.total_price
     if total is None:
         return None
+    if target.max_price is not None and listing.source == "ebay" and listing.shipping is None:
+        return None
+    if target.max_price is not None and total > target.max_price:
+        return None
     if listing.listing_type != "auction" and target.min_price is not None and total < target.min_price:
+        return None
+    # A Buy-It-Now under the cheapest real copy on TCGPlayer is a fake or a wrong card.
+    # Auctions are left alone: a low current bid is normal and we do not bid on them here.
+    if (listing.listing_type != "auction" and valuation is not None and valuation.floor_usd
+            and total < valuation.floor_usd * valuation.fx * 0.9):
+        return None
+
+    # ACE slabs are never a deal, a regrade, or a match. "Ace Spec" is a card type and stays.
+    if ACE_GRADE_RE.search(listing.title or ""):
         return None
 
     grade = detect_grade(listing.title)
@@ -304,7 +397,15 @@ def evaluate(
     tag_gap = tag_ten_score - tag_score if tag_score is not None and tag_score < tag_ten_score else None
     tag_near = tag_gap is not None and tag_gap <= tag_near_margin
     clean_hints = detect_clean_hints(listing.title)
-    condition_issue = detect_condition_issue(listing.title) if grade is None else None  # slabs carry their grade
+    condition_issue = detect_condition_issue(f"{listing.title} {listing.condition}") if grade is None else None
+    condition_verified = bool(re.search(r"\b(?:near[ -]mint|nm(?:/m)?|mint)\b", listing.condition, re.I))
+    if re.search(r"\b(?:not|no|non)\s+(?:near[ -]mint|mint|nm)\b", listing.condition, re.I):
+        condition_verified = False
+    if (valuation is not None and grade is None and not condition_verified
+            and not allow_unverified_condition):
+        return None
+    if listing.condition == "unverified" and not allow_unverified_condition:
+        return None
 
     regrade_candidate = False
     if target.regrade and (grade is not None or tag_near):
@@ -313,18 +414,18 @@ def evaluate(
         regrade_candidate = graded_below_ten and (in_range or tag_near)
 
     # Market values (listing currency) for this listing's grade and for a raw copy.
-    bucket = bucket_for_grade(grade)
-    graded_value = valuation.value(bucket) if valuation else None
+    # Played/damaged raw copies are not Near Mint, so the NM figure is not their value.
+    bucket = trusted_value_bucket(grade)
+    graded_value = valuation.value(bucket) if valuation and bucket and not condition_issue else None
     raw_value = valuation.value("raw") if valuation else None
 
     def _build(lane: str, cap: float, value: tuple[float, str] | None, value_bucket: str) -> Match:
         reason = ""
         if condition_issue:
             reason = f"condition: {condition_issue}"
-        elif (listing.listing_type != "auction" and value
-              and total < value[0] * (1 - target.irregular_pct / 100.0)):
-            # Only fixed prices: an auction's current bid is naturally far under value early on.
-            reason = f"{(value[0] - total) / value[0] * 100:.0f}% under value"
+        elif value and total < value[0] * (1 - target.irregular_pct / 100.0):
+            # A BIN this far under a trusted value is a fake, a wrong card, or a damaged copy.
+            return None
         return Match(
             target=target, listing=listing, total_price=total,
             savings_pct=(cap - total) / cap * 100.0 if cap else 0.0, grade=grade, lane=lane,
@@ -342,7 +443,7 @@ def evaluate(
                 cap = min(cap, target.max_price)
             if total <= cap:
                 return _build("deal", cap, graded_value, bucket)
-        elif target.max_price and total <= target.max_price:
+        elif valuation is None and target.max_price and total <= target.max_price:
             return _build("deal", target.max_price, None, "")
 
     # Lane 2: crack-and-regrade — a graded 8–9.5 (or TAG near-miss) priced under a raw NM copy.

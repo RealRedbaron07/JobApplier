@@ -69,46 +69,29 @@ GET /api/export?format=summary
 POST /api/import/json
 ```
 
-## Pokémon card sniper (eBay + Facebook Marketplace)
+## One-click Pokémon discovery
 
-`snipe.py` is a separate tool in this repo (package `cardsnipe/`) that watches for newly listed Pokémon cards under your price caps, alerts you instantly, snipes eBay auctions in the last seconds, and can send the first message to Facebook Marketplace sellers.
+Open **Browse cards** and click **Scan all cards automatically**. A background worker drives Chrome through broad eBay and Facebook Marketplace searches, deduplicates listings and imports candidates into **Scan results** on that page. It does not require any card targets. Choose eBay, Marketplace or both. Existing watchlist card names, grades, conditions and exclusions do not restrict this scan.
 
-```bash
-make login        # one time: sign in to eBay + Facebook in the sniper's Chrome profile
-make list         # watchlist lives in data/cardsnipe_watchlist.json (edit by hand or use add/rm)
-make add NAME="Moonbreon" CARD="Umbreon VMAX (Alternate Art Secret)" SET="Evolving Skies" NUM=215/203 \
-         KW="umbreon vmax 'alt art|215/203'" REGRADE=1          # BID=600 to snipe auctions, MAX= for a hard cap
-make value        # market value ladder per target (REFRESH=1 to refetch)
-make collection   # sync your Collectr showcase
-make scan         # one pass, dry-run: alerts fire, bids/messages are simulated with screenshots
-make snipe        # continuous dry-run every SNIPE_POLL_SECONDS
-make live         # real snipes (up to max_bid) and real Facebook messages
-make dash         # dashboard for both tools: http://127.0.0.1:5000 (jobs) and /snipe (cards)
-make deals | make bids | make cancel ID=3 | make test
-```
+Each click runs one pass: at most eight searches, up to 60 rows per search, with a 60-second cooldown after completion. eBay server errors get one retry using the same keywords in eBay's normal homepage search bar; those results are labelled as an unfiltered retry, since eBay's default ordering and filters apply. Verification blocks stop that source immediately; two consecutive failed searches also stop it. One transient query failure does not discard the other categories. Other sources can still finish. **Stop after current page** ends the pass without discarding candidates already collected. Scans do not repeat on a timer. Status polling only reads the local app.
 
-`make help` lists everything; `python3 snipe.py` (bare = watch) with aliases `s`/`w`/`a`/`rm`/`l`/`d`/`b` also works.
+The scan covers promotions/coupons, newest listings, ending auctions, offers, lots, sealed products and Marketplace collections. Prices, currencies, reported shipping, conditions, source routes and visible promotion terms are saved. Variable or unknown prices stay unknown. Listings above the advertised-price cap are omitted when that price is known; shipping can exceed the cap and is shown separately. Unknown shipping is marked explicitly. Candidates are not labelled as independently verified discounts, and a bid is not a final purchase price.
 
-How it decides: every keyword must appear (`"a|b"` = either), no exclude term may appear (whole-word, see `global_exclude` for the fakes/metal/display/novelty list), total price incl. shipping must be above `min_price` (skipped for auctions, where a low current bid is normal), and grade rules (`graded_only`, `min_grade`) apply when set.
+`Config.BROWSER_SCANS_ENABLED` permits these explicit read-only Chrome scans and scanner sign-in. `Config.EXTERNAL_ACCESS_ENABLED` stays hard-disabled: no eBay API, TCGplayer/PriceCharting calls, exchange-rate requests, Collectr sync, career-board fetches or paid AI services run from this workflow. Existing API keys are stripped from the broad scanner settings. The old scanner CLI and targeted network/valuation endpoints remain disabled. The app never bids, buys, or sends seller messages.
 
-**Market value, not guesses.** Give a target `card_name`, `set_name` and `number` (or `--card/--set/--number`, or the fields on the dashboard form) and the sniper values the card per grade bucket (raw, 7, 8, 9, 9.5, 10) as the **cheapest** figure any source reports:
+The scanner uses a persistent, separate Chrome profile. Your normal browser's Facebook login is not copied into it. If Marketplace asks for authentication, expand **Marketplace scanner sign-in**, sign in once, and click **Finish scanner sign-in**. The sign-in window stays open until you finish or cancel. Do not enter credentials into a short-lived scan window.
 
-- **TCGPlayer** market price (raw) via their search API, plus the lowest listed price as a reference "floor";
-- **PriceCharting** sold-comps averages for ungraded and every grade;
-- **eBay sold listings** (median of recent sales per grade) once your sniper Chrome is signed in to eBay (`make login`);
-- Card Ladder is paywalled with no public API, so it is not used.
+Open **Browse cards** to hunt across all Pokémon cards without specifying a card, set, grade or watchlist. Blank keywords default to `pokemon cards`. Broad discovery includes every buying format, with separate eBay routes for **Sales & coupons**, **Auctions ending soon** and **Accepts offers**. Product types such as singles, any grading company, lots, collections, sealed and promos are optional shortcuts. Seller promotions, current bids and negotiable prices are leads, not verified below-market deals. Coupon requirements and final auction prices need checking.
 
-Values are USD, converted to `EBAY_CURRENCY` with a live FX rate (fallback `SNIPE_USD_RATE`), cached for `SNIPE_PRICE_TTL_HOURS` in `cardsnipe.db`. A listing is a **deal** at ≥ `bargain_pct` (default 20%) under the value for its grade, and gets flagged **⚠️ irregular** at ≥ `irregular_pct` (default 50%) under — that's the "too good" zone (fake, damaged, mislabelled, scam… or a genuine mistake worth checking). `max_price` is now an optional hard cap on top; `make value` prints every target's value ladder, `make value REFRESH=1` refetches.
+The collapsed **Open searches manually (optional)** section retains direct eBay/Marketplace links. Each route and **Search all Pokémon on eBay** opens results in a new tab. Enter optional keywords and press **Search eBay**, or use **Search Marketplace** for the same query. These links preserve the saved budget and refresh after budget edits. **Open eBay home** opens [ebay.ca](https://www.ebay.ca/) if you prefer its own search bar. No eBay account or API key is required. Manual Marketplace links use the Facebook session in your normal browser. These manual links do not import results; use the automatic scan button for that.
 
-**Crack-and-regrade lane** (`regrade: true` / `--regrade` / `REGRADE=1`): also flags graded copies between `regrade_min_grade`–`regrade_max_grade` (default 8–9.5) priced at or under `regrade_max_price` (default = the raw NM market value, i.e. cheaper than a raw copy). TAG cards whose 1000-point score is within `tag_near_margin` (15) of `tag_ten_score` (950) qualify regardless of grade range — the "TAG 9 @ 945 that came back PSA 10" case. Alerts show ♻️, the TAG score and gap, and seller "clean copy" hints (clean, pack fresh, looks like a 10, undergraded, no whitening, ...). Both TAG numbers are editable in the watchlist JSON.
+**My portfolio** is a dated local snapshot. It does not automatically sync with Collectr. To update it without external fetching, open **Update portfolio from Collectr**, select USD on your public showcase, clear filters, load every card, copy the page and paste it into the dashboard. Preview the cards, conditions and quantities, then choose **Replace local snapshot**. Non-USD figures and incomplete totals are rejected before saved data changes. Collectr figures remain source estimates in their original USD, separate from independent market references. A new import leaves independent values unpriced. Played and unknown raw condition never receive Near Mint reference prices. Reload and focus refresh the local snapshot only, without contacting Collectr.
 
-- **eBay**: uses the official Browse API when `EBAY_APP_ID`/`EBAY_CERT_ID` are set (fastest); otherwise reads search pages in a real Chrome window. Auction snipes open the bid-confirmation page ~30 s early, re-read the exact countdown from the item page, and confirm `SNIPE_LEAD_SECONDS` (default 6) before the end. Buy-It-Now deals are opened in your browser (max `SNIPE_MAX_OPEN_PER_SCAN` per scan); nothing is purchased automatically.
-- **Facebook Marketplace**: newest listings in `FB_CITY` under the cap, linked exactly like eBay results (alerts, `make deals`, dashboard) so you open and message sellers yourself. Optional: `FB_AUTO_MESSAGE=true` plus `--live` sends `FB_MESSAGE_TEMPLATE` for you (off by default). Facebook's DOM changes often, so verify with a dry run (screenshots land in `data/cardsnipe_screens/`).
-- **Your collection (Collectr)**: set `COLLECTR_SHOWCASE_URL` to your public showcase and run `make collection` (or "Sync now" on the dashboard). The dashboard's *My collection* tab shows every card with Collectr's value and daily move, your portfolio total in your currency, and a **trade-up board**: current deals ranked by instant equity (market value − asking price) with a "fits" flag when the ask is under your whole portfolio value.
-- Alerts: console, macOS notification, optional `SNIPE_WEBHOOK_URL` (Discord/Slack-compatible). State is in `cardsnipe.db` (gitignored).
-- **Dashboard**: `make dash` and open [http://127.0.0.1:5000/snipe](http://127.0.0.1:5000/snipe) (set `DASHBOARD_PORT` if 5000 is taken by macOS AirPlay). Every feature stores its data and shows up there: deals (filter by deal/♻️ regrade lane, source and ⚠️ irregular flag, with the market value each was judged against), scheduled/placed/failed snipes (cancel from the page), market values per grade and source for every target (refetch buttons), your Collectr collection and trade-up board, the watchlist (add, pause, remove targets), every scan run (duration, counts, errors such as "Facebook not logged in"), and every listing the sniper ever looked at. It refreshes itself every 30 s while `make snipe` runs.
+Browser search links include the shared price cap; individual saved-card links use the lower shared or per-card cap. Shipping, tax and import charges still need checking. The app never bids, purchases, sends seller messages or submits job applications.
 
-Use your own eBay/Facebook accounts and keep the caps honest: `--live` places binding bids.
+**Reload saved results** only reads local storage. Historical scans and references remain available with their original dates. Values are saved estimates, not current quotes. Collection currency conversion uses the configured exchange-rate estimate without contacting an exchange-rate API. **Re-judge saved listings** uses saved, unexpired references only.
+
+Automatic discovery reads browser listings; it does not fetch independent current market prices. Review exact card number, set, language, grading company, condition, authenticity, promotion terms and all-in cost before treating a candidate as a bargain.
 
 ## Test
 

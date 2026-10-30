@@ -4,6 +4,11 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class Config:
+    # Paid APIs and background price-provider calls remain disabled.
+    EXTERNAL_ACCESS_ENABLED = False
+    # Explicit dashboard clicks may run bounded, read-only Chrome searches.
+    BROWSER_SCANS_ENABLED = True
+
     # JobApplier prepares application packages but never submits them. These
     # constants intentionally cannot be enabled through environment variables.
     AUTO_MODE = False
