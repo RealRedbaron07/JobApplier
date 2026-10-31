@@ -371,6 +371,41 @@ test('earlier source results stay visible with their older scan time after that 
   assert.equal(page.requests.length, 1);
 });
 
+test('Bargain review shows seller links, Marketplace candidates, and moves a checked bargain to the top section', async () => {
+  const page = priceFilterPage(true);
+  await page.context.loadDiscoveryResults();
+  assert.equal(page.element('#bargain-badge').textContent, '0 potential bargains');
+  assert.match(page.element('#bargain-reviewed').innerHTML, /No compared bargains yet/);
+  assert.match(page.element('#bargain-candidates').innerHTML, /Open seller listing/);
+  page.element('#bargain-source').value = 'facebook';
+  page.element('#bargain-source').listeners.change();
+  assert.match(page.element('#bargain-review-counts').innerHTML, /2<\/strong> Marketplace/);
+  assert.match(page.element('#bargain-candidates').innerHTML, /Pikachu card/);
+  assert.doesNotMatch(page.element('#bargain-candidates').innerHTML, /shipping-included/);
+  page.element('#bargain-candidates').listeners.change({target: {dataset: {reference: 'facebook:6:CAD'}, value: '60'}});
+  assert.equal(page.element('#bargain-badge').textContent, '1 potential bargains');
+  assert.match(page.element('#bargain-reviewed').innerHTML, /Pikachu card/);
+  assert.match(page.element('#bargain-reviewed').innerHTML, /50\.0% below/);
+  assert.doesNotMatch(page.element('#bargain-candidates').innerHTML, /Pikachu card/);
+  page.element('#bargain-reviewed').listeners.change({target: {dataset: {reference: 'facebook:6:CAD'}, value: ''}});
+  assert.equal(page.element('#bargain-badge').textContent, '0 potential bargains');
+  assert.match(page.element('#bargain-candidates').innerHTML, /Pikachu card/);
+  assert.equal(page.requests.length, 1, 'Reviewing saved bargains must not start a scan');
+});
+
+test('Bargain review can show every saved candidate in pages', async () => {
+  const page = priceFilterPage();
+  await page.context.loadDiscoveryResults();
+  vm.runInContext(`for (let id = 6; id < 38; id++)
+    discoveryResultData.listings.push({...discoveryResultData.listings[0], id, listing_id: String(id), title: 'Candidate ' + id});`, page.context);
+  page.context.renderBargainReview();
+  assert.equal((page.element('#bargain-candidates').innerHTML.match(/class="bargain-card /g) || []).length, 30);
+  assert.equal(page.element('#bargain-more').hidden, false);
+  page.element('#bargain-more').click();
+  assert.equal((page.element('#bargain-candidates').innerHTML.match(/class="bargain-card /g) || []).length, 38);
+  assert.equal(page.element('#bargain-more').hidden, true);
+});
+
 test('invalid and reversed price ranges show an error instead of misleading results', async () => {
   const page = priceFilterPage();
   await page.context.loadDiscoveryResults();

@@ -13,6 +13,7 @@
       <div class="brand"><span class="brand-mark">C</span><div><strong>Card desk</strong><small>Pokémon research workspace</small></div></div>
       <nav aria-label="Primary">
         <button class="nav-item active" data-view="discover"><span>⌕</span> Browse cards</button>
+        <button class="nav-item" data-view="bargains"><span>%</span> Bargain review</button>
         <button class="nav-item" data-view="collection"><span>◫</span> My portfolio</button>
         <button class="nav-item" data-view="watchlist"><span>★</span> Watchlist & budget</button>
         <span class="nav-label">SAVED RESEARCH</span>
@@ -29,7 +30,7 @@
     <main>
       <header class="topbar">
         <div><p class="eyebrow">YOUR CARD WORKSPACE</p><h1 id="page-title">Browse cards</h1></div>
-        <div class="top-actions"><span class="level local-status">{% if browser_scans_enabled %}Browser scans · paid APIs off{% else %}Local-only · no external calls{% endif %}</span><button class="button secondary small" id="refresh">Reload saved results</button><button class="button secondary small" id="budget-badge" data-view-link="watchlist">Set card budget</button></div>
+        <div class="top-actions"><span class="level local-status">{% if browser_scans_enabled %}Browser scans · paid APIs off{% else %}Local-only · no external calls{% endif %}</span><button class="button small" id="bargain-badge" data-view-link="bargains">Review bargains</button><button class="button secondary small" id="refresh">Reload saved results</button><button class="button secondary small" id="budget-badge" data-view-link="watchlist">Set card budget</button></div>
       </header>
       <div class="scan-controls">
         <p id="scan-status" role="status">Click Scan all cards to search broadly and collect candidates here. No card list is needed.</p>
@@ -52,7 +53,7 @@
           <details class="scanner-signin"><summary>Marketplace scanner sign-in</summary><p class="detail-meta">The scanner has its own saved Chrome profile. Your normal browser login is separate. Sign in once here; the sign-in window stays open until you finish or cancel.</p><div class="target-actions"><button class="button secondary small" id="facebook-login">Sign in to Marketplace scanner</button><button class="button secondary small" id="facebook-finish" hidden>Finish scanner sign-in</button><button class="button secondary small" id="facebook-cancel" hidden>Cancel sign-in</button></div></details>
         </article>
         <article class="panel candidates-panel">
-          <div class="panel-head"><div><p class="eyebrow">COLLECTED FOR YOUR REVIEW</p><h3>Scan results</h3></div><span class="level" id="broad-result-count">No scan yet</span></div>
+          <div class="panel-head"><div><p class="eyebrow">COLLECTED FOR YOUR REVIEW</p><h3>Scan results</h3></div><div class="target-actions"><button class="button secondary small" data-view-link="bargains">Open bargain review</button><span class="level" id="broad-result-count">No scan yet</span></div></div>
           <p id="broad-result-meta" class="detail-meta">Promotions and asking prices are leads. Below-market value is not independently verified.</p>
           <div class="toolbar candidate-source-shortcuts" aria-label="Review candidates by site"><button class="button secondary small" id="broad-all-leads" type="button">All candidates</button><button class="button secondary small" id="broad-ebay-leads" type="button">eBay</button><button class="button secondary small" id="broad-facebook-leads" type="button">Marketplace</button></div>
           <div class="toolbar candidate-filters">
@@ -96,6 +97,17 @@
         </div>
         <div class="browse-footer"><p>A low asking price is a lead. Check the exact set, number, language, condition and grade before comparing values.</p><button class="text-button" data-view-link="collection">View or update your portfolio →</button></div>
         </details>
+      </section>
+
+      <section class="view" id="view-bargains">
+        <article class="panel bargain-review-head">
+          <p class="eyebrow">YOUR REVIEW QUEUE</p><h2>Potential bargains</h2>
+          <p>Listings appear here when their reported price plus shipping is below a reference you entered for that exact item. The percentage is against your reference, not an independently verified market price. Open the seller listing before buying.</p>
+          <div id="bargain-review-counts" class="bargain-review-counts" role="status" aria-live="polite">Loading saved results…</div>
+          <div class="toolbar"><label class="compact-control">Site<select id="bargain-source"><option value="">All sites</option><option value="ebay">eBay</option><option value="facebook">Marketplace</option></select></label><button class="button secondary small" data-view-link="discover">Browse all scan results</button></div>
+        </article>
+        <article class="panel"><div class="panel-head"><div><p class="eyebrow">BELOW YOUR REFERENCE</p><h3>Compared bargains</h3></div></div><div id="bargain-reviewed" class="bargain-review-list"></div></article>
+        <article class="panel"><div class="panel-head"><div><p class="eyebrow">CHECK A LISTING</p><h3>Candidates to review</h3></div></div><p class="detail-meta">Check the exact set, number, condition and seller terms. Enter your reference price to calculate a percentage. Current saved listings appear before older or placeholder-priced listings.</p><div id="bargain-candidates" class="bargain-review-list"></div><button class="button secondary small" id="bargain-more" type="button" hidden>Show more candidates</button></article>
       </section>
 
       <section class="view" id="view-overview">

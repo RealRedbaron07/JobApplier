@@ -285,6 +285,14 @@ def test_job_dashboard_links_to_sniper(dashboard_client):
     assert b'href="/snipe"' in client.get("/").data
 
 
+def test_bargain_review_has_clear_navigation_and_saved_result_sections(snipe_client):
+    client, _, _ = snipe_client
+    page = client.get("/snipe").get_data(as_text=True)
+    for marker in ('data-view="bargains"', 'id="view-bargains"', 'data-view-link="bargains"',
+                   'id="bargain-reviewed"', 'id="bargain-candidates"', 'id="bargain-more"'):
+        assert marker in page
+
+
 def test_budget_survives_target_edits_and_can_be_cleared(snipe_client):
     client, _, path = snipe_client
     data = client.patch("/api/snipe/budget", json={"budget": "125.50"}).get_json()

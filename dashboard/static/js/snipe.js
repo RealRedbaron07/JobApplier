@@ -3,7 +3,7 @@
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money = (currency, value) => value == null ? '—' : `${currency || ''} ${Number(value).toFixed(2)}`.trim();
-const TITLES = {discover:'Browse cards', overview:'Saved overview', deals:'Saved matches', bids:'Auction history', values:'Price references', collection:'My portfolio', watchlist:'Watchlist & budget', scans:'Past scans', listings:'Saved listings'};
+const TITLES = {discover:'Browse cards', bargains:'Bargain review', overview:'Saved overview', deals:'Saved matches', bids:'Auction history', values:'Price references', collection:'My portfolio', watchlist:'Watchlist & budget', scans:'Past scans', listings:'Saved listings'};
 const BUCKETS = ['raw', '7', '8', '9', '9.5', '10'];
 const BUCKET_LABEL = {raw: 'Raw market reference', '7': 'PSA 7', '8': 'PSA 8', '9': 'PSA 9', '9.5': 'Grade 9.5', '10': 'PSA 10'};
 const listingPrice = row => row.total_price == null && row.price != null
@@ -352,6 +352,14 @@ function candidateDiscount(row) {
   return Number.isFinite(reference) && reference > 0 && Number.isFinite(row.total_price)
     ? (reference - row.total_price) / reference * 100 : null;
 }
+function candidateComparisonText(row, discount = candidateDiscount(row)) {
+  if (discount != null) return discount > 0 ? `Possible bargain: ${discount.toFixed(1)}% below your reference`
+    : discount < 0 ? `${Math.abs(discount).toFixed(1)}% above your reference` : 'At your reference';
+  if (row.source === 'facebook' && row.price != null && row.price <= 1)
+    return 'Free / $1 may be a placeholder; confirm seller price';
+  return row.total_price == null ? 'Total unknown; check shipping first' : 'Enter your reference to compare';
+}
+const candidateReferenceInput = row => `<label class="compact-control">Your reference (${esc(row.currency)})<input class="candidate-reference" data-reference="${esc(candidateKey(row))}" aria-label="Your reference price for ${esc(row.title)}" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="Enter price" value="${esc(candidateReferences[candidateKey(row)] ?? '')}"></label>`;
 
 function renderDiscoveryResults() {
   const source = $('#broad-result-source').value;
@@ -391,17 +399,12 @@ function renderDiscoveryResults() {
     ? `Scanned ${new Date(scan.started).toLocaleString()} · ${scan.scanned} rows read · ${scan.errors.length} source errors${scan.budget != null ? ` · older scan capped at ${money(scan.currency, scan.budget)} listed price; scan again to include higher prices` : ''}. Seller promotions and bids are leads, without an independently verified market price.`
     : 'Promotions and asking prices are leads. Below-market value is not independently verified.';
   $('#broad-results-table').innerHTML = rows.length ? rows.map(row => {
-    const key = candidateKey(row), reference = candidateReferences[key] ?? '', discount = candidateDiscount(row);
-    const comparison = discount == null ? (row.source === 'facebook' && row.price != null && row.price <= 1
-      ? 'Free / $1 may be a placeholder; confirm seller price'
-      : row.total_price == null ? 'Total unknown; check shipping first' : 'Enter your reference to compare')
-      : discount > 0 ? `Possible bargain: ${discount.toFixed(1)}% below your reference`
-      : discount < 0 ? `${Math.abs(discount).toFixed(1)}% above your reference` : 'At your reference';
+    const discount = candidateDiscount(row);
     return `<tr class="${discount > 0 ? 'candidate-bargain' : ''}">
     <td><a href="${esc(row.url)}" target="_blank" rel="noopener">${esc(row.title)}</a><span class="sub">${esc(row.source)} · ${row.listing_type === 'auction' ? 'Auction, current bid can rise' : 'Listed asking price'}${row.location ? ` · ${esc(row.location)}` : ''}</span>${row.discovery_at && row.discovery_at !== scan?.started ? `<span class="sub over-budget">Earlier scan ${esc(new Date(row.discovery_at).toLocaleString())}; open listing to confirm availability</span>` : ''}</td>
     <td>${row.promotion ? `<div class="candidate-promotion">${esc(row.promotion)}</div>` : ''}${row.discovery_routes.map(route => `<span class="sub">${esc(route)}</span>`).join('')}</td>
     <td><strong>${row.price == null ? 'Price varies / unavailable' : esc(listingPrice(row))}</strong>${row.shipping != null && row.shipping > 0 ? `<span class="sub">Includes ${esc(money(row.currency, row.shipping))} shipping</span>` : ''}<span class="sub">Before tax and other charges</span></td>
-    <td><label class="compact-control">Your reference (${esc(row.currency)})<input class="candidate-reference" data-reference="${esc(key)}" aria-label="Your reference price for ${esc(row.title)}" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="Enter price" value="${esc(reference)}"></label><span class="sub">${esc(comparison)}</span></td>
+    <td>${candidateReferenceInput(row)}<span class="sub">${esc(candidateComparisonText(row, discount))}</span></td>
     <td>${esc(row.condition || 'Not verified')}</td><td>${esc(ago(row.last_seen))}</td>
     <td><button class="button secondary small" data-dismiss="${row.id}">Remove</button></td>
   </tr>`;
@@ -409,9 +412,40 @@ function renderDiscoveryResults() {
   bindDismiss('#broad-results-table', loadDiscoveryResults);
 }
 
+let bargainLimit = 30;
+function bargainCard(row) {
+  const discount = candidateDiscount(row);
+  const earlier = row.discovery_at && row.discovery_at !== discoveryResultData.scan?.started;
+  return `<article class="bargain-card ${discount > 0 ? 'positive' : ''}">
+    <header><div><h4>${esc(row.title)}</h4><span class="sub">${esc(row.source === 'facebook' ? 'Marketplace' : 'eBay')} · ${row.listing_type === 'auction' ? 'Auction, bid can rise' : 'Fixed price'}${row.condition ? ` · ${esc(row.condition)}` : ''}${earlier ? ` · Earlier scan ${esc(new Date(row.discovery_at).toLocaleString())}` : ''}</span></div>${discount > 0 ? `<span class="bargain-percent">${discount.toFixed(1)}% below</span>` : ''}</header>
+    <div class="bargain-actions"><strong>${esc(listingPrice(row))}</strong>${candidateReferenceInput(row)}<a class="button secondary small" href="${esc(row.url)}" target="_blank" rel="noopener">Open seller listing ↗</a></div>
+    <span class="sub">${esc(candidateComparisonText(row, discount))}${earlier ? ' · Confirm availability and current price' : ''}</span>
+  </article>`;
+}
+function renderBargainReview() {
+  const source = $('#bargain-source').value;
+  const rows = discoveryResultData.listings.filter(row => !source || row.source === source);
+  const compared = rows.filter(row => candidateDiscount(row) > 0).sort((a, b) => candidateDiscount(b) - candidateDiscount(a));
+  const others = rows.filter(row => !(candidateDiscount(row) > 0)).sort((a, b) => {
+    const priority = row => Number(row.discovery_at === discoveryResultData.scan?.started) * 2
+      + Number(row.total_price != null && !(row.source === 'facebook' && row.price != null && row.price <= 1));
+    return priority(b) - priority(a);
+  });
+  const allCompared = discoveryResultData.listings.filter(row => candidateDiscount(row) > 0).length;
+  $('#bargain-badge').textContent = `${allCompared} potential bargains`;
+  $('#bargain-review-counts').innerHTML = `<span><strong>${compared.length}</strong> below your reference</span><span><strong>${others.length}</strong> other saved candidates</span><span><strong>${rows.filter(row => row.source === 'facebook').length}</strong> Marketplace</span>`;
+  $('#bargain-reviewed').innerHTML = compared.length ? compared.map(bargainCard).join('')
+    : '<div class="empty">No compared bargains yet. Check a listing below and enter your reference price to calculate its percentage.</div>';
+  $('#bargain-candidates').innerHTML = others.length ? others.slice(0, bargainLimit).map(bargainCard).join('')
+    : '<div class="empty">No other saved candidates for this site. Browse cards to scan again or change the site filter.</div>';
+  $('#bargain-more').hidden = others.length <= bargainLimit;
+  $('#bargain-more').textContent = `Show more candidates (${Math.min(30, Math.max(0, others.length - bargainLimit))} next)`;
+}
+
 async function loadDiscoveryResults() {
   discoveryResultData = await api('/api/snipe/discovery/results');
   renderDiscoveryResults();
+  renderBargainReview();
 }
 
 async function loadBroadStatus() {
@@ -476,20 +510,27 @@ $('#broad-price-clear').addEventListener('click', () => {
   $('#broad-max-price').value = '';
   renderDiscoveryResults();
 });
-$('#broad-results-table').addEventListener('change', event => {
+function saveCandidateReference(event) {
   const key = event.target?.dataset?.reference;
   if (!key || !discoveryResultData.listings.some(row => candidateKey(row) === key)) return;
   const value = event.target.value.trim();
   if (value && (!Number.isFinite(Number(value)) || Number(value) <= 0)) {
     toast('Enter a positive reference price, or leave it blank.', true);
     renderDiscoveryResults();
+    renderBargainReview();
     return;
   }
   if (value) candidateReferences[key] = Number(value);
   else delete candidateReferences[key];
   try { localStorage.setItem(CANDIDATE_REFERENCES_KEY, JSON.stringify(candidateReferences)); } catch (_) {}
   renderDiscoveryResults();
-});
+  renderBargainReview();
+}
+for (const selector of ['#broad-results-table', '#bargain-reviewed', '#bargain-candidates']) {
+  $(selector).addEventListener('change', saveCandidateReference);
+}
+$('#bargain-source').addEventListener('change', () => { bargainLimit = 30; renderBargainReview(); });
+$('#bargain-more').addEventListener('click', () => { bargainLimit += 30; renderBargainReview(); });
 
 async function loadDiscover() {
   await Promise.all([loadDiscovery(), loadDiscoveryResults(), loadBroadStatus()]);
@@ -638,7 +679,7 @@ function bindDismiss(root, reload) {
 }
 
 // ── wiring ──────────────────────────────────────────────────────────────────
-const LOADERS = {discover: loadDiscover, collection: loadCollection, overview: loadOverview, deals: loadDeals, bids: loadBids, values: loadValues, watchlist: loadWatchlist, scans: loadScans, listings: loadListings};
+const LOADERS = {discover: loadDiscover, bargains: loadDiscoveryResults, collection: loadCollection, overview: loadOverview, deals: loadDeals, bids: loadBids, values: loadValues, watchlist: loadWatchlist, scans: loadScans, listings: loadListings};
 
 async function refreshAll() {
   const failed = [];
@@ -672,6 +713,7 @@ const REPLACED_ROOTS = {
   scans: ['#scans-table'],
   listings: ['#listings-table'],
   discover: ['#broad-results-table'],
+  bargains: ['#bargain-reviewed', '#bargain-candidates'],
 };
 
 function isTextField(el) {
