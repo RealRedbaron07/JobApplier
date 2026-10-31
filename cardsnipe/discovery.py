@@ -14,7 +14,7 @@ from cardsnipe.ebay import EbayWeb
 from cardsnipe.facebook import FacebookMarketplace
 from cardsnipe.watchlist import Target
 
-MAX_SEARCHES = 7
+MAX_SEARCHES = 8
 RESULTS_PER_SEARCH = 60
 COOLDOWN_SECONDS = 60
 PAGE_INTERVAL_SECONDS = 2
@@ -47,17 +47,46 @@ def browser_search_links(target, settings, *, mode="bin"):
 def search_plan(source="all"):
     if not isinstance(source, str) or source not in {"all", "ebay", "facebook"}:
         raise ValueError("Choose all, ebay, or facebook")
-    searches = [("ebay", mode, "pokemon cards") for mode in ("sale", "all", "auction", "offers")]
+    searches = [("facebook", "all", query) for query in
+                ("pokemon single card", "pokemon graded card", "pokemon sealed")]
+    searches += [("ebay", mode, "pokemon cards") for mode in ("sale", "all", "auction", "offers")]
     searches += [("ebay", "all", "pokemon sealed")]
-    searches += [("facebook", "all", query) for query in ("pokemon cards", "pokemon single card")]
     return [item for item in searches if source == "all" or item[0] == source][:MAX_SEARCHES]
 
 
-LOT_RE = re.compile(r"\b(?:lots?|bulk|binders?)\b|\bcards?\s+(?:bundle|collection)s?\b|\bcollection\s+of\b", re.I)
+LOT_RE = re.compile(
+    r"\b(?:lots?|bulk|binders?)\b|\bcards?\s+(?:bundle|collection)s?\b|"
+    r"\bcollection(?:s|\s+of|\s+sale)?\b|\b(?:cards|singles|sets)\b|"
+    r"\b(?:card\s+hits|single\s+packs|looking\s+to\s+trade|looking\s+for|buying|"
+    r"trade\s+or\s+buy|can\s+sell\s+in\s+singles)\b", re.I)
+CARD_NUMBER_RE = re.compile(r"\b\d{1,3}/\d{1,3}\b")
 
 
 def is_lot_listing(title: str) -> bool:
-    return bool(LOT_RE.search(title or ""))
+    title = title or ""
+    if re.search(r"\b(?:ultra\s+premium\s+collection|special\s+collection|booster\s+bundle)\b", title, re.I):
+        return False
+    if CARD_NUMBER_RE.search(title) and not re.search(r"\b(?:lots?|bulk|binders?|collection)\b", title, re.I):
+        return False
+    return bool(LOT_RE.search(title))
+
+
+def is_discovery_candidate(listing) -> bool:
+    # Marketplace $0/$1 offers commonly advertise variable per-card prices.
+    if is_lot_listing(listing.title):
+        return False
+    if listing.source == "facebook":
+        if listing.price is not None and listing.price <= 1:
+            return False
+        if re.search(r"\bpre[ -]?orders?\b", listing.title, re.I):
+            return False
+        if re.fullmatch(r"(?:pok[eé]mon\s+)?cards?(?:\s+for\s+sale)?", listing.title.strip(), re.I):
+            return False
+        if re.fullmatch(r"pok[eé]mon\s+(?:vintage|card\s+english\s*&\s*japanese)", listing.title.strip(), re.I):
+            return False
+        if re.fullmatch(r"[\w .'-]+,\s*[A-Z]{2}", listing.title.strip()):
+            return False
+    return True
 
 
 def promotion_text(listing):
@@ -115,7 +144,7 @@ class DiscoveryScanner:
                     for listing in listings:
                         if listing.currency != self.settings.ebay_currency:
                             continue
-                        if is_lot_listing(listing.title):
+                        if not is_discovery_candidate(listing):
                             continue
                         entry = found.setdefault(listing.key, {"listing": listing, "routes": []})
                         route_mode = "search-bar retry (unfiltered)" if name == "ebay" and getattr(ebay, "used_home_search", False) else mode

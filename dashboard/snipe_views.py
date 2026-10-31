@@ -13,7 +13,8 @@ from config import Config
 
 from cardsnipe.pricing import VALUATION_VERSION, PriceService, usd_rate
 from cardsnipe.discovery import (COOLDOWN_SECONDS, DISCOVERY_MODES, MAX_SEARCHES, RESULTS_PER_SEARCH,
-                                 DiscoveryScanner, browser_search_links as _browser_search_links, is_lot_listing, search_plan)
+                                 DiscoveryScanner, browser_search_links as _browser_search_links,
+                                 is_discovery_candidate, search_plan)
 from cardsnipe.runner import revalue_store, scanner_session
 from cardsnipe.settings import SnipeSettings
 from cardsnipe.store import ScanRun, ScheduledBid, SeenListing, Store
@@ -368,7 +369,7 @@ def snipe_discovery_stop():
 @snipe_bp.get("/api/snipe/discovery/results")
 def snipe_discovery_results():
     rows, latest = get_store().discovery_results()
-    return jsonify({"listings": [_listing_dict(row) for row in rows if not is_lot_listing(row.title)],
+    return jsonify({"listings": [_listing_dict(row) for row in rows if is_discovery_candidate(row)],
                     "scan": _scan_dict(latest) if latest else None})
 
 

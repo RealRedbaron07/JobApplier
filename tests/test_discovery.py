@@ -27,11 +27,32 @@ def listing(source="ebay", item="12345678901", **changes):
 @pytest.mark.parametrize("title,is_lot", [
     ("Pokemon cards lot of 20", True), ("Bulk Pokemon binder", True),
     ("Pokemon card collection", True), ("Collection of Pokemon cards", True),
+    ("Pokemon Cards", True), ("Pokemon Singles For Sale", True),
+    ("Pokemon Starmie CGC 9 and Eevee PSA 8 Graded Cards", True),
+    ("Pokemon Card Hits", True), ("Pokemon Single Packs", True),
+    ("Looking to trade 30th ETB", True),
     ("Lost Origin Charizard single", False), ("Ultra Premium Collection sealed box", False),
     ("Pokemon booster bundle sealed", False),
+    ("Pokemon Cards - Mega Charizard ex PFL 125/094", False),
 ])
 def test_lot_filter_preserves_individual_and_sealed_products(title, is_lot):
     assert discovery.is_lot_listing(title) is is_lot
+
+
+def test_marketplace_placeholder_prices_and_location_only_titles_are_excluded():
+    assert not discovery.is_discovery_candidate(listing("facebook", title="Pokemon Cards", price=20))
+    assert not discovery.is_discovery_candidate(listing("facebook", title="Markham, ON", price=20))
+    assert not discovery.is_discovery_candidate(listing("facebook", title="Charizard ex 125/094", price=1))
+    assert not discovery.is_discovery_candidate(listing("facebook", title="Pokemon vintage", price=500))
+    assert not discovery.is_discovery_candidate(listing("facebook", title="Pikachu booster pack pre-order", price=12))
+    assert discovery.is_discovery_candidate(listing("facebook", title="Charizard ex 125/094", price=40))
+
+
+def test_marketplace_searches_run_first_without_specific_card_targets():
+    plan = discovery.search_plan()
+    assert len(plan) == 8
+    assert [name for name, _, _ in plan[:3]] == ["facebook"] * 3
+    assert all("pokemon" in query for _, _, query in plan)
 
 
 def test_lots_are_not_saved_or_returned_as_discovery_results(browser_scan, monkeypatch):
@@ -86,9 +107,9 @@ def test_broad_scan_is_bounded_and_imports_without_targets_prices_or_condition_f
     monkeypatch.setattr(discovery.FacebookMarketplace, "find", facebook_search)
     report = discovery.DiscoveryScanner(settings, store).scan()
     rows, scan = store.discovery_results()
-    assert len(searches) == report["pages_done"] == 7
-    assert len(rows) == report["candidates"] == report["scanned"] == 420
-    assert report["new_listings"] == 420 and report["errors"] == []
+    assert len(searches) == report["pages_done"] == 8
+    assert len(rows) == report["candidates"] == report["scanned"] == 480
+    assert report["new_listings"] == 480 and report["errors"] == []
     assert scan.kind == "broad" and scan.budget is None and scan.currency == "CAD"
     assert scan.deals == 0 and scan.bids_scheduled == 0 and not scan.live
     assert all(row.market_value is None and row.matched_target is None for row in rows)
@@ -118,7 +139,7 @@ def test_one_blocked_source_does_not_repeat_or_discard_other_source_results(brow
     monkeypatch.setattr(discovery.EbayWeb, "search_page", blocked)
     monkeypatch.setattr(discovery.FacebookMarketplace, "find", lambda *a, **kw: [listing("facebook")])
     report = discovery.DiscoveryScanner(settings, store).scan()
-    assert attempts == ["ebay"] and report["pages_done"] == 3
+    assert attempts == ["ebay"] and report["pages_done"] == 4
     assert len(report["errors"]) == 1 and report["candidates"] == 1
     assert store.discovery_results()[0][0].source == "facebook"
 
@@ -147,7 +168,7 @@ def test_stop_keeps_all_prices_without_shared_budget_cap(browser_scan, monkeypat
         return [listing(item="1", price=46), listing(item="2", price=None), listing(item="3", currency="USD")]
 
     monkeypatch.setattr(discovery.EbayWeb, "search_page", search)
-    report = discovery.DiscoveryScanner(settings, store, stop=stop).scan()
+    report = discovery.DiscoveryScanner(settings, store, stop=stop).scan("ebay")
     rows, _ = store.discovery_results()
     assert report["stopped"] and report["pages_done"] == 1 and len(rows) == 2
     assert {row.listing_id for row in rows} == {"1", "2"}
@@ -292,7 +313,7 @@ def test_one_click_broad_endpoint_runs_with_an_empty_watchlist_and_cannot_launch
     monkeypatch.setattr(views, "DiscoveryScanner", Scanner)
     try:
         response = client.post("/api/snipe/discovery/scan", json={"source": "all", "live": True, "max_searches": 9999})
-        assert response.status_code == 202 and response.get_json()["max_searches"] == 7
+        assert response.status_code == 202 and response.get_json()["max_searches"] == 8
         assert not response.get_json()["paid_apis_enabled"] and started.wait(2)
         assert client.post("/api/snipe/discovery/scan", json={}).status_code == 409
         assert client.post("/api/snipe/discovery/stop").status_code == 202
