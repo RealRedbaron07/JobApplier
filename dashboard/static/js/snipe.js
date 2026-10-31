@@ -416,9 +416,11 @@ let bargainLimit = 30;
 function bargainCard(row) {
   const discount = candidateDiscount(row);
   const earlier = row.discovery_at && row.discovery_at !== discoveryResultData.scan?.started;
+  const askLabel = row.listing_type === 'auction' ? 'Current bid' : 'Seller ask';
+  const shippingLabel = row.shipping == null ? 'Shipping not reported' : `Shipping ${money(row.currency, row.shipping)}`;
   return `<article class="bargain-card ${discount > 0 ? 'positive' : ''}">
     <header><div><h4>${esc(row.title)}</h4><span class="sub">${esc(row.source === 'facebook' ? 'Marketplace' : 'eBay')} · ${row.listing_type === 'auction' ? 'Auction, bid can rise' : 'Fixed price'}${row.condition ? ` · ${esc(row.condition)}` : ''}${earlier ? ` · Earlier scan ${esc(new Date(row.discovery_at).toLocaleString())}` : ''}</span></div>${discount > 0 ? `<span class="bargain-percent">${discount.toFixed(1)}% below</span>` : ''}</header>
-    <div class="bargain-actions"><strong>${esc(listingPrice(row))}</strong>${candidateReferenceInput(row)}<a class="button secondary small" href="${esc(row.url)}" target="_blank" rel="noopener">Open seller listing ↗</a></div>
+    <div class="bargain-actions"><div><strong>${esc(listingPrice(row))}</strong><span class="sub">${askLabel} ${esc(money(row.currency, row.price))} · ${esc(shippingLabel)}${row.source === 'facebook' ? ' · travel and delivery extra' : ''}</span></div>${candidateReferenceInput(row)}<a class="button secondary small" href="${esc(row.url)}" target="_blank" rel="noopener">Open seller listing ↗</a></div>
     <span class="sub">${esc(candidateComparisonText(row, discount))}${earlier ? ' · Confirm availability and current price' : ''}</span>
   </article>`;
 }

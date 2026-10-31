@@ -388,7 +388,7 @@ def test_search_controls_are_real_links_even_before_javascript_loads(snipe_clien
     parser = Links()
     parser.feed(client.get("/snipe").get_data(as_text=True))
     categories = [link for link in parser.links if "data-discovery-query" in link]
-    assert len(categories) == 8
+    assert len(categories) == 6
     for link in categories:
         url = urlparse(link["href"])
         params = parse_qs(url.query)

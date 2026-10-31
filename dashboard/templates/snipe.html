@@ -40,14 +40,14 @@
         <article class="panel auto-scan-panel">
           <p class="eyebrow">AUTOMATIC DISCOVERY</p>
           <h2>Scan broadly. Choose the cards yourself.</h2>
-          <p>One click searches promotions, new listings, ending auctions, offers, lots, sealed products and Marketplace. Results appear below without adding specific card targets.</p>
+          <p>One click searches promotions, new listings, ending auctions, offers, singles, sealed products and Marketplace. Lot listings are excluded.</p>
           <div class="auto-scan-actions">
             <label>Sites<select id="broad-source"><option value="all">eBay + Marketplace</option><option value="ebay">eBay</option><option value="facebook">Marketplace</option></select></label>
             <button class="button" id="broad-scan">Scan all cards automatically</button>
             <button class="button secondary" id="broad-stop" hidden>Stop after current page</button>
           </div>
-          <p class="detail-meta">Up to 8 broad searches and 60 results per search. One pass per click, with a 60-second cooldown. The shared card budget does not limit this scan. No paid API, price-provider calls, purchases or messages.</p>
-          <progress id="broad-progress" max="8" value="0" hidden aria-label="Broad scan progress"></progress>
+          <p class="detail-meta">Up to 7 broad searches and 60 results per search. One pass per click, with a 60-second cooldown. The shared card budget does not limit this scan. No paid API, price-provider calls, purchases or messages.</p>
+          <progress id="broad-progress" max="7" value="0" hidden aria-label="Broad scan progress"></progress>
           <p id="broad-status" role="status" aria-live="polite">Ready to scan.</p>
           <div id="broad-errors" role="status"></div>
           <details class="scanner-signin"><summary>Marketplace scanner sign-in</summary><p class="detail-meta">The scanner has its own saved Chrome profile. Your normal browser login is separate. Sign in once here; the sign-in window stays open until you finish or cancel.</p><div class="target-actions"><button class="button secondary small" id="facebook-login">Sign in to Marketplace scanner</button><button class="button secondary small" id="facebook-finish" hidden>Finish scanner sign-in</button><button class="button secondary small" id="facebook-cancel" hidden>Cancel sign-in</button></div></details>
@@ -67,14 +67,14 @@
             <button class="button secondary small" id="broad-price-clear" type="button">Clear price</button>
           </div>
           <p id="broad-price-help" class="detail-meta" role="status" aria-live="polite">Price includes reported shipping, before tax. Unknown totals are hidden while a price range is set. Marketplace listings count as fixed price. Set and type match listing titles only; check the seller page.</p>
-          <p class="detail-meta">Enter a checked reference price for the exact item, condition and currency to see a possible bargain percentage. References stay in this browser. No reference means no bargain claim.</p>
+          <p class="detail-meta">Prices are copied from seller search cards. eBay total adds reported shipping; Marketplace uses the shown asking price. Your reference is entered by you, never matched automatically. Percentage = (reference − displayed total) ÷ reference. Verify the exact card and seller price before buying.</p>
           <div class="table-wrap"><table><thead><tr><th>Listing</th><th>Why it surfaced</th><th>Ask / bid + shipping</th><th>Potential bargain</th><th>Condition</th><th>Seen</th><th></th></tr></thead><tbody id="broad-results-table"><tr><td colspan="7" class="empty">Click Scan all cards automatically to collect listings here.</td></tr></tbody></table></div>
         </article>
         <details class="manual-browse"><summary>Open searches manually (optional)</summary>
         <article class="panel search-panel">
           <p class="eyebrow">BROWSE THE WHOLE MARKET</p>
           <h2>Find the opportunity. Pick the card later.</h2>
-          <p class="search-intro">Browse across Pokémon singles, graded cards, lots, collections and sealed products. No specific card, set, grade or watchlist is required. You choose what is worth buying.</p>
+          <p class="search-intro">Browse Pokémon singles, graded cards and sealed products. No specific card, set, grade or watchlist is required. You choose what is worth buying.</p>
           <form id="discovery-form" class="search-form">
             <label>Optional keywords · leave broad to see everything<input id="discovery-query" name="query" value="pokemon cards" maxlength="160" placeholder="Leave blank for all Pokémon cards"></label>
             <button type="submit" hidden>Search eBay</button>

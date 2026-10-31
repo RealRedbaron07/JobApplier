@@ -13,7 +13,7 @@ from config import Config
 
 from cardsnipe.pricing import VALUATION_VERSION, PriceService, usd_rate
 from cardsnipe.discovery import (COOLDOWN_SECONDS, DISCOVERY_MODES, MAX_SEARCHES, RESULTS_PER_SEARCH,
-                                 DiscoveryScanner, browser_search_links as _browser_search_links, search_plan)
+                                 DiscoveryScanner, browser_search_links as _browser_search_links, is_lot_listing, search_plan)
 from cardsnipe.runner import revalue_store, scanner_session
 from cardsnipe.settings import SnipeSettings
 from cardsnipe.store import ScanRun, ScheduledBid, SeenListing, Store
@@ -368,7 +368,7 @@ def snipe_discovery_stop():
 @snipe_bp.get("/api/snipe/discovery/results")
 def snipe_discovery_results():
     rows, latest = get_store().discovery_results()
-    return jsonify({"listings": [_listing_dict(row) for row in rows],
+    return jsonify({"listings": [_listing_dict(row) for row in rows if not is_lot_listing(row.title)],
                     "scan": _scan_dict(latest) if latest else None})
 
 
@@ -380,8 +380,7 @@ def snipe_page():
         Target(name=query, keywords=[query], max_price=watchlist.budget, use_market=False), settings, mode="all",
     )} for label, query in (
         ("All Pokémon cards", "pokemon cards"), ("Singles", "pokemon singles"),
-        ("All graded cards", "pokemon graded"), ("Lots & bundles", "pokemon card lot"),
-        ("Collections", "pokemon collection"), ("Sealed products", "pokemon sealed"), ("Promos", "pokemon promo"),
+        ("All graded cards", "pokemon graded"), ("Sealed products", "pokemon sealed"), ("Promos", "pokemon promo"),
     )]
     broad = Target(name="pokemon cards", keywords=["pokemon cards"], max_price=watchlist.budget, use_market=False)
     return render_template(

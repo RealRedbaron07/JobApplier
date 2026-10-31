@@ -24,6 +24,26 @@ def listing(source="ebay", item="12345678901", **changes):
     return Listing(**values)
 
 
+@pytest.mark.parametrize("title,is_lot", [
+    ("Pokemon cards lot of 20", True), ("Bulk Pokemon binder", True),
+    ("Pokemon card collection", True), ("Collection of Pokemon cards", True),
+    ("Lost Origin Charizard single", False), ("Ultra Premium Collection sealed box", False),
+    ("Pokemon booster bundle sealed", False),
+])
+def test_lot_filter_preserves_individual_and_sealed_products(title, is_lot):
+    assert discovery.is_lot_listing(title) is is_lot
+
+
+def test_lots_are_not_saved_or_returned_as_discovery_results(browser_scan, monkeypatch):
+    settings, store, _ = browser_scan
+    monkeypatch.setattr(discovery.EbayWeb, "search_page", lambda *a: [
+        listing(item="lot", title="Pokemon card lot of 20"),
+        listing(item="single", title="Charizard single card"),
+    ])
+    discovery.DiscoveryScanner(settings, store).scan("ebay")
+    assert [row.title for row in store.discovery_results()[0]] == ["Charizard single card"]
+
+
 @pytest.fixture
 def browser_scan(monkeypatch):
     settings = replace(SnipeSettings.from_env(), ebay_app_id="unused-key", ebay_cert_id="unused-secret",
@@ -66,9 +86,9 @@ def test_broad_scan_is_bounded_and_imports_without_targets_prices_or_condition_f
     monkeypatch.setattr(discovery.FacebookMarketplace, "find", facebook_search)
     report = discovery.DiscoveryScanner(settings, store).scan()
     rows, scan = store.discovery_results()
-    assert len(searches) == report["pages_done"] == 8
-    assert len(rows) == report["candidates"] == report["scanned"] == 480
-    assert report["new_listings"] == 480 and report["errors"] == []
+    assert len(searches) == report["pages_done"] == 7
+    assert len(rows) == report["candidates"] == report["scanned"] == 420
+    assert report["new_listings"] == 420 and report["errors"] == []
     assert scan.kind == "broad" and scan.budget is None and scan.currency == "CAD"
     assert scan.deals == 0 and scan.bids_scheduled == 0 and not scan.live
     assert all(row.market_value is None and row.matched_target is None for row in rows)
@@ -82,8 +102,8 @@ def test_broad_scan_deduplicates_and_preserves_routes_without_fake_discount_math
     monkeypatch.setattr(discovery.EbayWeb, "search_page", lambda *a: [listing()])
     report = discovery.DiscoveryScanner(settings, store).scan("ebay")
     rows, _ = store.discovery_results()
-    assert report["scanned"] == 6 and report["candidates"] == report["new_listings"] == 1
-    assert len(rows) == 1 and len(json.loads(rows[0].discovery_routes)) == 6
+    assert report["scanned"] == 5 and report["candidates"] == report["new_listings"] == 1
+    assert len(rows) == 1 and len(json.loads(rows[0].discovery_routes)) == 5
     assert rows[0].savings_pct is None and rows[0].market_value is None
 
 
@@ -272,7 +292,7 @@ def test_one_click_broad_endpoint_runs_with_an_empty_watchlist_and_cannot_launch
     monkeypatch.setattr(views, "DiscoveryScanner", Scanner)
     try:
         response = client.post("/api/snipe/discovery/scan", json={"source": "all", "live": True, "max_searches": 9999})
-        assert response.status_code == 202 and response.get_json()["max_searches"] == 8
+        assert response.status_code == 202 and response.get_json()["max_searches"] == 7
         assert not response.get_json()["paid_apis_enabled"] and started.wait(2)
         assert client.post("/api/snipe/discovery/scan", json={}).status_code == 409
         assert client.post("/api/snipe/discovery/stop").status_code == 202

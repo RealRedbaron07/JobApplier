@@ -14,7 +14,7 @@ from cardsnipe.ebay import EbayWeb
 from cardsnipe.facebook import FacebookMarketplace
 from cardsnipe.watchlist import Target
 
-MAX_SEARCHES = 8
+MAX_SEARCHES = 7
 RESULTS_PER_SEARCH = 60
 COOLDOWN_SECONDS = 60
 PAGE_INTERVAL_SECONDS = 2
@@ -48,9 +48,16 @@ def search_plan(source="all"):
     if not isinstance(source, str) or source not in {"all", "ebay", "facebook"}:
         raise ValueError("Choose all, ebay, or facebook")
     searches = [("ebay", mode, "pokemon cards") for mode in ("sale", "all", "auction", "offers")]
-    searches += [("ebay", "all", query) for query in ("pokemon card lot", "pokemon sealed")]
-    searches += [("facebook", "all", query) for query in ("pokemon cards", "pokemon collection")]
+    searches += [("ebay", "all", "pokemon sealed")]
+    searches += [("facebook", "all", query) for query in ("pokemon cards", "pokemon single card")]
     return [item for item in searches if source == "all" or item[0] == source][:MAX_SEARCHES]
+
+
+LOT_RE = re.compile(r"\b(?:lots?|bulk|binders?)\b|\bcards?\s+(?:bundle|collection)s?\b|\bcollection\s+of\b", re.I)
+
+
+def is_lot_listing(title: str) -> bool:
+    return bool(LOT_RE.search(title or ""))
 
 
 def promotion_text(listing):
@@ -107,6 +114,8 @@ class DiscoveryScanner:
                     scanned += len(listings)
                     for listing in listings:
                         if listing.currency != self.settings.ebay_currency:
+                            continue
+                        if is_lot_listing(listing.title):
                             continue
                         entry = found.setdefault(listing.key, {"listing": listing, "routes": []})
                         route_mode = "search-bar retry (unfiltered)" if name == "ebay" and getattr(ebay, "used_home_search", False) else mode
