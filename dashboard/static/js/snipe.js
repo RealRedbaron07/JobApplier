@@ -360,6 +360,23 @@ function candidateComparisonText(row, discount = candidateDiscount(row)) {
   return row.total_price == null ? 'Total unknown; check shipping first' : 'Enter your reference to compare';
 }
 const candidateReferenceInput = row => `<label class="compact-control">Your reference (${esc(row.currency)})<input class="candidate-reference" data-reference="${esc(candidateKey(row))}" aria-label="Your reference price for ${esc(row.title)}" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="Enter price" value="${esc(candidateReferences[candidateKey(row)] ?? '')}"></label>`;
+const PRODUCT_KINDS = ['single', 'graded', 'sealed', 'promo', 'other'];
+const PRODUCT_LABELS = {single: 'Single', graded: 'Graded', sealed: 'Sealed', promo: 'Promo', other: 'Other / unclear'};
+const PRODUCT_KINDS_KEY = 'cardsnipe_visible_product_kinds_v1';
+let visibleProductKinds = new Set(PRODUCT_KINDS);
+try {
+  const saved = JSON.parse(localStorage.getItem(PRODUCT_KINDS_KEY));
+  if (Array.isArray(saved)) visibleProductKinds = new Set(saved.filter(kind => PRODUCT_KINDS.includes(kind)));
+} catch (_) {}
+function productKind(row) {
+  const title = row.title || '';
+  if (/\b(?:promo|promotional|pre[- ]?release|black star)\b/i.test(title)) return 'promo';
+  if (/\b(?:PSA|CGC|BGS|SGC|graded|slabbed|slab|beckett)\b|\bTAG\s*\d{1,2}\b/i.test(title)) return 'graded';
+  if (/\b(?:sealed|booster|ETB|elite trainer|tin|blister|box|pack|portfolio|starter set|collection)\b/i.test(title)) return 'sealed';
+  if (/\b(?:card|single)\b|\b\d{1,3}\/\d{1,3}\b/i.test(title)) return 'single';
+  return 'other';
+}
+const productKindVisible = row => visibleProductKinds.has(productKind(row));
 
 function renderDiscoveryResults() {
   const source = $('#broad-result-source').value;
@@ -378,7 +395,7 @@ function renderDiscoveryResults() {
   minField.setAttribute('aria-invalid', String(!!invalidMin || reversed));
   maxField.setAttribute('aria-invalid', String(!!invalidMax || reversed));
   const priceActive = min != null || max != null;
-  const rows = discoveryResultData.listings.filter(row => !priceError && (!source || row.source === source)
+  const rows = discoveryResultData.listings.filter(row => !priceError && productKindVisible(row) && (!source || row.source === source)
     && (!format || row.listing_type === format)
     && (!priceActive || (Number.isFinite(row.total_price) && (min == null || row.total_price >= min) && (max == null || row.total_price <= max)))
     && (!set || row.title.toLowerCase().includes(set))
@@ -388,7 +405,7 @@ function renderDiscoveryResults() {
   const scan = discoveryResultData.scan;
   for (const [id, site, label] of [['#broad-all-leads', '', 'All'], ['#broad-ebay-leads', 'ebay', 'eBay'], ['#broad-facebook-leads', 'facebook', 'Marketplace']]) {
     const button = $(id);
-    const matching = site ? discoveryResultData.listings.filter(row => row.source === site) : discoveryResultData.listings;
+    const matching = discoveryResultData.listings.filter(row => productKindVisible(row) && (!site || row.source === site));
     const earlier = matching.filter(row => row.discovery_at && row.discovery_at !== scan?.started).length;
     button.textContent = `${label} ${matching.length}${earlier ? ` (${earlier} earlier)` : ''}`;
     button.setAttribute('aria-pressed', String(source === site));
@@ -401,7 +418,7 @@ function renderDiscoveryResults() {
   $('#broad-results-table').innerHTML = rows.length ? rows.map(row => {
     const discount = candidateDiscount(row);
     return `<tr class="${discount > 0 ? 'candidate-bargain' : ''}">
-    <td><a href="${esc(row.url)}" target="_blank" rel="noopener">${esc(row.title)}</a><span class="sub">${esc(row.source)} · ${row.listing_type === 'auction' ? 'Auction, current bid can rise' : 'Listed asking price'}${row.location ? ` · ${esc(row.location)}` : ''}</span>${row.discovery_at && row.discovery_at !== scan?.started ? `<span class="sub over-budget">Earlier scan ${esc(new Date(row.discovery_at).toLocaleString())}; open listing to confirm availability</span>` : ''}</td>
+    <td><a href="${esc(row.url)}" target="_blank" rel="noopener">${esc(row.title)}</a><span class="sub">${esc(row.source)} · ${PRODUCT_LABELS[productKind(row)]} · ${row.listing_type === 'auction' ? 'Auction, current bid can rise' : 'Listed asking price'}${row.location ? ` · ${esc(row.location)}` : ''}</span>${row.discovery_at && row.discovery_at !== scan?.started ? `<span class="sub over-budget">Earlier scan ${esc(new Date(row.discovery_at).toLocaleString())}; open listing to confirm availability</span>` : ''}</td>
     <td>${row.promotion ? `<div class="candidate-promotion">${esc(row.promotion)}</div>` : ''}${row.discovery_routes.map(route => `<span class="sub">${esc(route)}</span>`).join('')}</td>
     <td><strong>${row.price == null ? 'Price varies / unavailable' : esc(listingPrice(row))}</strong>${row.shipping != null && row.shipping > 0 ? `<span class="sub">Includes ${esc(money(row.currency, row.shipping))} shipping</span>` : ''}<span class="sub">Before tax and other charges</span></td>
     <td>${candidateReferenceInput(row)}<span class="sub">${esc(candidateComparisonText(row, discount))}</span></td>
@@ -418,16 +435,16 @@ function bargainCard(row) {
   const askLabel = row.listing_type === 'auction' ? 'Current bid' : 'Seller ask';
   const shippingLabel = row.shipping == null ? 'Shipping not reported' : `Shipping ${money(row.currency, row.shipping)}`;
   return `<article class="bargain-card ${discount > 0 ? 'positive' : ''}">
-    <header><div><h4>${esc(row.title)}</h4><span class="sub">${esc(row.source === 'facebook' ? 'Marketplace' : 'eBay')} · ${row.listing_type === 'auction' ? 'Auction, bid can rise' : 'Fixed price'}${row.condition ? ` · ${esc(row.condition)}` : ''}${earlier ? ` · Earlier scan ${esc(new Date(row.discovery_at).toLocaleString())}` : ''}</span></div>${discount > 0 ? `<span class="bargain-percent">${discount.toFixed(1)}% below</span>` : ''}</header>
+    <header><div><h4>${esc(row.title)}</h4><span class="sub">${esc(row.source === 'facebook' ? 'Marketplace' : 'eBay')} · ${PRODUCT_LABELS[productKind(row)]} · ${row.listing_type === 'auction' ? 'Auction, bid can rise' : 'Fixed price'}${row.condition ? ` · ${esc(row.condition)}` : ''}${earlier ? ` · Earlier scan ${esc(new Date(row.discovery_at).toLocaleString())}` : ''}</span></div>${discount > 0 ? `<span class="bargain-percent">${discount.toFixed(1)}% below</span>` : ''}</header>
     <div class="bargain-actions"><div><strong>${esc(listingPrice(row))}</strong><span class="sub">${askLabel} ${esc(money(row.currency, row.price))} · ${esc(shippingLabel)}${row.source === 'facebook' ? ' · travel and delivery extra' : ''}</span></div>${candidateReferenceInput(row)}<a class="button secondary small" href="${esc(row.url)}" target="_blank" rel="noopener">Open seller listing ↗</a></div>
     <span class="sub">${esc(candidateComparisonText(row, discount))}${earlier ? ' · Confirm availability and current price' : ''}</span>
   </article>`;
 }
 function renderBargainReview() {
   const source = $('#bargain-source').value;
-  const compared = discoveryResultData.listings.filter(row => (!source || row.source === source) && candidateDiscount(row) > 0)
+  const compared = discoveryResultData.listings.filter(row => productKindVisible(row) && (!source || row.source === source) && candidateDiscount(row) > 0)
     .sort((a, b) => candidateDiscount(b) - candidateDiscount(a));
-  const allCompared = discoveryResultData.listings.filter(row => candidateDiscount(row) > 0).length;
+  const allCompared = discoveryResultData.listings.filter(row => productKindVisible(row) && candidateDiscount(row) > 0).length;
   $('#bargain-badge').textContent = `${allCompared} potential bargains`;
   $('#bargain-review-counts').innerHTML = `<span><strong>${compared.length}</strong> below your reference for this site</span>`;
   $('#bargain-reviewed').innerHTML = compared.length ? compared.map(bargainCard).join('')
@@ -495,6 +512,20 @@ for (const [id, source] of [['#broad-all-leads', ''], ['#broad-ebay-leads', 'eba
   $(id).addEventListener('click', () => { $('#broad-result-source').value = source; renderDiscoveryResults(); });
 }
 $('#broad-result-format').addEventListener('change', renderDiscoveryResults);
+for (const kind of PRODUCT_KINDS) {
+  for (const view of ['broad', 'bargain']) {
+    const box = $(`#${view}-kind-${kind}`);
+    box.checked = visibleProductKinds.has(kind);
+    box.addEventListener('change', () => {
+      if (box.checked) visibleProductKinds.add(kind);
+      else visibleProductKinds.delete(kind);
+      for (const otherView of ['broad', 'bargain']) $(`#${otherView}-kind-${kind}`).checked = box.checked;
+      try { localStorage.setItem(PRODUCT_KINDS_KEY, JSON.stringify([...visibleProductKinds])); } catch (_) {}
+      renderDiscoveryResults();
+      renderBargainReview();
+    });
+  }
+}
 ['#broad-result-query', '#broad-result-set', '#broad-result-type'].forEach(selector => $(selector).addEventListener('input', renderDiscoveryResults));
 ['#broad-min-price', '#broad-max-price'].forEach(selector => $(selector).addEventListener('input', renderDiscoveryResults));
 $('#broad-price-clear').addEventListener('click', () => {

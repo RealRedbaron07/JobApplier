@@ -59,14 +59,22 @@
           <div class="toolbar candidate-filters">
             <label class="compact-control">Site<select id="broad-result-source"><option value="facebook" selected>Marketplace</option><option value="">All sites</option><option value="ebay">eBay</option></select></label>
             <label class="compact-control">Buying format<select id="broad-result-format"><option value="">Auctions + fixed price</option><option value="auction">Auctions</option><option value="bin">Buy Now / fixed price</option></select></label>
-            <label class="compact-control">Search results<input id="broad-result-query" class="search" placeholder="Filter any card, lot, condition or promotion"></label>
+            <label class="compact-control">Search results<input id="broad-result-query" class="search" placeholder="Filter any card, grade, condition or promotion"></label>
             <label class="compact-control">Set in title<input id="broad-result-set" class="search" placeholder="e.g. Evolving Skies"></label>
-            <label class="compact-control">Type in title<input id="broad-result-type" class="search" placeholder="e.g. PSA, lot, sealed"></label>
+            <label class="compact-control">Type in title<input id="broad-result-type" class="search" placeholder="e.g. PSA, sealed, promo"></label>
             <label class="compact-control price-filter">Min price<input id="broad-min-price" type="number" min="0" step="0.01" inputmode="decimal" placeholder="No minimum" aria-describedby="broad-price-help"></label>
             <label class="compact-control price-filter">Max price<input id="broad-max-price" type="number" min="0" step="0.01" inputmode="decimal" placeholder="No maximum" aria-describedby="broad-price-help"></label>
             <button class="button secondary small" id="broad-price-clear" type="button">Clear price</button>
           </div>
+          <fieldset class="product-kind-filter"><legend>Show product types. Uncheck to hide</legend><div>
+            <label><input id="broad-kind-single" type="checkbox" checked> Singles</label>
+            <label><input id="broad-kind-graded" type="checkbox" checked> Graded</label>
+            <label><input id="broad-kind-sealed" type="checkbox" checked> Sealed</label>
+            <label><input id="broad-kind-promo" type="checkbox" checked> Promos</label>
+            <label><input id="broad-kind-other" type="checkbox" checked> Other / unclear</label>
+          </div></fieldset>
           <p id="broad-price-help" class="detail-meta" role="status" aria-live="polite">Price includes reported shipping, before tax. Unknown totals are hidden while a price range is set. Marketplace listings count as fixed price. Set and type match listing titles only; check the seller page.</p>
+          <p class="detail-meta">Product types are estimated from listing titles. Promo means a promo card, not a seller discount. Check the seller page if a type looks wrong.</p>
           <p class="detail-meta">Prices are copied from seller search cards. eBay total adds reported shipping; Marketplace uses the shown asking price. Your reference is entered by you, never matched automatically. Percentage = (reference − displayed total) ÷ reference. Verify the exact card and seller price before buying.</p>
           <div class="table-wrap"><table><thead><tr><th>Listing</th><th>Why it surfaced</th><th>Ask / bid + shipping</th><th>Potential bargain</th><th>Condition</th><th>Seen</th><th></th></tr></thead><tbody id="broad-results-table"><tr><td colspan="7" class="empty">Click Scan all cards automatically to collect listings here.</td></tr></tbody></table></div>
         </article>
@@ -105,6 +113,13 @@
           <p>Only listings below a reference you entered appear here. Set or change references in Browse cards. The percentage is against your reference, not an independently verified market price. Open the seller listing before buying.</p>
           <div id="bargain-review-counts" class="bargain-review-counts" role="status" aria-live="polite">Loading saved results…</div>
           <div class="toolbar"><label class="compact-control">Site<select id="bargain-source"><option value="facebook" selected>Marketplace</option><option value="">All sites</option><option value="ebay">eBay</option></select></label><button class="button secondary small" data-view-link="discover">Browse all scan results</button></div>
+          <fieldset class="product-kind-filter"><legend>Show product types. Uncheck to hide</legend><div>
+            <label><input id="bargain-kind-single" type="checkbox" checked> Singles</label>
+            <label><input id="bargain-kind-graded" type="checkbox" checked> Graded</label>
+            <label><input id="bargain-kind-sealed" type="checkbox" checked> Sealed</label>
+            <label><input id="bargain-kind-promo" type="checkbox" checked> Promos</label>
+            <label><input id="bargain-kind-other" type="checkbox" checked> Other / unclear</label>
+          </div></fieldset>
         </article>
         <article class="panel"><div class="panel-head"><div><p class="eyebrow">BELOW YOUR REFERENCE</p><h3>Compared bargains</h3></div></div><div id="bargain-reviewed" class="bargain-review-list"></div></article>
       </section>

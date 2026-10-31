@@ -292,6 +292,9 @@ def test_bargain_review_has_clear_navigation_and_saved_result_sections(snipe_cli
                    'id="bargain-reviewed"'):
         assert marker in page
     assert 'id="bargain-candidates"' not in page
+    for view in ('broad', 'bargain'):
+        for kind in ('single', 'graded', 'sealed', 'promo', 'other'):
+            assert f'id="{view}-kind-{kind}"' in page
 
 
 def test_budget_survives_target_edits_and_can_be_cleared(snipe_client):

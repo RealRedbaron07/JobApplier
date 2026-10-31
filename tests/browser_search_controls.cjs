@@ -408,6 +408,34 @@ test('Bargain review includes every positive comparison without showing unreview
   assert.doesNotMatch(page.element('#bargain-reviewed').innerHTML, /upper-boundary|unknown-shipping/);
 });
 
+test('product type checkboxes hide multiple categories in Browse and Bargain review', async () => {
+  const page = priceFilterPage(true);
+  await page.context.loadDiscoveryResults();
+  vm.runInContext(`discoveryResultData.listings.push(
+    {...discoveryResultData.listings[6], id: 7, listing_id: '7', title: 'Pokemon sealed booster box'},
+    {...discoveryResultData.listings[6], id: 8, listing_id: '8', title: 'Pikachu promo card'},
+    {...discoveryResultData.listings[6], id: 9, listing_id: '9', title: 'Charizard PSA 10 graded card'}
+  );
+  for (let id of [6, 7, 8, 9]) candidateReferences['facebook:' + id + ':CAD'] = 60;`, page.context);
+  page.element('#broad-result-source').value = 'facebook';
+  page.element('#bargain-source').value = 'facebook';
+  page.context.renderDiscoveryResults();
+  page.context.renderBargainReview();
+  assert.equal((page.element('#bargain-reviewed').innerHTML.match(/class="bargain-card /g) || []).length, 4);
+  page.element('#broad-kind-sealed').checked = false;
+  page.element('#broad-kind-sealed').listeners.change();
+  page.element('#bargain-kind-promo').checked = false;
+  page.element('#bargain-kind-promo').listeners.change();
+  assert.equal(page.element('#bargain-kind-sealed').checked, false);
+  assert.equal(page.element('#broad-kind-promo').checked, false);
+  assert.match(page.element('#broad-results-table').innerHTML, /Pikachu card|Charizard PSA/);
+  assert.doesNotMatch(page.element('#broad-results-table').innerHTML, /sealed booster box|Pikachu promo card/);
+  assert.equal((page.element('#bargain-reviewed').innerHTML.match(/class="bargain-card /g) || []).length, 2);
+  assert.doesNotMatch(page.element('#bargain-reviewed').innerHTML, /sealed booster box|Pikachu promo card/);
+  assert.deepEqual(JSON.parse(page.storage.get('cardsnipe_visible_product_kinds_v1')).sort(), ['graded', 'other', 'single']);
+  assert.equal(page.requests.length, 1, 'Product type filtering must not start a scan');
+});
+
 test('invalid and reversed price ranges show an error instead of misleading results', async () => {
   const page = priceFilterPage();
   await page.context.loadDiscoveryResults();
