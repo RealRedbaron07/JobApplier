@@ -412,7 +412,6 @@ function renderDiscoveryResults() {
   bindDismiss('#broad-results-table', loadDiscoveryResults);
 }
 
-let bargainLimit = 30;
 function bargainCard(row) {
   const discount = candidateDiscount(row);
   const earlier = row.discovery_at && row.discovery_at !== discoveryResultData.scan?.started;
@@ -426,22 +425,13 @@ function bargainCard(row) {
 }
 function renderBargainReview() {
   const source = $('#bargain-source').value;
-  const rows = discoveryResultData.listings.filter(row => !source || row.source === source);
-  const compared = rows.filter(row => candidateDiscount(row) > 0).sort((a, b) => candidateDiscount(b) - candidateDiscount(a));
-  const others = rows.filter(row => !(candidateDiscount(row) > 0)).sort((a, b) => {
-    const priority = row => Number(row.discovery_at === discoveryResultData.scan?.started) * 2
-      + Number(row.total_price != null && !(row.source === 'facebook' && row.price != null && row.price <= 1));
-    return priority(b) - priority(a);
-  });
+  const compared = discoveryResultData.listings.filter(row => (!source || row.source === source) && candidateDiscount(row) > 0)
+    .sort((a, b) => candidateDiscount(b) - candidateDiscount(a));
   const allCompared = discoveryResultData.listings.filter(row => candidateDiscount(row) > 0).length;
   $('#bargain-badge').textContent = `${allCompared} potential bargains`;
-  $('#bargain-review-counts').innerHTML = `<span><strong>${compared.length}</strong> below your reference</span><span><strong>${others.length}</strong> other saved candidates</span><span><strong>${rows.filter(row => row.source === 'facebook').length}</strong> Marketplace</span>`;
+  $('#bargain-review-counts').innerHTML = `<span><strong>${compared.length}</strong> below your reference for this site</span>`;
   $('#bargain-reviewed').innerHTML = compared.length ? compared.map(bargainCard).join('')
-    : '<div class="empty">No compared bargains yet. Check a listing below and enter your reference price to calculate its percentage.</div>';
-  $('#bargain-candidates').innerHTML = others.length ? others.slice(0, bargainLimit).map(bargainCard).join('')
-    : '<div class="empty">No other saved candidates for this site. Browse cards to scan again or change the site filter.</div>';
-  $('#bargain-more').hidden = others.length <= bargainLimit;
-  $('#bargain-more').textContent = `Show more candidates (${Math.min(30, Math.max(0, others.length - bargainLimit))} next)`;
+    : '<div class="empty">No listings below your reference for this site. Browse scan results and enter a checked reference price to compare a listing.</div>';
 }
 
 async function loadDiscoveryResults() {
@@ -528,11 +518,10 @@ function saveCandidateReference(event) {
   renderDiscoveryResults();
   renderBargainReview();
 }
-for (const selector of ['#broad-results-table', '#bargain-reviewed', '#bargain-candidates']) {
+for (const selector of ['#broad-results-table', '#bargain-reviewed']) {
   $(selector).addEventListener('change', saveCandidateReference);
 }
-$('#bargain-source').addEventListener('change', () => { bargainLimit = 30; renderBargainReview(); });
-$('#bargain-more').addEventListener('click', () => { bargainLimit += 30; renderBargainReview(); });
+$('#bargain-source').addEventListener('change', renderBargainReview);
 
 async function loadDiscover() {
   await Promise.all([loadDiscovery(), loadDiscoveryResults(), loadBroadStatus()]);
@@ -715,7 +704,7 @@ const REPLACED_ROOTS = {
   scans: ['#scans-table'],
   listings: ['#listings-table'],
   discover: ['#broad-results-table'],
-  bargains: ['#bargain-reviewed', '#bargain-candidates'],
+  bargains: ['#bargain-reviewed'],
 };
 
 function isTextField(el) {
