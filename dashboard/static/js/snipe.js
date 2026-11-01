@@ -360,7 +360,7 @@ function candidateComparisonText(row, discount = candidateDiscount(row)) {
     return 'Free / $1 may be a placeholder; confirm seller price';
   return row.total_price == null ? 'Total unknown; check shipping first' : 'Enter your reference to compare';
 }
-const candidateReferenceInput = row => `<label class="compact-control">Your reference (${esc(row.currency)})<input class="candidate-reference" data-reference="${esc(candidateKey(row))}" aria-label="Your reference price for ${esc(row.title)}" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="Enter price" value="${esc(candidateReferences[candidateKey(row)] ?? '')}"></label>`;
+const candidateReferenceInput = row => `<div class="reference-control"><label class="compact-control">Your reference (${esc(row.currency)})<input class="candidate-reference" data-reference="${esc(candidateKey(row))}" aria-label="Your reference price for ${esc(row.title)}" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="Enter price" value="${esc(candidateReferences[candidateKey(row)] ?? '')}"></label><button class="button secondary small" type="button" data-compare="${esc(candidateKey(row))}">Compare</button></div>`;
 const PRODUCT_KINDS = ['single', 'graded', 'sealed', 'promo', 'other'];
 const PRODUCT_LABELS = {single: 'Single', graded: 'Graded', sealed: 'Sealed', promo: 'Promo', other: 'Other / unclear'};
 const PRODUCT_KINDS_KEY = 'cardsnipe_visible_product_kinds_v1';
@@ -435,7 +435,7 @@ function bargainCard(row) {
   const earlier = row.discovery_at && row.discovery_at !== discoveryResultData.scan?.started;
   const askLabel = row.listing_type === 'auction' ? 'Current bid' : 'Seller ask';
   const shippingLabel = row.shipping == null ? 'Shipping not reported' : `Shipping ${money(row.currency, row.shipping)}`;
-  const setNotes = matchingSetTrends(row.title).map(trend => `<span class="set-trend-note">Title match: ${esc(trend.set_name)} · ${esc(trend.metric)} ${trend.change_pct > 0 ? '+' : ''}${trend.change_pct.toFixed(1)}% (${esc(trend.first_date)} to ${esc(trend.latest_date)}, ${esc(trend.source)} import). Set movement does not price this card.</span>`).join('');
+  const setNotes = discount > 0 ? matchingSetTrends(row.title).map(trend => `<span class="set-trend-note">Title match: ${esc(trend.set_name)} · ${esc(trend.metric)} ${trend.change_pct > 0 ? '+' : ''}${trend.change_pct.toFixed(1)}% (${esc(trend.first_date)} to ${esc(trend.latest_date)}, ${esc(trend.source)} import). Set movement does not price this card.</span>`).join('') : '';
   return `<article class="bargain-card ${discount > 0 ? 'positive' : ''}">
     <header><div><h4>${esc(row.title)}</h4><span class="sub">${esc(row.source === 'facebook' ? 'Marketplace' : 'eBay')} · ${PRODUCT_LABELS[productKind(row)]} · ${row.listing_type === 'auction' ? 'Auction, bid can rise' : 'Fixed price'}${row.condition ? ` · ${esc(row.condition)}` : ''}${earlier ? ` · Earlier scan ${esc(new Date(row.discovery_at).toLocaleString())}` : ''}</span></div>${discount > 0 ? `<span class="bargain-percent">${discount.toFixed(1)}% below</span>` : ''}</header>
     <div class="bargain-actions"><div><strong>${esc(listingPrice(row))}</strong><span class="sub">${askLabel} ${esc(money(row.currency, row.price))} · ${esc(shippingLabel)}${row.source === 'facebook' ? ' · travel and delivery extra' : ''}</span></div>${candidateReferenceInput(row)}<a class="button secondary small" href="${esc(row.url)}" target="_blank" rel="noopener">Open seller listing ↗</a></div>
@@ -479,15 +479,24 @@ $('#set-trend-form').addEventListener('submit', async event => {
   } catch (err) { $('#set-trend-status').textContent = err.message; }
   finally { button.disabled = false; }
 });
+let bargainLimit = 20;
 function renderBargainReview() {
   const source = $('#bargain-source').value;
-  const compared = discoveryResultData.listings.filter(row => productKindVisible(row) && (!source || row.source === source) && candidateDiscount(row) > 0)
+  const rows = discoveryResultData.listings.filter(row => productKindVisible(row) && (!source || row.source === source));
+  const compared = rows.filter(row => candidateDiscount(row) > 0)
     .sort((a, b) => candidateDiscount(b) - candidateDiscount(a));
+  const unchecked = rows.filter(row => !(candidateDiscount(row) > 0))
+    .sort((a, b) => Number(b.discovery_at === discoveryResultData.scan?.started) - Number(a.discovery_at === discoveryResultData.scan?.started));
   const allCompared = discoveryResultData.listings.filter(row => productKindVisible(row) && candidateDiscount(row) > 0).length;
   $('#bargain-badge').textContent = `${allCompared} potential bargains`;
-  $('#bargain-review-counts').innerHTML = `<span><strong>${compared.length}</strong> below your reference for this site</span>`;
+  $('#bargain-review-counts').innerHTML = `<span><strong>${compared.length}</strong> below your reference for this site</span><span><strong>${unchecked.length}</strong> need a price check or are above your reference</span>`;
   $('#bargain-reviewed').innerHTML = compared.length ? compared.map(bargainCard).join('')
-    : '<div class="empty">No listings below your reference for this site. Browse scan results and enter a checked reference price to compare a listing.</div>';
+    : '<div class="empty">No price-checked bargains for this site yet. Check a saved listing below against a current reference price.</div>';
+  $('#bargain-check-count').textContent = `(${unchecked.length})`;
+  $('#bargain-candidates').innerHTML = unchecked.length ? unchecked.slice(0, bargainLimit).map(bargainCard).join('')
+    : '<div class="empty">No unchecked listings for this site. Change the site or product filters, or scan again.</div>';
+  $('#bargain-more').hidden = unchecked.length <= bargainLimit;
+  $('#bargain-more').textContent = `Show more listings (${Math.min(20, unchecked.length - bargainLimit)} next)`;
 }
 
 async function loadDiscoveryResults() {
@@ -588,10 +597,16 @@ function saveCandidateReference(event) {
   renderDiscoveryResults();
   renderBargainReview();
 }
-for (const selector of ['#broad-results-table', '#bargain-reviewed']) {
+for (const selector of ['#broad-results-table', '#bargain-reviewed', '#bargain-candidates']) {
   $(selector).addEventListener('change', saveCandidateReference);
+  $(selector).addEventListener('click', event => {
+    if (!event.target?.dataset?.compare) return;
+    const input = event.target.parentElement?.querySelector('.candidate-reference');
+    if (input) saveCandidateReference({target: input});
+  });
 }
-$('#bargain-source').addEventListener('change', renderBargainReview);
+$('#bargain-source').addEventListener('change', () => { bargainLimit = 20; renderBargainReview(); });
+$('#bargain-more').addEventListener('click', () => { bargainLimit += 20; renderBargainReview(); });
 
 async function loadDiscover() {
   await Promise.all([loadDiscovery(), loadDiscoveryResults(), loadBroadStatus()]);
@@ -774,7 +789,7 @@ const REPLACED_ROOTS = {
   scans: ['#scans-table'],
   listings: ['#listings-table'],
   discover: ['#broad-results-table'],
-  bargains: ['#bargain-reviewed', '#set-trend-list'],
+  bargains: ['#bargain-reviewed', '#bargain-candidates', '#set-trend-list'],
 };
 
 function isTextField(el) {

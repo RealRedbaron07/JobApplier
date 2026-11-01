@@ -375,26 +375,30 @@ test('Bargain review shows only positive comparisons and seller links', async ()
   const page = priceFilterPage(true);
   await page.context.loadDiscoveryResults();
   assert.equal(page.element('#bargain-badge').textContent, '0 potential bargains');
-  assert.match(page.element('#bargain-reviewed').innerHTML, /No listings below your reference/);
+  assert.match(page.element('#bargain-reviewed').innerHTML, /No price-checked bargains/);
   page.element('#bargain-source').value = 'facebook';
   page.element('#bargain-source').listeners.change();
   assert.doesNotMatch(page.element('#bargain-reviewed').innerHTML, /Pikachu card|free-pickup/);
+  assert.match(page.element('#bargain-candidates').innerHTML, /Pikachu card/);
   page.element('#broad-results-table').listeners.change({target: {dataset: {reference: 'facebook:6:CAD'}, value: '20'}});
   assert.equal(page.element('#bargain-badge').textContent, '0 potential bargains');
   assert.doesNotMatch(page.element('#bargain-reviewed').innerHTML, /Pikachu card/);
-  page.element('#broad-results-table').listeners.change({target: {dataset: {reference: 'facebook:6:CAD'}, value: '60'}});
+  page.element('#bargain-candidates').listeners.click({target: {dataset: {compare: 'facebook:6:CAD'},
+    parentElement: {querySelector() { return {dataset: {reference: 'facebook:6:CAD'}, value: '60'}; }}}});
   assert.equal(page.element('#bargain-badge').textContent, '1 potential bargains');
   assert.match(page.element('#bargain-reviewed').innerHTML, /Pikachu card/);
   assert.match(page.element('#bargain-reviewed').innerHTML, /50\.0% below/);
   assert.match(page.element('#bargain-reviewed').innerHTML, /Open seller listing/);
   assert.doesNotMatch(page.element('#bargain-reviewed').innerHTML, /free-pickup|shipping-included/);
+  assert.doesNotMatch(page.element('#bargain-candidates').innerHTML, /Pikachu card/);
   page.element('#bargain-reviewed').listeners.change({target: {dataset: {reference: 'facebook:6:CAD'}, value: ''}});
   assert.equal(page.element('#bargain-badge').textContent, '0 potential bargains');
   assert.doesNotMatch(page.element('#bargain-reviewed').innerHTML, /Pikachu card/);
+  assert.match(page.element('#bargain-candidates').innerHTML, /Pikachu card/);
   assert.equal(page.requests.length, 1, 'Reviewing saved bargains must not start a scan');
 });
 
-test('Bargain review includes every positive comparison without showing unreviewed candidates', async () => {
+test('Bargain review keeps positive comparisons separate from its price-check queue', async () => {
   const page = priceFilterPage();
   await page.context.loadDiscoveryResults();
   vm.runInContext(`for (let id = 6; id < 38; id++)
@@ -406,6 +410,7 @@ test('Bargain review includes every positive comparison without showing unreview
   page.context.renderBargainReview();
   assert.equal((page.element('#bargain-reviewed').innerHTML.match(/class="bargain-card /g) || []).length, 33);
   assert.doesNotMatch(page.element('#bargain-reviewed').innerHTML, /upper-boundary|unknown-shipping/);
+  assert.match(page.element('#bargain-candidates').innerHTML, /upper-boundary|unknown-shipping/);
 });
 
 test('product type checkboxes hide multiple categories in Browse and Bargain review', async () => {

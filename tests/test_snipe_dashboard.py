@@ -291,7 +291,8 @@ def test_bargain_review_has_clear_navigation_and_saved_result_sections(snipe_cli
     for marker in ('data-view="bargains"', 'id="view-bargains"', 'data-view-link="bargains"',
                    'id="bargain-reviewed"'):
         assert marker in page
-    assert 'id="bargain-candidates"' not in page
+    assert 'id="bargain-candidates"' in page
+    assert 'id="bargain-price-check"' in page
     for view in ('broad', 'bargain'):
         for kind in ('single', 'graded', 'sealed', 'promo', 'other'):
             assert f'id="{view}-kind-{kind}"' in page
