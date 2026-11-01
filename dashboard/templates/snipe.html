@@ -121,6 +121,16 @@
             <label><input id="bargain-kind-other" type="checkbox" checked> Other / unclear</label>
           </div></fieldset>
         </article>
+        <article class="panel set-trends-panel">
+          <div class="panel-head"><div><p class="eyebrow">SET CONTEXT</p><h3>Set price history you imported</h3></div></div>
+          <p class="detail-meta">Compare the same set, source, metric and unit across dates. A rising set does not prove an individual listing is underpriced. No market app or paid API is contacted.</p>
+          <div class="table-wrap"><table><thead><tr><th>Set</th><th>Source / metric</th><th>First</th><th>Latest</th><th>Change</th></tr></thead><tbody id="set-trend-list"><tr><td colspan="5" class="empty">No set history imported.</td></tr></tbody></table></div>
+          <details class="set-trend-import"><summary>Import set price history from an app</summary>
+            <p class="detail-meta">Paste CSV with columns <code>date,source,set_name,metric,unit,value</code>. Use the same metric and unit from the same source on each date, such as a set index in POINTS or booster box price in USD. Up to 500 rows per import. Reimporting the same date corrects its value.</p>
+            <form id="set-trend-form"><label>Set history CSV<textarea id="set-trend-csv" rows="6" maxlength="100000" placeholder="date,source,set_name,metric,unit,value&#10;2026-10-01,Your App,Evolving Skies,Set index,POINTS,100&#10;2026-10-31,Your App,Evolving Skies,Set index,POINTS,112"></textarea></label><button class="button secondary" type="submit">Save local set history</button></form>
+            <p class="detail-meta" id="set-trend-status" role="status" aria-live="polite"></p>
+          </details>
+        </article>
         <article class="panel"><div class="panel-head"><div><p class="eyebrow">BELOW YOUR REFERENCE</p><h3>Compared bargains</h3></div></div><div id="bargain-reviewed" class="bargain-review-list"></div></article>
       </section>
 

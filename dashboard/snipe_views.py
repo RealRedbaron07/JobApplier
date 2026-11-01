@@ -586,6 +586,21 @@ def snipe_collection():
     })
 
 
+@snipe_bp.get("/api/snipe/set-trends")
+def snipe_set_trends():
+    return jsonify({"series": get_store().set_trends(), "local_only": True})
+
+
+@snipe_bp.post("/api/snipe/set-trends/import")
+def snipe_set_trends_import():
+    from cardsnipe.set_trends import parse_set_prices_csv
+
+    entries = parse_set_prices_csv(_payload().get("csv"))
+    count = get_store().import_set_prices(entries)
+    return jsonify({"message": f"Saved {count} local set observations.", "series": get_store().set_trends(),
+                    "local_only": True})
+
+
 @snipe_bp.post("/api/snipe/collection/import")
 def snipe_collection_import():
     from cardsnipe.collectr import parse_showcase_import

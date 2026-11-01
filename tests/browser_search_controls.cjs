@@ -436,6 +436,40 @@ test('product type checkboxes hide multiple categories in Browse and Bargain rev
   assert.equal(page.requests.length, 1, 'Product type filtering must not start a scan');
 });
 
+test('a user-imported set trend appears only beside a title-matched compared bargain', async () => {
+  const page = priceFilterPage(true);
+  await page.context.loadDiscoveryResults();
+  vm.runInContext(`discoveryResultData.listings[6].title = 'Pikachu Evolving Skies card';
+    setTrendData = [{source:'Market App', set_name:'Evolving Skies', metric:'Set index', unit:'POINTS',
+      observations:2, first_date:'2026-10-01', first_value:100,
+      latest_date:'2026-10-31', latest_value:112, change_pct:12}];`, page.context);
+  page.element('#bargain-source').value = 'facebook';
+  page.element('#broad-results-table').listeners.change({target: {dataset: {reference: 'facebook:6:CAD'}, value: '60'}});
+  assert.match(page.element('#bargain-reviewed').innerHTML, /Set index \+12\.0%/);
+  assert.match(page.element('#bargain-reviewed').innerHTML, /Set movement does not price this card/);
+  page.element('#bargain-reviewed').listeners.change({target: {dataset: {reference: 'facebook:6:CAD'}, value: ''}});
+  assert.doesNotMatch(page.element('#bargain-reviewed').innerHTML, /Set index/);
+  assert.equal(page.requests.length, 1, 'Set context must not start a browser scan');
+});
+
+test('set history import uses only the local API and displays dated changes', async () => {
+  const series = [{source:'Market App', set_name:'Evolving Skies', metric:'Set index', unit:'POINTS',
+    observations:2, first_date:'2026-10-01', first_value:100,
+    latest_date:'2026-10-31', latest_value:112, change_pct:12}];
+  const page = boot({respond(url) {
+    assert.match(url, /^\/api\/snipe\/set-trends(?:\/import)?$/);
+    return {series, message:'Saved 2 local set observations.'};
+  }});
+  await page.context.loadSetTrends();
+  assert.match(page.element('#set-trend-list').innerHTML, /Evolving Skies/);
+  assert.match(page.element('#set-trend-list').innerHTML, /\+12\.0%/);
+  page.element('#set-trend-csv').value = 'date,source,set_name,metric,unit,value\n';
+  await page.element('#set-trend-form').listeners.submit({preventDefault() {}});
+  assert.equal(page.requests[1].url, '/api/snipe/set-trends/import');
+  assert.equal(page.requests[1].options.method, 'POST');
+  assert.equal(page.element('#set-trend-status').textContent, 'Saved 2 local set observations.');
+});
+
 test('invalid and reversed price ranges show an error instead of misleading results', async () => {
   const page = priceFilterPage();
   await page.context.loadDiscoveryResults();

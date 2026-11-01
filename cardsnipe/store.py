@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String, Text, UniqueConstraint, create_engine
+from sqlalchemy import Boolean, Column, Date, DateTime, Float, Integer, String, Text, UniqueConstraint, create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -133,6 +133,21 @@ class CollectionSnapshot(Base):
     unvalued_items = Column(Integer, default=0)
     total_cards = Column(Integer)
     total_graded = Column(Integer)
+
+
+class SetPriceObservation(Base):
+    """One user-imported set metric on one date, kept apart from listing prices."""
+
+    __tablename__ = "set_price_observations"
+    __table_args__ = (UniqueConstraint("source", "set_name", "metric", "unit", "observed_on"),)
+
+    id = Column(Integer, primary_key=True)
+    source = Column(String(100), nullable=False)
+    set_name = Column(String(100), nullable=False)
+    metric = Column(String(100), nullable=False)
+    unit = Column(String(12), nullable=False)
+    observed_on = Column(Date, nullable=False)
+    value = Column(Float, nullable=False)
 
 
 class ScanRun(Base):
@@ -391,6 +406,45 @@ class Store:
     def collection_history(self, limit: int = 90) -> list[CollectionSnapshot]:
         with self.session() as session:
             return session.query(CollectionSnapshot).order_by(CollectionSnapshot.synced_at.desc()).limit(limit).all()
+
+    # ── user-imported set price history ──────────────────────────────────
+    def import_set_prices(self, entries: list[dict]) -> int:
+        with self.session() as session:
+            existing = {(
+                row.source.casefold(), row.set_name.casefold(), row.metric.casefold(),
+                row.unit, row.observed_on,
+            ): row for row in session.query(SetPriceObservation).all()}
+            for entry in entries:
+                key = (entry["source"].casefold(), entry["set_name"].casefold(),
+                       entry["metric"].casefold(), entry["unit"], entry["observed_on"])
+                row = existing.get(key)
+                if row is None:
+                    row = SetPriceObservation(**entry)
+                    session.add(row)
+                    existing[key] = row
+                else:
+                    row.value = entry["value"]
+            session.commit()
+        return len(entries)
+
+    def set_trends(self) -> list[dict]:
+        with self.session() as session:
+            rows = session.query(SetPriceObservation).order_by(SetPriceObservation.observed_on).all()
+            grouped: dict[tuple, list[SetPriceObservation]] = {}
+            for row in rows:
+                key = (row.source.casefold(), row.set_name.casefold(), row.metric.casefold(), row.unit)
+                grouped.setdefault(key, []).append(row)
+            trends = []
+            for observations in grouped.values():
+                first, latest = observations[0], observations[-1]
+                trends.append({
+                    "source": latest.source, "set_name": latest.set_name, "metric": latest.metric,
+                    "unit": latest.unit, "observations": len(observations),
+                    "first_date": first.observed_on.isoformat(), "first_value": first.value,
+                    "latest_date": latest.observed_on.isoformat(), "latest_value": latest.value,
+                    "change_pct": round((latest.value / first.value - 1) * 100, 1) if len(observations) > 1 else None,
+                })
+            return sorted(trends, key=lambda row: (row["set_name"].casefold(), row["source"].casefold(), row["metric"].casefold()))
 
     # ── scan history ─────────────────────────────────────────────────────
     def record_scan(self, started: datetime, finished: datetime, sources: list[str], live: bool,

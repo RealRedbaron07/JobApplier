@@ -340,6 +340,7 @@ document.querySelectorAll('[data-discovery-query]').forEach(link => link.addEven
 }));
 
 let discoveryResultData = {listings: [], scan: null};
+let setTrendData = [];
 let completedBroadScan = null;
 let broadStatusInFlight = false;
 const CANDIDATE_REFERENCES_KEY = 'cardsnipe_candidate_references_v1';
@@ -434,12 +435,50 @@ function bargainCard(row) {
   const earlier = row.discovery_at && row.discovery_at !== discoveryResultData.scan?.started;
   const askLabel = row.listing_type === 'auction' ? 'Current bid' : 'Seller ask';
   const shippingLabel = row.shipping == null ? 'Shipping not reported' : `Shipping ${money(row.currency, row.shipping)}`;
+  const setNotes = matchingSetTrends(row.title).map(trend => `<span class="set-trend-note">Title match: ${esc(trend.set_name)} · ${esc(trend.metric)} ${trend.change_pct > 0 ? '+' : ''}${trend.change_pct.toFixed(1)}% (${esc(trend.first_date)} to ${esc(trend.latest_date)}, ${esc(trend.source)} import). Set movement does not price this card.</span>`).join('');
   return `<article class="bargain-card ${discount > 0 ? 'positive' : ''}">
     <header><div><h4>${esc(row.title)}</h4><span class="sub">${esc(row.source === 'facebook' ? 'Marketplace' : 'eBay')} · ${PRODUCT_LABELS[productKind(row)]} · ${row.listing_type === 'auction' ? 'Auction, bid can rise' : 'Fixed price'}${row.condition ? ` · ${esc(row.condition)}` : ''}${earlier ? ` · Earlier scan ${esc(new Date(row.discovery_at).toLocaleString())}` : ''}</span></div>${discount > 0 ? `<span class="bargain-percent">${discount.toFixed(1)}% below</span>` : ''}</header>
     <div class="bargain-actions"><div><strong>${esc(listingPrice(row))}</strong><span class="sub">${askLabel} ${esc(money(row.currency, row.price))} · ${esc(shippingLabel)}${row.source === 'facebook' ? ' · travel and delivery extra' : ''}</span></div>${candidateReferenceInput(row)}<a class="button secondary small" href="${esc(row.url)}" target="_blank" rel="noopener">Open seller listing ↗</a></div>
-    <span class="sub">${esc(candidateComparisonText(row, discount))}${earlier ? ' · Confirm availability and current price' : ''}</span>
+    <span class="sub">${esc(candidateComparisonText(row, discount))}${earlier ? ' · Confirm availability and current price' : ''}</span>${setNotes}
   </article>`;
 }
+function matchingSetTrends(title) {
+  const normalized = ` ${String(title || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()} `;
+  const matches = setTrendData.filter(trend => trend.change_pct != null &&
+    normalized.includes(` ${trend.set_name.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()} `));
+  const longest = Math.max(0, ...matches.map(trend => trend.set_name.length));
+  return matches.filter(trend => trend.set_name.length === longest);
+}
+function renderSetTrends() {
+  const rows = [...setTrendData].sort((a, b) => (b.change_pct ?? -Infinity) - (a.change_pct ?? -Infinity));
+  $('#set-trend-list').innerHTML = rows.length ? rows.map(row => `<tr>
+    <td><strong>${esc(row.set_name)}</strong><span class="sub">${row.observations} dated observations</span></td>
+    <td>${esc(row.source)}<span class="sub">${esc(row.metric)} · ${esc(row.unit)}</span></td>
+    <td>${esc(row.first_value.toFixed(2))} ${esc(row.unit)}<span class="sub">${esc(row.first_date)}</span></td>
+    <td>${esc(row.latest_value.toFixed(2))} ${esc(row.unit)}<span class="sub">${esc(row.latest_date)}</span></td>
+    <td>${row.change_pct == null ? 'Need a second date' : `${row.change_pct > 0 ? '+' : ''}${row.change_pct.toFixed(1)}%`}</td>
+  </tr>`).join('') : '<tr><td colspan="5" class="empty">No set history imported. Paste two or more dated observations for the same set and metric.</td></tr>';
+}
+async function loadSetTrends() {
+  const data = await api('/api/snipe/set-trends');
+  setTrendData = data.series;
+  renderSetTrends();
+  renderBargainReview();
+}
+$('#set-trend-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const button = $('#set-trend-form button[type="submit"]');
+  button.disabled = true;
+  $('#set-trend-status').textContent = 'Saving local set history…';
+  try {
+    const data = await api('/api/snipe/set-trends/import', {method: 'POST', body: JSON.stringify({csv: $('#set-trend-csv').value})});
+    setTrendData = data.series;
+    renderSetTrends();
+    renderBargainReview();
+    $('#set-trend-status').textContent = data.message;
+  } catch (err) { $('#set-trend-status').textContent = err.message; }
+  finally { button.disabled = false; }
+});
 function renderBargainReview() {
   const source = $('#bargain-source').value;
   const compared = discoveryResultData.listings.filter(row => productKindVisible(row) && (!source || row.source === source) && candidateDiscount(row) > 0)
@@ -701,7 +740,7 @@ function bindDismiss(root, reload) {
 }
 
 // ── wiring ──────────────────────────────────────────────────────────────────
-const LOADERS = {discover: loadDiscover, bargains: loadDiscoveryResults, collection: loadCollection, overview: loadOverview, deals: loadDeals, bids: loadBids, values: loadValues, watchlist: loadWatchlist, scans: loadScans, listings: loadListings};
+const LOADERS = {discover: loadDiscover, bargains: async () => Promise.all([loadDiscoveryResults(), loadSetTrends()]), collection: loadCollection, overview: loadOverview, deals: loadDeals, bids: loadBids, values: loadValues, watchlist: loadWatchlist, scans: loadScans, listings: loadListings};
 
 async function refreshAll() {
   const failed = [];
@@ -735,7 +774,7 @@ const REPLACED_ROOTS = {
   scans: ['#scans-table'],
   listings: ['#listings-table'],
   discover: ['#broad-results-table'],
-  bargains: ['#bargain-reviewed'],
+  bargains: ['#bargain-reviewed', '#set-trend-list'],
 };
 
 function isTextField(el) {
