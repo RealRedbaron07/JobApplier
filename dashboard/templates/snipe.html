@@ -110,7 +110,7 @@
       <section class="view" id="view-bargains">
         <article class="panel bargain-review-head">
           <p class="eyebrow">YOUR REVIEW QUEUE</p><h2>Potential bargains</h2>
-          <p>Compared bargains appear only after you check a listing against a reference price. Use the price-check queue below to do that here. The percentage is against your reference, not a verified market price.</p>
+          <p>Broad scans check up to 12 exact, ungraded singles against TCGplayer in a regular browser and convert USD with the Bank of Canada rate. Possible bargains appear here automatically. Condition, shipping, taxes and availability still need your review. You can enter your own reference below for other listings.</p>
           <div id="bargain-review-counts" class="bargain-review-counts" role="status" aria-live="polite">Loading saved results…</div>
           <div class="toolbar"><label class="compact-control">Site<select id="bargain-source"><option value="facebook" selected>Marketplace</option><option value="">All sites</option><option value="ebay">eBay</option></select></label><button class="button secondary small" data-view-link="discover">Browse all scan results</button></div>
           <fieldset class="product-kind-filter"><legend>Show product types. Uncheck to hide</legend><div>
@@ -121,10 +121,10 @@
             <label><input id="bargain-kind-other" type="checkbox" checked> Other / unclear</label>
           </div></fieldset>
         </article>
-        <article class="panel"><div class="panel-head"><div><p class="eyebrow">BELOW YOUR REFERENCE</p><h3>Compared bargains</h3></div></div><div id="bargain-reviewed" class="bargain-review-list"></div></article>
+        <article class="panel"><div class="panel-head"><div><p class="eyebrow">BELOW REFERENCE PRICE</p><h3>Possible bargains</h3></div></div><div id="bargain-reviewed" class="bargain-review-list"></div></article>
         <details class="panel bargain-check-panel" id="bargain-price-check" open>
           <summary>Price-check saved listings <span id="bargain-check-count"></span></summary>
-          <p class="detail-meta">These are unverified leads. Check the exact card, condition, seller price and shipping, then enter a current reference price. Only a positive comparison moves into Compared bargains.</p>
+          <p class="detail-meta">These are unverified leads. Check the exact card, condition, seller price and shipping, then enter a current reference price. Only a positive comparison moves into Possible bargains.</p>
           <div id="bargain-candidates" class="bargain-review-list"></div>
           <button class="button secondary small" id="bargain-more" type="button" hidden>Show more listings</button>
         </details>

@@ -128,6 +128,22 @@ def test_broad_scan_deduplicates_and_preserves_routes_without_fake_discount_math
     assert rows[0].savings_pct is None and rows[0].market_value is None
 
 
+def test_broad_scan_prices_exact_single_without_a_paid_api(browser_scan, monkeypatch):
+    settings, store, _ = browser_scan
+    card = listing("facebook", title="Lugia VSTAR 139/195 Silver Tempest", price=5, shipping=0)
+    monkeypatch.setattr(discovery.FacebookMarketplace, "find", lambda *a, **kw: [card])
+    monkeypatch.setattr(discovery, "bank_of_canada_usd_cad", lambda browser: 1.4)
+    monkeypatch.setattr(discovery, "tcgplayer_market", lambda browser, title: {"price": 10, "name": "Lugia VSTAR"})
+    report = discovery.DiscoveryScanner(settings, store).scan("facebook")
+    row = store.discovery_results()[0][0]
+    assert report["priced"] == report["bargains"] == 1
+    assert row.market_value == 14 and row.savings_pct == pytest.approx((14 - 5) / 14 * 100)
+    assert row.matched_target is None and store.recent_deals() == []
+    assert row.value_source.startswith("TCGplayer browser")
+    store.revalue(lambda listing: None)
+    assert store.discovery_results()[0][0].market_value == 14
+
+
 def test_one_blocked_source_does_not_repeat_or_discard_other_source_results(browser_scan, monkeypatch):
     settings, store, _ = browser_scan
     attempts = []

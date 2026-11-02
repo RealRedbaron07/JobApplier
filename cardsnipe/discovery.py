@@ -10,8 +10,10 @@ from datetime import datetime, timezone
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from cardsnipe.browser import Browser, SourceUnavailable
+from cardsnipe.bargains import bank_of_canada_usd_cad, eligible, tcgplayer_market
 from cardsnipe.ebay import EbayWeb
 from cardsnipe.facebook import FacebookMarketplace
+from cardsnipe.matcher import Match
 from cardsnipe.watchlist import Target
 
 MAX_SEARCHES = 8
@@ -116,7 +118,7 @@ class DiscoveryScanner:
         browser = Browser(self.settings)
         ebay, facebook = EbayWeb(self.settings, browser), FacebookMarketplace(self.settings, browser)
         found, unavailable, errors, failures = {}, set(), [], {}
-        scanned = pages = new = saved = 0
+        scanned = pages = new = saved = priced = bargains = 0
         stopped = False
         try:
             for name, mode, query in plan:
@@ -164,13 +166,49 @@ class DiscoveryScanner:
                 row = self.store.record_listing(listing, None, discovery_at=started,
                                                 discovery_routes=entry["routes"], promotion=promotion_text(listing))
                 saved += int(not row.dismissed)
+            # shortcut: price at most 12 exact singles per scan; add a resumable queue if coverage becomes too small.
+            candidates = [entry["listing"] for entry in found.values()
+                          if entry["listing"].currency == "CAD" and eligible(entry["listing"].title)
+                          and entry["listing"].total_price is not None and entry["listing"].price > 1]
+            if candidates and not self.stop.is_set() and time.monotonic() < deadline:
+                try:
+                    fx = bank_of_canada_usd_cad(browser)
+                    if fx is None:
+                        errors.append("price check: Bank of Canada USD/CAD rate was not readable; no comparisons made")
+                    else:
+                        for listing in candidates[:12]:
+                            if self.stop.is_set() or time.monotonic() >= deadline:
+                                break
+                            self.progress(message=f"Checking exact card prices: {priced} priced so far…",
+                                          priced=priced, bargains=bargains)
+                            if self.stop.wait(PAGE_INTERVAL_SECONDS):
+                                break
+                            try:
+                                product = tcgplayer_market(browser, listing.title)
+                                if not product:
+                                    continue
+                                value = round(product["price"] * fx, 2)
+                                match = Match(Target(name="Broad browser price check", keywords=[], use_market=False),
+                                              listing, listing.total_price, 0, None, cap=0,
+                                              market_value=value, value_source=f"TCGplayer browser · BoC FX {fx:g}",
+                                              value_bucket="raw")
+                                self.store.record_listing(listing, match, discovery_at=started,
+                                                          discovery_routes=found[listing.key]["routes"],
+                                                          promotion=promotion_text(listing))
+                                priced += 1
+                                bargains += int(match.under_value_pct > 0)
+                            except Exception as exc:
+                                errors.append(f"price check for {listing.title!r}: {str(exc).splitlines()[0]}")
+                except Exception as exc:
+                    errors.append(f"price check: {str(exc).splitlines()[0]}")
         finally:
             browser.quit()
             self.store.record_scan(started=started, finished=datetime.now(timezone.utc),
                                    sources=sorted({name for name, _, _ in plan}), live=False,
-                                   scanned=scanned, new_listings=new, deals=0, regrade_deals=0,
+                                   scanned=scanned, new_listings=new, deals=bargains, regrade_deals=0,
                                    bids_scheduled=0, errors=errors, kind="broad", budget=None,
                                    currency=self.settings.ebay_currency)
-        return {"message": f"{'Stopped' if stopped else 'Finished'}: {saved} candidates saved from {pages} searches. {len(errors)} source errors.",
+        stopped = stopped or self.stop.is_set()
+        return {"message": f"{'Stopped' if stopped else 'Finished'}: {saved} candidates saved from {pages} searches. {priced} exact singles priced, {bargains} possible bargains. {len(errors)} errors.",
                 "scanned": scanned, "new_listings": new, "candidates": saved, "pages_done": pages,
-                "page_limit": len(plan), "errors": errors, "stopped": stopped}
+                "page_limit": len(plan), "priced": priced, "bargains": bargains, "errors": errors, "stopped": stopped}

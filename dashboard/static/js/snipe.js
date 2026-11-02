@@ -349,16 +349,18 @@ try { candidateReferences = JSON.parse(localStorage.getItem(CANDIDATE_REFERENCES
 const candidateKey = row => `${row.source}:${row.listing_id}:${row.currency}`;
 function candidateDiscount(row) {
   if (row.source === 'facebook' && row.price != null && row.price <= 1) return null;
-  const reference = Number(candidateReferences[candidateKey(row)]);
+  const manual = Number(candidateReferences[candidateKey(row)]);
+  const reference = Number.isFinite(manual) && manual > 0 ? manual : Number(row.market_value);
   return Number.isFinite(reference) && reference > 0 && Number.isFinite(row.total_price)
     ? (reference - row.total_price) / reference * 100 : null;
 }
 function candidateComparisonText(row, discount = candidateDiscount(row)) {
-  if (discount != null) return discount > 0 ? `Possible bargain: ${discount.toFixed(1)}% below your reference`
-    : discount < 0 ? `${Math.abs(discount).toFixed(1)}% above your reference` : 'At your reference';
+  const source = Number(candidateReferences[candidateKey(row)]) > 0 ? 'your reference' : `${row.value_source || 'market reference'} (condition and printing unverified)`;
+  if (discount != null) return discount > 0 ? `Possible bargain: ${discount.toFixed(1)}% below ${source}`
+    : discount < 0 ? `${Math.abs(discount).toFixed(1)}% above ${source}` : `At ${source}`;
   if (row.source === 'facebook' && row.price != null && row.price <= 1)
     return 'Free / $1 may be a placeholder; confirm seller price';
-  return row.total_price == null ? 'Total unknown; check shipping first' : 'Enter your reference to compare';
+  return row.total_price == null ? 'Total unknown; check shipping first' : 'No exact browser price found; enter your reference to compare';
 }
 const candidateReferenceInput = row => `<div class="reference-control"><label class="compact-control">Your reference (${esc(row.currency)})<input class="candidate-reference" data-reference="${esc(candidateKey(row))}" aria-label="Your reference price for ${esc(row.title)}" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="Enter price" value="${esc(candidateReferences[candidateKey(row)] ?? '')}"></label><button class="button secondary small" type="button" data-compare="${esc(candidateKey(row))}">Compare</button></div>`;
 const PRODUCT_KINDS = ['single', 'graded', 'sealed', 'promo', 'other'];
@@ -438,8 +440,8 @@ function bargainCard(row) {
   const setNotes = discount > 0 ? matchingSetTrends(row.title).map(trend => `<span class="set-trend-note">Title match: ${esc(trend.set_name)} · ${esc(trend.metric)} ${trend.change_pct > 0 ? '+' : ''}${trend.change_pct.toFixed(1)}% (${esc(trend.first_date)} to ${esc(trend.latest_date)}, ${esc(trend.source)} import). Set movement does not price this card.</span>`).join('') : '';
   return `<article class="bargain-card ${discount > 0 ? 'positive' : ''}">
     <header><div><h4>${esc(row.title)}</h4><span class="sub">${esc(row.source === 'facebook' ? 'Marketplace' : 'eBay')} · ${PRODUCT_LABELS[productKind(row)]} · ${row.listing_type === 'auction' ? 'Auction, bid can rise' : 'Fixed price'}${row.condition ? ` · ${esc(row.condition)}` : ''}${earlier ? ` · Earlier scan ${esc(new Date(row.discovery_at).toLocaleString())}` : ''}</span></div>${discount > 0 ? `<span class="bargain-percent">${discount.toFixed(1)}% below</span>` : ''}</header>
-    <div class="bargain-actions"><div><strong>${esc(listingPrice(row))}</strong><span class="sub">${askLabel} ${esc(money(row.currency, row.price))} · ${esc(shippingLabel)}${row.source === 'facebook' ? ' · travel and delivery extra' : ''}</span></div>${candidateReferenceInput(row)}<a class="button secondary small" href="${esc(row.url)}" target="_blank" rel="noopener">Open seller listing ↗</a></div>
-    <span class="sub">${esc(candidateComparisonText(row, discount))}${earlier ? ' · Confirm availability and current price' : ''}</span>${setNotes}
+    <div class="bargain-actions"><div><strong>${esc(listingPrice(row))}</strong><span class="sub">${askLabel} ${esc(money(row.currency, row.price))} · ${esc(shippingLabel)}${row.source === 'facebook' ? ' · travel and delivery extra' : ''}</span></div>${candidateReferenceInput(row)}<a class="button secondary small" href="${esc(row.url)}" target="_blank" rel="noopener">Open seller listing ↗</a>${row.market_value ? `<a class="button secondary small" href="https://www.tcgplayer.com/search/pokemon/product?productLineName=pokemon&q=${encodeURIComponent(row.title)}" target="_blank" rel="noopener">Check TCGplayer search ↗</a>` : ''}</div>
+    <span class="sub">${esc(candidateComparisonText(row, discount))}${row.market_value ? ` · Reference ${esc(money(row.currency, row.market_value))}` : ''}${earlier ? ' · Confirm availability and current price' : ''}</span>${setNotes}
   </article>`;
 }
 function matchingSetTrends(title) {
@@ -489,9 +491,9 @@ function renderBargainReview() {
     .sort((a, b) => Number(b.discovery_at === discoveryResultData.scan?.started) - Number(a.discovery_at === discoveryResultData.scan?.started));
   const allCompared = discoveryResultData.listings.filter(row => productKindVisible(row) && candidateDiscount(row) > 0).length;
   $('#bargain-badge').textContent = `${allCompared} potential bargains`;
-  $('#bargain-review-counts').innerHTML = `<span><strong>${compared.length}</strong> below your reference for this site</span><span><strong>${unchecked.length}</strong> need a price check or are above your reference</span>`;
+  $('#bargain-review-counts').innerHTML = `<span><strong>${compared.length}</strong> possible bargains for this site</span><span><strong>${unchecked.length}</strong> unpriced or above reference</span>`;
   $('#bargain-reviewed').innerHTML = compared.length ? compared.map(bargainCard).join('')
-    : '<div class="empty">No price-checked bargains for this site yet. Check a saved listing below against a current reference price.</div>';
+    : '<div class="empty">No positive exact-card comparisons yet. Run a new browser scan or check an unpriced listing below.</div>';
   $('#bargain-check-count').textContent = `(${unchecked.length})`;
   $('#bargain-candidates').innerHTML = unchecked.length ? unchecked.slice(0, bargainLimit).map(bargainCard).join('')
     : '<div class="empty">No unchecked listings for this site. Change the site or product filters, or scan again.</div>';

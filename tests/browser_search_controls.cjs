@@ -375,7 +375,7 @@ test('Bargain review shows only positive comparisons and seller links', async ()
   const page = priceFilterPage(true);
   await page.context.loadDiscoveryResults();
   assert.equal(page.element('#bargain-badge').textContent, '0 potential bargains');
-  assert.match(page.element('#bargain-reviewed').innerHTML, /No price-checked bargains/);
+  assert.match(page.element('#bargain-reviewed').innerHTML, /No positive exact-card comparisons/);
   page.element('#bargain-source').value = 'facebook';
   page.element('#bargain-source').listeners.change();
   assert.doesNotMatch(page.element('#bargain-reviewed').innerHTML, /Pikachu card|free-pickup/);
@@ -396,6 +396,18 @@ test('Bargain review shows only positive comparisons and seller links', async ()
   assert.doesNotMatch(page.element('#bargain-reviewed').innerHTML, /Pikachu card/);
   assert.match(page.element('#bargain-candidates').innerHTML, /Pikachu card/);
   assert.equal(page.requests.length, 1, 'Reviewing saved bargains must not start a scan');
+});
+
+test('browser market reference automatically places a saved listing in bargain review', async () => {
+  const page = priceFilterPage(true);
+  await page.context.loadDiscoveryResults();
+  vm.runInContext("discoveryResultData.listings.find(row => row.listing_id === '6').market_value = 60", page.context);
+  vm.runInContext("discoveryResultData.listings.find(row => row.listing_id === '6').value_source = 'TCGplayer browser · BoC FX 1.4'", page.context);
+  page.element('#bargain-source').value = 'facebook';
+  page.context.renderBargainReview();
+  assert.match(page.element('#bargain-reviewed').innerHTML, /Pikachu card/);
+  assert.match(page.element('#bargain-reviewed').innerHTML, /TCGplayer browser/);
+  assert.equal(page.element('#bargain-badge').textContent, '1 potential bargains');
 });
 
 test('Bargain review keeps positive comparisons separate from its price-check queue', async () => {

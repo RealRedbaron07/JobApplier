@@ -234,6 +234,8 @@ class Store:
                 row.discovery_routes = json.dumps(discovery_routes or [])
                 row.promotion = promotion
             self._apply_match(row, None if row.dismissed else match)
+            if discovery_at is not None:
+                row.matched_target = None
             session.commit()
             return row
 
@@ -265,6 +267,8 @@ class Store:
         stats = {"checked": 0, "matched": 0, "unmatched": 0, "changed": 0}
         with self.session() as session:
             for row in session.query(SeenListing).all():
+                if row.discovery_at is not None:
+                    continue
                 listing = Listing(
                     source=row.source, listing_id=row.listing_id, title=row.title or "", price=row.price,
                     currency=row.currency or "", url=row.url or "", listing_type=row.listing_type or "bin",
