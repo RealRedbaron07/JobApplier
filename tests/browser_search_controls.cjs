@@ -299,6 +299,23 @@ test('set and type title filters combine with the high and low price limits with
   assert.equal(page.requests.length, 1);
 });
 
+test('condition filter treats seller title claims separately from unknown and card HP', async () => {
+  const page = priceFilterPage(true);
+  await page.context.loadDiscoveryResults();
+  assert.equal(page.context.conditionClaim({title: 'Pikachu 330 HP Near Mint', condition: ''}), 'nm');
+  assert.equal(page.context.conditionClaim({title: 'Pikachu LP', condition: 'Pre-Owned'}), 'lp');
+  assert.equal(page.context.conditionClaim({title: 'Pikachu NM', condition: 'Moderately Played'}), 'mp');
+  assert.equal(page.context.conditionClaim({title: 'Pikachu no scratches', condition: ''}), 'unknown');
+  assert.equal(page.context.conditionClaim({title: 'PSA 10 Pikachu', condition: ''}), 'other');
+  page.element('#broad-result-source').value = '';
+  page.element('#broad-condition').value = 'unknown';
+  page.element('#broad-condition').listeners.change();
+  assert.equal(page.element('#broad-result-count').textContent, '5 of 7 candidates');
+  page.element('#broad-condition').value = 'nm';
+  page.element('#broad-condition').listeners.change();
+  assert.equal(page.element('#broad-result-count').textContent, '0 of 7 candidates');
+});
+
 test('auction and fixed-price filters combine with price and site without starting a scan', async () => {
   const page = priceFilterPage();
   await page.context.loadDiscoveryResults();

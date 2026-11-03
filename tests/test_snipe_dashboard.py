@@ -228,6 +228,30 @@ def test_deals_listings_bids_and_scans_endpoints(snipe_client):
     assert len(scans) == 2 and scans[1]["deals"] == 2 and scans[1]["errors"][0].startswith("facebook")
 
 
+def test_remove_selected_listings_hides_them_without_touching_other_finds(snipe_client):
+    client, store, _ = snipe_client
+    _populate(store)
+    rows = client.get("/api/snipe/listings").get_json()["listings"]
+    ids = [row["id"] for row in rows[:2]]
+    assert client.post("/api/snipe/listings/remove-selected", json={"ids": ids}).get_json()["removed"] == 2
+    assert {row["id"] for row in client.get("/api/snipe/listings").get_json()["listings"]} == {rows[2]["id"]}
+    assert client.post("/api/snipe/listings/remove-selected", json={"ids": ids}).get_json()["removed"] == 0
+    for bad in ([], [ids[0], ids[0]], [True], ["1"], list(range(1, 502))):
+        assert client.post("/api/snipe/listings/remove-selected", json={"ids": bad}).status_code == 400
+
+
+def test_saved_listing_search_and_older_pages_cover_history(snipe_client):
+    client, store, _ = snipe_client
+    _populate(store)
+    first = client.get("/api/snipe/listings?limit=1&offset=0").get_json()
+    second = client.get("/api/snipe/listings?limit=1&offset=1").get_json()
+    assert first["has_more"] and second["has_more"]
+    assert first["listings"][0]["id"] != second["listings"][0]["id"]
+    assert client.get("/api/snipe/listings?limit=1&offset=2").get_json()["has_more"] is False
+    assert client.get("/api/snipe/listings?q=not-a-real-card").get_json()["listings"] == []
+    assert client.get("/api/snipe/listings?offset=-1").status_code == 400
+
+
 def test_old_deals_stay_in_history_without_claiming_to_be_current(snipe_client):
     from cardsnipe.store import SeenListing
 

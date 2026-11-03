@@ -3,7 +3,7 @@
 import re
 from urllib.parse import quote_plus
 
-from cardsnipe.matcher import detect_grade
+from cardsnipe.matcher import detect_condition_issue, detect_grade
 
 NUMBER = re.compile(r"(?<!\d)(\d{1,3}/\d{1,3})(?!\d)")
 EXCLUDE = re.compile(r"\b(?:sealed|booster|etb|box|pack|lot|bundle|jumbo|oversized|proxy|fake|metal|reprint|custom|graded|slab|psa|cgc|bgs|tag|japanese|korean|chinese|german|french|spanish|italian|world championship)\b", re.I)
@@ -11,7 +11,8 @@ VARIANT = re.compile(r"\b(?:reverse holo|cosmos holo|non.?holo|first edition|1st
 
 
 def eligible(title):
-    return len(NUMBER.findall(title or "")) == 1 and not EXCLUDE.search(title) and not VARIANT.search(title) and not detect_grade(title)
+    return (len(NUMBER.findall(title or "")) == 1 and not EXCLUDE.search(title) and not VARIANT.search(title)
+            and not detect_grade(title) and not detect_condition_issue(title))
 
 
 def _words(text):

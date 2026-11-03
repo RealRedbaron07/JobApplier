@@ -335,12 +335,16 @@ class Store:
             SeenListing.last_seen >= utcnow() - timedelta(hours=24),
         )
 
-    def recent_listings(self, limit: int = 100, source: str | None = None) -> list[SeenListing]:
+    def recent_listings(self, limit: int = 100, source: str | None = None,
+                        offset: int = 0, search: str = "") -> list[SeenListing]:
         with self.session() as session:
-            query = session.query(SeenListing).filter(SeenListing.dismissed.isnot(True))
+            stmt = session.query(SeenListing).filter(SeenListing.dismissed.isnot(True))
             if source:
-                query = query.filter(SeenListing.source == source)
-            return query.order_by(SeenListing.last_seen.desc().nullslast(), SeenListing.first_seen.desc()).limit(limit).all()
+                stmt = stmt.filter(SeenListing.source == source)
+            if search:
+                stmt = stmt.filter(SeenListing.title.ilike(f"%{search}%"))
+            return stmt.order_by(SeenListing.last_seen.desc().nullslast(), SeenListing.first_seen.desc(),
+                                 SeenListing.id.desc()).offset(offset).limit(limit).all()
 
     # ── valuations ───────────────────────────────────────────────────────
     def save_valuation(self, valuation) -> None:

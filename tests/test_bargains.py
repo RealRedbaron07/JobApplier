@@ -5,7 +5,8 @@ def test_only_clear_single_cards_get_browser_price_checks():
     assert eligible("Pokemon Lugia VSTAR 139/195 Silver Tempest")
     for title in ("Lugia VSTAR Silver Tempest", "PSA 10 Lugia VSTAR 139/195 Silver Tempest",
                   "Lugia VSTAR 139/195 Japanese Silver Tempest", "Lugia VSTAR 139/195 reverse holo Silver Tempest",
-                  "Lugia VSTAR 139/195 211/195 Silver Tempest", "Lugia VSTAR 139/195 jumbo Silver Tempest"):
+                  "Lugia VSTAR 139/195 211/195 Silver Tempest", "Lugia VSTAR 139/195 jumbo Silver Tempest",
+                  "Lugia VSTAR 139/195 Silver Tempest LP", "Lugia VSTAR 139/195 Silver Tempest damaged"):
         assert not eligible(title)
 
 

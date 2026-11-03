@@ -380,10 +380,28 @@ function productKind(row) {
   return 'other';
 }
 const productKindVisible = row => visibleProductKinds.has(productKind(row));
+const CONDITION_LABELS = {nm: 'NM / Mint', lp: 'Lightly played', mp: 'Moderately played', hp: 'Heavily played / damaged', unknown: 'Unknown'};
+function conditionClaim(row) {
+  if (['graded', 'sealed'].includes(productKind(row))) return 'other';
+  let text = `${row.condition || ''} ${row.title || ''}`.toLowerCase();
+  text = text.replace(/\b\d{2,4}\s*hp\b/g, '').replace(/\b(?:not|no|non)[ -]?(?:near[ -]?mint|mint|nm)\b/g, '');
+  if (/\b(?:damaged?|dmg|creases?|bent|water damage|torn|heavily played|heavy play|hp)\b/.test(text)) return 'hp';
+  if (/\b(?:moderately played|moderate play|mp)\b/.test(text)) return 'mp';
+  if (/\b(?:lightly played|light play|lp)\b/.test(text)) return 'lp';
+  if (/\b(?:near[ -]?mint|nm|mint)\b/.test(text)) return 'nm';
+  return 'unknown';
+}
+function conditionText(row) {
+  const claim = conditionClaim(row);
+  if (claim === 'other') return row.condition || 'Raw condition not applicable';
+  if (claim === 'unknown') return 'Unknown';
+  return `${CONDITION_LABELS[claim]} claim${row.condition && !/^(?:pre-owned|used|new|unverified)$/i.test(row.condition.trim()) ? ` · ${row.condition}` : ' · title only'}`;
+}
 
 function renderDiscoveryResults() {
   const source = $('#broad-result-source').value;
   const format = $('#broad-result-format').value;
+  const condition = $('#broad-condition').value;
   const query = $('#broad-result-query').value.trim().toLowerCase();
   const set = $('#broad-result-set').value.trim().toLowerCase();
   const type = $('#broad-result-type').value.trim().toLowerCase();
@@ -400,6 +418,7 @@ function renderDiscoveryResults() {
   const priceActive = min != null || max != null;
   const rows = discoveryResultData.listings.filter(row => !priceError && productKindVisible(row) && (!source || row.source === source)
     && (!format || row.listing_type === format)
+    && (!condition || conditionClaim(row) === condition)
     && (!priceActive || (Number.isFinite(row.total_price) && (min == null || row.total_price >= min) && (max == null || row.total_price <= max)))
     && (!set || row.title.toLowerCase().includes(set))
     && (!type || row.title.toLowerCase().includes(type))
@@ -425,11 +444,12 @@ function renderDiscoveryResults() {
     <td>${row.promotion ? `<div class="candidate-promotion">${esc(row.promotion)}</div>` : ''}${row.discovery_routes.map(route => `<span class="sub">${esc(route)}</span>`).join('')}</td>
     <td><strong>${row.price == null ? 'Price varies / unavailable' : esc(listingPrice(row))}</strong>${row.shipping != null && row.shipping > 0 ? `<span class="sub">Includes ${esc(money(row.currency, row.shipping))} shipping</span>` : ''}<span class="sub">Before tax and other charges</span></td>
     <td>${candidateReferenceInput(row)}<span class="sub">${esc(candidateComparisonText(row, discount))}</span></td>
-    <td>${esc(row.condition || 'Not verified')}</td><td>${esc(ago(row.last_seen))}</td>
-    <td><button class="button secondary small" data-dismiss="${row.id}">Remove</button></td>
+    <td>${esc(conditionText(row))}</td><td>${esc(ago(row.last_seen))}</td>
+    <td><input type="checkbox" data-select-listing="${row.id}" aria-label="Select ${esc(row.title)}"><button class="button secondary small" data-dismiss="${row.id}">Remove</button></td>
   </tr>`;
   }).join('') : `<tr><td colspan="7" class="empty">${priceError || (scan ? 'No candidates to show for the latest scan and filters. Check the source errors above.' : 'Click Scan all cards automatically to collect listings here.')}</td></tr>`;
   bindDismiss('#broad-results-table', loadDiscoveryResults);
+  updateSelection('broad-results-table');
 }
 
 function bargainCard(row) {
@@ -439,8 +459,8 @@ function bargainCard(row) {
   const shippingLabel = row.shipping == null ? 'Shipping not reported' : `Shipping ${money(row.currency, row.shipping)}`;
   const setNotes = discount > 0 ? matchingSetTrends(row.title).map(trend => `<span class="set-trend-note">Title match: ${esc(trend.set_name)} · ${esc(trend.metric)} ${trend.change_pct > 0 ? '+' : ''}${trend.change_pct.toFixed(1)}% (${esc(trend.first_date)} to ${esc(trend.latest_date)}, ${esc(trend.source)} import). Set movement does not price this card.</span>`).join('') : '';
   return `<article class="bargain-card ${discount > 0 ? 'positive' : ''}">
-    <header><div><h4>${esc(row.title)}</h4><span class="sub">${esc(row.source === 'facebook' ? 'Marketplace' : 'eBay')} · ${PRODUCT_LABELS[productKind(row)]} · ${row.listing_type === 'auction' ? 'Auction, bid can rise' : 'Fixed price'}${row.condition ? ` · ${esc(row.condition)}` : ''}${earlier ? ` · Earlier scan ${esc(new Date(row.discovery_at).toLocaleString())}` : ''}</span></div>${discount > 0 ? `<span class="bargain-percent">${discount.toFixed(1)}% below</span>` : ''}</header>
-    <div class="bargain-actions"><div><strong>${esc(listingPrice(row))}</strong><span class="sub">${askLabel} ${esc(money(row.currency, row.price))} · ${esc(shippingLabel)}${row.source === 'facebook' ? ' · travel and delivery extra' : ''}</span></div>${candidateReferenceInput(row)}<a class="button secondary small" href="${esc(row.url)}" target="_blank" rel="noopener">Open seller listing ↗</a>${row.market_value ? `<a class="button secondary small" href="https://www.tcgplayer.com/search/pokemon/product?productLineName=pokemon&q=${encodeURIComponent(row.title)}" target="_blank" rel="noopener">Check TCGplayer search ↗</a>` : ''}</div>
+    <header><div><h4><input type="checkbox" data-select-listing="${row.id}" aria-label="Select ${esc(row.title)}"> ${esc(row.title)}</h4><span class="sub">${esc(row.source === 'facebook' ? 'Marketplace' : 'eBay')} · ${PRODUCT_LABELS[productKind(row)]} · ${row.listing_type === 'auction' ? 'Auction, bid can rise' : 'Fixed price'} · ${esc(conditionText(row))}${earlier ? ` · Earlier scan ${esc(new Date(row.discovery_at).toLocaleString())}` : ''}</span></div>${discount > 0 ? `<span class="bargain-percent">${discount.toFixed(1)}% below</span>` : ''}</header>
+    <div class="bargain-actions"><div><strong>${esc(listingPrice(row))}</strong><span class="sub">${askLabel} ${esc(money(row.currency, row.price))} · ${esc(shippingLabel)}${row.source === 'facebook' ? ' · travel and delivery extra' : ''}</span></div>${candidateReferenceInput(row)}<a class="button secondary small" href="${esc(row.url)}" target="_blank" rel="noopener">Open seller listing ↗</a>${row.market_value ? `<a class="button secondary small" href="https://www.tcgplayer.com/search/pokemon/product?productLineName=pokemon&q=${encodeURIComponent(row.title)}" target="_blank" rel="noopener">Check TCGplayer search ↗</a>` : ''}<button class="button secondary small" type="button" data-dismiss="${row.id}">Remove</button></div>
     <span class="sub">${esc(candidateComparisonText(row, discount))}${row.market_value ? ` · Reference ${esc(money(row.currency, row.market_value))}` : ''}${earlier ? ' · Confirm availability and current price' : ''}</span>${setNotes}
   </article>`;
 }
@@ -484,7 +504,9 @@ $('#set-trend-form').addEventListener('submit', async event => {
 let bargainLimit = 20;
 function renderBargainReview() {
   const source = $('#bargain-source').value;
-  const rows = discoveryResultData.listings.filter(row => productKindVisible(row) && (!source || row.source === source));
+  const condition = $('#bargain-condition').value;
+  const rows = discoveryResultData.listings.filter(row => productKindVisible(row) && (!source || row.source === source)
+    && (!condition || conditionClaim(row) === condition));
   const compared = rows.filter(row => candidateDiscount(row) > 0)
     .sort((a, b) => candidateDiscount(b) - candidateDiscount(a));
   const unchecked = rows.filter(row => !(candidateDiscount(row) > 0))
@@ -499,6 +521,9 @@ function renderBargainReview() {
     : '<div class="empty">No unchecked listings for this site. Change the site or product filters, or scan again.</div>';
   $('#bargain-more').hidden = unchecked.length <= bargainLimit;
   $('#bargain-more').textContent = `Show more listings (${Math.min(20, unchecked.length - bargainLimit)} next)`;
+  bindDismiss('#bargain-reviewed', loadDiscoveryResults);
+  bindDismiss('#bargain-candidates', loadDiscoveryResults);
+  updateSelection('view-bargains');
 }
 
 async function loadDiscoveryResults() {
@@ -562,6 +587,7 @@ for (const [id, source] of [['#broad-all-leads', ''], ['#broad-ebay-leads', 'eba
   $(id).addEventListener('click', () => { $('#broad-result-source').value = source; renderDiscoveryResults(); });
 }
 $('#broad-result-format').addEventListener('change', renderDiscoveryResults);
+$('#broad-condition').addEventListener('change', renderDiscoveryResults);
 for (const kind of PRODUCT_KINDS) {
   for (const view of ['broad', 'bargain']) {
     const box = $(`#${view}-kind-${kind}`);
@@ -600,7 +626,10 @@ function saveCandidateReference(event) {
   renderBargainReview();
 }
 for (const selector of ['#broad-results-table', '#bargain-reviewed', '#bargain-candidates']) {
-  $(selector).addEventListener('change', saveCandidateReference);
+  $(selector).addEventListener('change', event => {
+    if (event.target?.dataset?.selectListing) updateSelection(selector === '#broad-results-table' ? 'broad-results-table' : 'view-bargains');
+    else saveCandidateReference(event);
+  });
   $(selector).addEventListener('click', event => {
     if (!event.target?.dataset?.compare) return;
     const input = event.target.parentElement?.querySelector('.candidate-reference');
@@ -608,6 +637,7 @@ for (const selector of ['#broad-results-table', '#bargain-reviewed', '#bargain-c
   });
 }
 $('#bargain-source').addEventListener('change', () => { bargainLimit = 20; renderBargainReview(); });
+$('#bargain-condition').addEventListener('change', () => { bargainLimit = 20; renderBargainReview(); });
 $('#bargain-more').addEventListener('click', () => { bargainLimit += 20; renderBargainReview(); });
 
 async function loadDiscover() {
@@ -734,18 +764,54 @@ async function loadScans() {
 }
 
 // ── listings ────────────────────────────────────────────────────────────────
+let listingsPage = 0;
 async function loadListings() {
-  const source = $('#listing-source').value, q = $('#listing-search').value.toLowerCase();
-  const data = await api(`/api/snipe/listings?limit=500&source=${source}`);
-  const rows = data.listings.filter(r => !q || (r.title || '').toLowerCase().includes(q));
+  const source = $('#listing-source').value, q = $('#listing-search').value.trim();
+  const page = listingsPage;
+  const data = await api(`/api/snipe/listings?limit=500&source=${source}&offset=${page * 500}&q=${encodeURIComponent(q)}`);
+  if (page !== listingsPage || source !== $('#listing-source').value || q !== $('#listing-search').value.trim()) return;
+  const rows = data.listings;
+  $('#listings-newer').disabled = listingsPage === 0;
+  $('#listings-older').disabled = !data.has_more;
+  $('#listings-page').textContent = `Page ${listingsPage + 1} · ${rows.length} shown`;
   $('#listings-table').innerHTML = rows.length ? rows.map(r => `<tr>
     <td title="${esc(r.last_seen || 'Not rechecked since the accuracy update')}">${r.last_seen ? esc(ago(r.last_seen)) : 'not rechecked'}</td><td>${esc(r.source)}</td>
     <td><a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.title)}</a>${r.condition ? `<span class="sub">Seller condition: ${esc(r.condition)}</span>` : ''}${r.location ? `<span class="sub">${esc(r.location)}</span>` : ''}</td>
     <td>${esc(r.listing_type)}</td><td>${esc(listingPrice(r))}</td>
     <td>${r.matched_target ? `${lanePill(r)} <span class="sub">${esc(r.matched_target)}</span>` : '<span class="detail-meta">no</span>'}</td>
-    <td><button class="button secondary small" data-dismiss="${r.id}">Remove</button></td>
+    <td><input type="checkbox" data-select-listing="${r.id}" aria-label="Select ${esc(r.title)}"><button class="button secondary small" data-dismiss="${r.id}">Remove</button></td>
   </tr>`).join('') : '<tr><td colspan="7" class="empty">Nothing seen yet.</td></tr>';
   bindDismiss('#listings-table', loadListings);
+  updateSelection('listings-table');
+}
+
+function selectedListings(root) {
+  return [...($('#' + root).querySelectorAll?.('[data-select-listing]:checked') || [])].map(box => Number(box.dataset.selectListing));
+}
+function updateSelection(root) {
+  const button = $(`[data-remove-selected="${root}"]`);
+  const count = selectedListings(root).length;
+  button.disabled = !count;
+  button.textContent = `Remove selected (${count})`;
+}
+for (const root of ['broad-results-table', 'view-bargains', 'listings-table']) {
+  if (root === 'listings-table') $('#' + root).addEventListener('change', event => {
+    if (event.target?.dataset?.selectListing) updateSelection(root);
+  });
+  $(`[data-select-visible="${root}"]`).addEventListener('click', () => {
+    $('#' + root).querySelectorAll('[data-select-listing]').forEach(box => { box.checked = true; });
+    updateSelection(root);
+  });
+  $(`[data-remove-selected="${root}"]`).addEventListener('click', async event => {
+    const ids = [...new Set(selectedListings(root))];
+    if (!ids.length) return;
+    event.target.disabled = true;
+    try {
+      const result = await api('/api/snipe/listings/remove-selected', {method: 'POST', body: JSON.stringify({ids})});
+      toast(result.message);
+      await (root === 'listings-table' ? loadListings() : loadDiscoveryResults());
+    } catch (err) { toast(err.message, true); updateSelection(root); }
+  });
 }
 
 function bindDismiss(root, reload) {
@@ -769,8 +835,10 @@ async function refreshAll() {
 
 ['#deal-lane', '#deal-source', '#deal-flag'].forEach(sel => $(sel).addEventListener('change', loadDeals));
 $('#deal-search').addEventListener('input', loadDeals);
-$('#listing-source').addEventListener('change', loadListings);
-$('#listing-search').addEventListener('input', loadListings);
+$('#listing-source').addEventListener('change', () => { listingsPage = 0; loadListings(); });
+$('#listing-search').addEventListener('input', () => { listingsPage = 0; loadListings(); });
+$('#listings-newer').addEventListener('click', () => { listingsPage = Math.max(0, listingsPage - 1); loadListings(); });
+$('#listings-older').addEventListener('click', () => { listingsPage += 1; loadListings(); });
 $('#refresh').addEventListener('click', async () => {
   const btn = $('#refresh'); btn.disabled = true;
   try {
@@ -805,6 +873,8 @@ function isTextField(el) {
 }
 
 function refreshWouldWipe(name) {
+  const selectedRoot = {discover: 'broad-results-table', bargains: 'view-bargains', listings: 'listings-table'}[name];
+  if (selectedRoot && selectedListings(selectedRoot).length) return true;
   const el = document.activeElement;
   if (!isTextField(el)) return false;
   return (REPLACED_ROOTS[name] || []).some(sel => document.querySelector(sel)?.contains(el));

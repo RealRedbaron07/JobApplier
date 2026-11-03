@@ -13,7 +13,7 @@ from cardsnipe.browser import Browser, SourceUnavailable
 from cardsnipe.bargains import bank_of_canada_usd_cad, eligible, tcgplayer_market
 from cardsnipe.ebay import EbayWeb
 from cardsnipe.facebook import FacebookMarketplace
-from cardsnipe.matcher import Match
+from cardsnipe.matcher import Match, detect_condition_issue
 from cardsnipe.watchlist import Target
 
 MAX_SEARCHES = 8
@@ -169,6 +169,7 @@ class DiscoveryScanner:
             # shortcut: price at most 12 exact singles per scan; add a resumable queue if coverage becomes too small.
             candidates = [entry["listing"] for entry in found.values()
                           if entry["listing"].currency == "CAD" and eligible(entry["listing"].title)
+                          and not detect_condition_issue(entry["listing"].condition)
                           and entry["listing"].total_price is not None and entry["listing"].price > 1]
             if candidates and not self.stop.is_set() and time.monotonic() < deadline:
                 try:

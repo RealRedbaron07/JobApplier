@@ -59,6 +59,7 @@
           <div class="toolbar candidate-filters">
             <label class="compact-control">Site<select id="broad-result-source"><option value="facebook" selected>Marketplace</option><option value="">All sites</option><option value="ebay">eBay</option></select></label>
             <label class="compact-control">Buying format<select id="broad-result-format"><option value="">Auctions + fixed price</option><option value="auction">Auctions</option><option value="bin">Buy Now / fixed price</option></select></label>
+            <label class="compact-control">Condition claim<select id="broad-condition"><option value="">Any condition</option><option value="nm">NM / Mint</option><option value="lp">Lightly played</option><option value="mp">Moderately played</option><option value="hp">Heavily played / damaged</option><option value="unknown">Unknown</option></select></label>
             <label class="compact-control">Search results<input id="broad-result-query" class="search" placeholder="Filter any card, grade, condition or promotion"></label>
             <label class="compact-control">Set in title<input id="broad-result-set" class="search" placeholder="e.g. Evolving Skies"></label>
             <label class="compact-control">Type in title<input id="broad-result-type" class="search" placeholder="e.g. PSA, sealed, promo"></label>
@@ -75,7 +76,9 @@
           </div></fieldset>
           <p id="broad-price-help" class="detail-meta" role="status" aria-live="polite">Price includes reported shipping, before tax. Unknown totals are hidden while a price range is set. Marketplace listings count as fixed price. Set and type match listing titles only; check the seller page.</p>
           <p class="detail-meta">Product types are estimated from listing titles. Promo means a promo card, not a seller discount. Check the seller page if a type looks wrong.</p>
-          <p class="detail-meta">Prices are copied from seller search cards. eBay total adds reported shipping; Marketplace uses the shown asking price. Your reference is entered by you, never matched automatically. Percentage = (reference − displayed total) ÷ reference. Verify the exact card and seller price before buying.</p>
+          <p class="detail-meta">Condition filters use seller fields and title claims. “Pre-Owned” and blank fields stay Unknown. Graded and sealed products appear only with Any condition; use product type filters for those. Condition is never photo verified.</p>
+          <p class="detail-meta">Prices are copied from seller search cards. eBay total adds reported shipping; Marketplace uses the shown asking price. Exact raw singles can get a browser market reference; you can also enter your own. Percentage = (reference − displayed total) ÷ reference. Verify the exact card and seller price before buying.</p>
+          <div class="toolbar"><button class="button secondary small" type="button" data-select-visible="broad-results-table">Select visible</button><button class="button secondary small" type="button" data-remove-selected="broad-results-table" disabled>Remove selected (0)</button></div>
           <div class="table-wrap"><table><thead><tr><th>Listing</th><th>Why it surfaced</th><th>Ask / bid + shipping</th><th>Potential bargain</th><th>Condition</th><th>Seen</th><th></th></tr></thead><tbody id="broad-results-table"><tr><td colspan="7" class="empty">Click Scan all cards automatically to collect listings here.</td></tr></tbody></table></div>
         </article>
         <details class="manual-browse"><summary>Open searches manually (optional)</summary>
@@ -112,7 +115,8 @@
           <p class="eyebrow">YOUR REVIEW QUEUE</p><h2>Potential bargains</h2>
           <p>Broad scans check up to 12 exact, ungraded singles against TCGplayer in a regular browser and convert USD with the Bank of Canada rate. Possible bargains appear here automatically. Condition, shipping, taxes and availability still need your review. You can enter your own reference below for other listings.</p>
           <div id="bargain-review-counts" class="bargain-review-counts" role="status" aria-live="polite">Loading saved results…</div>
-          <div class="toolbar"><label class="compact-control">Site<select id="bargain-source"><option value="facebook" selected>Marketplace</option><option value="">All sites</option><option value="ebay">eBay</option></select></label><button class="button secondary small" data-view-link="discover">Browse all scan results</button></div>
+          <div class="toolbar"><label class="compact-control">Site<select id="bargain-source"><option value="facebook" selected>Marketplace</option><option value="">All sites</option><option value="ebay">eBay</option></select></label><label class="compact-control">Condition claim<select id="bargain-condition"><option value="">Any condition</option><option value="nm">NM / Mint</option><option value="lp">Lightly played</option><option value="mp">Moderately played</option><option value="hp">Heavily played / damaged</option><option value="unknown">Unknown</option></select></label><button class="button secondary small" data-view-link="discover">Browse all scan results</button></div>
+          <div class="toolbar"><button class="button secondary small" type="button" data-select-visible="view-bargains">Select visible</button><button class="button secondary small" type="button" data-remove-selected="view-bargains" disabled>Remove selected (0)</button></div>
           <fieldset class="product-kind-filter"><legend>Show product types. Uncheck to hide</legend><div>
             <label><input id="bargain-kind-single" type="checkbox" checked> Singles</label>
             <label><input id="bargain-kind-graded" type="checkbox" checked> Graded</label>
@@ -250,7 +254,8 @@
 
       <section class="view" id="view-listings">
         <article class="panel">
-          <div class="toolbar"><label class="compact-control">Source<select id="listing-source"><option value="">All</option><option value="ebay">eBay</option><option value="facebook">Facebook</option></select></label><label class="compact-control">Search<input id="listing-search" class="search" placeholder="title"></label><span class="detail-meta">Every listing the sniper has looked at, matched or not.</span></div>
+          <div class="toolbar"><label class="compact-control">Source<select id="listing-source"><option value="">All</option><option value="ebay">eBay</option><option value="facebook">Facebook</option></select></label><label class="compact-control">Search saved titles<input id="listing-search" class="search" placeholder="card or set"></label><button class="button secondary small" type="button" data-select-visible="listings-table">Select visible</button><button class="button secondary small" type="button" data-remove-selected="listings-table" disabled>Remove selected (0)</button></div>
+          <div class="toolbar"><button class="button secondary small" id="listings-newer" type="button" disabled>Newer</button><span class="detail-meta" id="listings-page">Page 1</span><button class="button secondary small" id="listings-older" type="button" disabled>Older</button></div>
           <div class="table-wrap"><table><thead><tr><th>Last checked</th><th>Source</th><th>Listing</th><th>Type</th><th>Price + shipping</th><th>Matched</th><th></th></tr></thead><tbody id="listings-table"></tbody></table></div>
         </article>
       </section>

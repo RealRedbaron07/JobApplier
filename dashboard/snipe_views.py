@@ -433,10 +433,30 @@ def snipe_dismiss_listing(row_id: int):
     return jsonify({"message": "Removed"})
 
 
+@snipe_bp.post("/api/snipe/listings/remove-selected")
+def snipe_dismiss_selected_listings():
+    ids = _payload().get("ids")
+    if (not isinstance(ids, list) or not 1 <= len(ids) <= 500
+            or any(type(row_id) is not int or row_id <= 0 for row_id in ids)
+            or len(set(ids)) != len(ids)):
+        return jsonify({"error": "Select 1 to 500 distinct saved listings."}), 400
+    removed = sum(get_store().dismiss_listing(row_id) for row_id in ids)
+    return jsonify({"removed": removed, "message": f"Removed {removed} saved listings"})
+
+
 @snipe_bp.get("/api/snipe/listings")
 def snipe_listings():
-    rows = get_store().recent_listings(limit=_limit(100), source=request.args.get("source") or None)
-    return jsonify({"listings": [_listing_dict(r) for r in rows]})
+    limit = _limit(100)
+    try:
+        offset = int(request.args.get("offset", "0"))
+    except ValueError:
+        offset = -1
+    search = (request.args.get("q") or "").strip()
+    if offset < 0 or offset > 100000 or len(search) > 160:
+        return jsonify({"error": "Invalid saved-listing search or offset."}), 400
+    rows = get_store().recent_listings(limit=limit + 1, source=request.args.get("source") or None,
+                                       offset=offset, search=search)
+    return jsonify({"listings": [_listing_dict(r) for r in rows[:limit]], "has_more": len(rows) > limit})
 
 
 @snipe_bp.get("/api/snipe/bids")
