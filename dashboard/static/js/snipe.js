@@ -340,6 +340,7 @@ document.querySelectorAll('[data-discovery-query]').forEach(link => link.addEven
 }));
 
 let discoveryResultData = {listings: [], scan: null};
+let broadLimit = 200;
 let setTrendData = [];
 let completedBroadScan = null;
 let broadStatusInFlight = false;
@@ -373,16 +374,16 @@ try {
 } catch (_) {}
 function productKind(row) {
   const title = row.title || '';
-  if (/\b(?:promo|promotional|pre[- ]?release|black star)\b/i.test(title)) return 'promo';
   if (/\b(?:PSA|CGC|BGS|SGC|graded|slabbed|slab|beckett)\b|\bTAG\s*\d{1,2}\b/i.test(title)) return 'graded';
   if (/\b(?:sealed|booster|ETB|elite trainer|tin|blister|box|pack|portfolio|starter set|collection)\b/i.test(title)) return 'sealed';
+  if (/\b(?:promo|promotional|pre[- ]?release|black star)\b/i.test(title)) return 'promo';
   if (/\b(?:card|single)\b|\b\d{1,3}\/\d{1,3}\b/i.test(title)) return 'single';
   return 'other';
 }
 const productKindVisible = row => visibleProductKinds.has(productKind(row));
-const CONDITION_LABELS = {nm: 'NM / Mint', lp: 'Lightly played', mp: 'Moderately played', hp: 'Heavily played / damaged', unknown: 'Unknown'};
+const CONDITION_LABELS = {nm: 'NM / Mint', lp: 'Lightly played', mp: 'Moderately played', hp: 'Heavily played / damaged', unknown: 'Unknown', graded: 'Graded', sealed: 'Sealed'};
 function conditionClaim(row) {
-  if (['graded', 'sealed'].includes(productKind(row))) return 'other';
+  if (['graded', 'sealed'].includes(productKind(row))) return productKind(row);
   let text = `${row.condition || ''} ${row.title || ''}`.toLowerCase();
   text = text.replace(/\b\d{2,4}\s*hp\b/g, '').replace(/\b(?:not|no|non)[ -]?(?:near[ -]?mint|mint|nm)\b/g, '');
   if (/\b(?:damaged?|dmg|creases?|bent|water damage|torn|heavily played|heavy play|hp)\b/.test(text)) return 'hp';
@@ -393,9 +394,14 @@ function conditionClaim(row) {
 }
 function conditionText(row) {
   const claim = conditionClaim(row);
-  if (claim === 'other') return row.condition || 'Raw condition not applicable';
+  if (claim === 'graded' || claim === 'sealed') return `${CONDITION_LABELS[claim]} · ${row.condition || 'details unverified'}`;
   if (claim === 'unknown') return 'Unknown';
   return `${CONDITION_LABELS[claim]} claim${row.condition && !/^(?:pre-owned|used|new|unverified)$/i.test(row.condition.trim()) ? ` · ${row.condition}` : ' · title only'}`;
+}
+function conditionBreakdown(rows) {
+  const counts = Object.fromEntries(Object.keys(CONDITION_LABELS).map(kind => [kind, 0]));
+  rows.forEach(row => { counts[conditionClaim(row)]++; });
+  return `Condition claims in this site, before other filters: ${Object.entries(counts).map(([kind, count]) => `${CONDITION_LABELS[kind]} ${count}`).join(' · ')}. These are seller claims, not photo checks.`;
 }
 
 function renderDiscoveryResults() {
@@ -425,6 +431,7 @@ function renderDiscoveryResults() {
     && (!query || `${row.title} ${row.condition} ${row.promotion} ${row.discovery_routes.join(' ')}`.toLowerCase().includes(query)))
     .sort((a, b) => Math.max(candidateDiscount(b) || 0, 0) - Math.max(candidateDiscount(a) || 0, 0));
   const scan = discoveryResultData.scan;
+  $('#broad-condition-breakdown').textContent = conditionBreakdown(discoveryResultData.listings.filter(row => productKindVisible(row) && (!source || row.source === source)));
   for (const [id, site, label] of [['#broad-all-leads', '', 'All'], ['#broad-ebay-leads', 'ebay', 'eBay'], ['#broad-facebook-leads', 'facebook', 'Marketplace']]) {
     const button = $(id);
     const matching = discoveryResultData.listings.filter(row => productKindVisible(row) && (!site || row.source === site));
@@ -433,11 +440,13 @@ function renderDiscoveryResults() {
     button.setAttribute('aria-pressed', String(source === site));
   }
   $('#broad-price-help').textContent = priceError || `Price filters${scan?.currency ? ` (${scan.currency})` : ''} include reported shipping, before tax. Unknown totals are hidden while a price range is set. Marketplace listings count as fixed price. Set and type match listing titles only; verify on the seller page. Filters do not start a scan.`;
-  $('#broad-result-count').textContent = scan ? `${rows.length} of ${discoveryResultData.listings.length} candidates` : 'No scan yet';
+  $('#broad-result-count').textContent = scan ? `${rows.length} of ${discoveryResultData.listings.length} saved finds${rows.length > broadLimit ? ` · ${broadLimit} shown` : ''}` : 'No scan yet';
   $('#broad-result-meta').textContent = scan
-    ? `Scanned ${new Date(scan.started).toLocaleString()} · ${scan.scanned} rows read · ${scan.errors.length} source errors${scan.budget != null ? ` · older scan capped at ${money(scan.currency, scan.budget)} listed price; scan again to include higher prices` : ''}. Seller promotions and bids are leads, without an independently verified market price.`
+    ? `Latest scan ${new Date(scan.started).toLocaleString()} · ${scan.scanned} rows read · ${scan.errors.length} source errors${scan.budget != null ? ` · older scan capped at ${money(scan.currency, scan.budget)} listed price` : ''}. Unremoved finds from earlier scans stay here with their original scan time. Open older listings to confirm availability.`
     : 'Promotions and asking prices are leads. Below-market value is not independently verified.';
-  $('#broad-results-table').innerHTML = rows.length ? rows.map(row => {
+  $('#broad-more').hidden = rows.length <= broadLimit;
+  $('#broad-more').textContent = `Show more saved finds (${Math.min(200, rows.length - broadLimit)} next)`;
+  $('#broad-results-table').innerHTML = rows.length ? rows.slice(0, broadLimit).map(row => {
     const discount = candidateDiscount(row);
     return `<tr class="${discount > 0 ? 'candidate-bargain' : ''}">
     <td><a href="${esc(row.url)}" target="_blank" rel="noopener">${esc(row.title)}</a><span class="sub">${esc(row.source)} · ${PRODUCT_LABELS[productKind(row)]} · ${row.listing_type === 'auction' ? 'Auction, current bid can rise' : 'Listed asking price'}${row.location ? ` · ${esc(row.location)}` : ''}</span>${row.discovery_at && row.discovery_at !== scan?.started ? `<span class="sub over-budget">Earlier scan ${esc(new Date(row.discovery_at).toLocaleString())}; open listing to confirm availability</span>` : ''}</td>
@@ -447,7 +456,7 @@ function renderDiscoveryResults() {
     <td>${esc(conditionText(row))}</td><td>${esc(ago(row.last_seen))}</td>
     <td><input type="checkbox" data-select-listing="${row.id}" aria-label="Select ${esc(row.title)}"><button class="button secondary small" data-dismiss="${row.id}">Remove</button></td>
   </tr>`;
-  }).join('') : `<tr><td colspan="7" class="empty">${priceError || (scan ? 'No candidates to show for the latest scan and filters. Check the source errors above.' : 'Click Scan all cards automatically to collect listings here.')}</td></tr>`;
+  }).join('') : `<tr><td colspan="7" class="empty">${priceError || (scan ? 'No unremoved finds match these filters. Check the condition counts and other filters above.' : 'Click Scan all cards automatically to collect listings here.')}</td></tr>`;
   bindDismiss('#broad-results-table', loadDiscoveryResults);
   updateSelection('broad-results-table');
 }
@@ -505,6 +514,7 @@ let bargainLimit = 20;
 function renderBargainReview() {
   const source = $('#bargain-source').value;
   const condition = $('#bargain-condition').value;
+  $('#bargain-condition-breakdown').textContent = conditionBreakdown(discoveryResultData.listings.filter(row => productKindVisible(row) && (!source || row.source === source)));
   const rows = discoveryResultData.listings.filter(row => productKindVisible(row) && (!source || row.source === source)
     && (!condition || conditionClaim(row) === condition));
   const compared = rows.filter(row => candidateDiscount(row) > 0)
@@ -513,7 +523,7 @@ function renderBargainReview() {
     .sort((a, b) => Number(b.discovery_at === discoveryResultData.scan?.started) - Number(a.discovery_at === discoveryResultData.scan?.started));
   const allCompared = discoveryResultData.listings.filter(row => productKindVisible(row) && candidateDiscount(row) > 0).length;
   $('#bargain-badge').textContent = `${allCompared} potential bargains`;
-  $('#bargain-review-counts').innerHTML = `<span><strong>${compared.length}</strong> possible bargains for this site</span><span><strong>${unchecked.length}</strong> unpriced or above reference</span>`;
+  $('#bargain-review-counts').innerHTML = `<span><strong>${compared.length}</strong> possible bargains for these filters</span><span><strong>${unchecked.length}</strong> unpriced or above reference</span>`;
   $('#bargain-reviewed').innerHTML = compared.length ? compared.map(bargainCard).join('')
     : '<div class="empty">No positive exact-card comparisons yet. Run a new browser scan or check an unpriced listing below.</div>';
   $('#bargain-check-count').textContent = `(${unchecked.length})`;
@@ -539,6 +549,7 @@ async function loadBroadStatus() {
     const data = await api('/api/snipe/discovery/scan');
     const busy = data.running;
     const scanning = busy && data.operation === 'broad';
+    const priceChecking = busy && data.operation === 'price-check';
     const signingIn = busy && data.operation === 'login';
     $('#broad-scan').disabled = busy || data.cooldown_seconds > 0 || !data.browser_scans_enabled;
     $('#broad-scan').textContent = scanning ? 'Scanning all cards…' : data.cooldown_seconds > 0 ? `Scan again in ${data.cooldown_seconds}s` : 'Scan all cards automatically';
@@ -549,12 +560,16 @@ async function loadBroadStatus() {
     $('#broad-progress').max = data.page_limit || data.max_searches;
     $('#broad-progress').value = data.pages_done || 0;
     $('#broad-status').textContent = (data.message || 'Ready to scan.') + (scanning ? ` ${data.pages_done || 0}/${data.page_limit} searches · ${data.candidates || 0} candidates so far.` : '');
+    $('#bargain-auto-check').disabled = busy || !data.browser_scans_enabled;
+    $('#bargain-auto-status').textContent = data.operation === 'price-check'
+      ? `${data.message || 'Checking saved singles…'}${(data.errors || []).length ? ` ${data.errors.join(' · ')}` : ''}`
+      : 'Public browser pages only. No paid API.';
     $('#broad-errors').innerHTML = (data.errors || []).map(error => `<p class="err">${esc(error)}</p>`).join('');
     $('#facebook-login').disabled = busy || !data.browser_scans_enabled;
     $('#facebook-finish').hidden = !signingIn;
     $('#facebook-finish').disabled = !data.login_waiting;
     $('#facebook-cancel').hidden = !signingIn;
-    if (!busy && data.operation === 'broad' && data.started !== completedBroadScan) {
+    if (!busy && ['broad', 'price-check'].includes(data.operation) && data.started !== completedBroadScan) {
       completedBroadScan = data.started;
       await loadDiscoveryResults();
       await loadOverview();
@@ -575,6 +590,14 @@ $('#broad-stop').addEventListener('click', async () => {
   try { await api('/api/snipe/discovery/stop', {method: 'POST'}); await loadBroadStatus(); }
   catch (err) { toast(err.message, true); }
 });
+$('#bargain-auto-check').addEventListener('click', async () => {
+  $('#bargain-auto-check').disabled = true;
+  $('#bargain-auto-status').textContent = 'Starting saved price check…';
+  try {
+    await api('/api/snipe/discovery/price-check', {method: 'POST'});
+    await loadBroadStatus();
+  } catch (err) { $('#bargain-auto-status').textContent = err.message; $('#bargain-auto-check').disabled = false; }
+});
 for (const [id, path] of [['#facebook-login', ''], ['#facebook-finish', '/finish'], ['#facebook-cancel', '/cancel']]) {
   $(id).addEventListener('click', async () => {
     $(id).disabled = true;
@@ -588,6 +611,7 @@ for (const [id, source] of [['#broad-all-leads', ''], ['#broad-ebay-leads', 'eba
 }
 $('#broad-result-format').addEventListener('change', renderDiscoveryResults);
 $('#broad-condition').addEventListener('change', renderDiscoveryResults);
+$('#broad-more').addEventListener('click', () => { broadLimit += 200; renderDiscoveryResults(); });
 for (const kind of PRODUCT_KINDS) {
   for (const view of ['broad', 'bargain']) {
     const box = $(`#${view}-kind-${kind}`);

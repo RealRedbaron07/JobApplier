@@ -144,6 +144,18 @@ def test_broad_scan_prices_exact_single_without_a_paid_api(browser_scan, monkeyp
     assert store.discovery_results()[0][0].market_value == 14
 
 
+def test_removed_find_is_not_repriced_or_counted_as_a_bargain(browser_scan, monkeypatch):
+    settings, store, _ = browser_scan
+    card = listing("facebook", title="Lugia VSTAR 139/195 Silver Tempest", price=5, shipping=0)
+    row = store.record_listing(card, None)
+    store.dismiss_listing(row.id)
+    monkeypatch.setattr(discovery.FacebookMarketplace, "find", lambda *a, **kw: [card])
+    monkeypatch.setattr(discovery, "bank_of_canada_usd_cad", lambda browser: pytest.fail("dismissed find was repriced"))
+    report = discovery.DiscoveryScanner(settings, store).scan("facebook")
+    assert report["candidates"] == report["priced"] == report["bargains"] == 0
+    assert store.discovery_results()[0] == []
+
+
 def test_one_blocked_source_does_not_repeat_or_discard_other_source_results(browser_scan, monkeypatch):
     settings, store, _ = browser_scan
     attempts = []
@@ -200,14 +212,15 @@ def test_browser_scan_flag_blocks_all_work(browser_scan, monkeypatch):
     assert not opened
 
 
-def test_empty_new_scan_does_not_present_old_results_as_fresh(browser_scan, monkeypatch):
+def test_empty_new_scan_keeps_unremoved_finds_with_their_older_timestamp(browser_scan, monkeypatch):
     settings, store, _ = browser_scan
     monkeypatch.setattr(discovery.EbayWeb, "search_page", lambda *a: [listing()])
     discovery.DiscoveryScanner(settings, store).scan("ebay")
-    assert len(store.discovery_results()[0]) == 1
+    previous = store.discovery_results()[0][0].discovery_at
     monkeypatch.setattr(discovery.EbayWeb, "search_page", lambda *a: [])
     discovery.DiscoveryScanner(settings, store).scan("ebay")
-    assert store.discovery_results()[0] == []
+    rows, latest = store.discovery_results()
+    assert len(rows) == 1 and rows[0].discovery_at == previous < latest.started
 
 
 def test_failed_source_keeps_earlier_candidates_with_their_original_scan_time(browser_scan, monkeypatch):
@@ -306,6 +319,68 @@ def test_removed_candidates_stay_removed_and_are_not_counted_as_available(browse
     assert store.dismiss_listing(row.id)
     report = scanner.scan("ebay")
     assert report["candidates"] == 0 and store.discovery_results()[0] == []
+
+
+def test_saved_price_check_advances_past_unmatched_cards_and_keeps_removed_out(browser_scan, monkeypatch):
+    settings, store, opened = browser_scan
+    started = datetime.now(timezone.utc)
+    for item in range(3):
+        row = store.record_listing(listing("facebook", str(item),
+                                           title=f"Pikachu 025/165 Pokemon 151 card {item}", price=10, shipping=0),
+                                   None, discovery_at=started)
+        if item == 2:
+            store.dismiss_listing(row.id)
+    store.record_scan(started, started, ["facebook"], False, 3, 3, 0, 0, 0, [], kind="broad")
+    monkeypatch.setattr(discovery, "bank_of_canada_usd_cad", lambda browser: 1.4)
+    checked = []
+    def product(browser, title):
+        checked.append(title)
+        return {"price": 10} if title.endswith("0") else None
+    monkeypatch.setattr(discovery, "tcgplayer_market", product)
+    safe_settings = replace(settings, ebay_app_id="", ebay_cert_id="", live=False, fb_auto_message=False,
+                            notify_macos=False, webhook_url="")
+    first = discovery.price_saved_singles(safe_settings, store)
+    second = discovery.price_saved_singles(safe_settings, store)
+    rows, _ = store.discovery_results()
+    assert first["checked"] == 2 and first["priced"] == first["bargains"] == 1
+    assert second["checked"] == 0 and len(checked) == 2 and len(opened) == 1 and opened[0].closed
+    assert len(rows) == 2 and all(row.price_checked_at for row in rows)
+
+
+def test_saved_price_stays_on_unchanged_listing_and_resets_when_ask_changes(browser_scan):
+    _, store, _ = browser_scan
+    started = datetime.now(timezone.utc)
+    original = listing(title="Pikachu 025/165 Pokemon 151 card", price=10)
+    row = store.record_listing(original, None, discovery_at=started)
+    assert store.set_discovery_price(row.id, 14, "browser")
+    same = store.record_listing(original, None, discovery_at=started)
+    assert same.market_value == 14 and same.price_checked_at is not None
+    changed = store.record_listing(listing(title=original.title, price=12), None, discovery_at=started)
+    assert changed.market_value is None and changed.price_checked_at is None
+
+
+def test_saved_price_check_endpoint_is_bounded_and_blocks_duplicate_scan(snipe_client, monkeypatch):
+    import dashboard.snipe_views as views
+
+    client, _, _ = snipe_client
+    monkeypatch.setattr(Config, "BROWSER_SCANS_ENABLED", True)
+    started, release = threading.Event(), threading.Event()
+    def check(settings, store, *, stop, progress):
+        started.set()
+        assert release.wait(2)
+        return {"message": "Checked 1 saved single", "checked": 1, "priced": 1, "bargains": 0, "errors": []}
+    monkeypatch.setattr(views, "price_saved_singles", check)
+    try:
+        assert client.post("/api/snipe/discovery/price-check").status_code == 202
+        assert started.wait(2)
+        assert client.post("/api/snipe/discovery/price-check").status_code == 409
+        assert client.post("/api/snipe/discovery/stop").status_code == 202
+    finally:
+        release.set()
+        deadline = time.monotonic() + 2
+        while views._scan_state["running"] and time.monotonic() < deadline:
+            time.sleep(0.01)
+    assert client.get("/api/snipe/discovery/scan").get_json()["checked"] == 1
 
 
 def test_one_click_broad_endpoint_runs_with_an_empty_watchlist_and_cannot_launch_duplicates(snipe_client, monkeypatch):

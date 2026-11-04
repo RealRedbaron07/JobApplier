@@ -13,7 +13,7 @@ from cardsnipe.browser import Browser, SourceUnavailable
 from cardsnipe.bargains import bank_of_canada_usd_cad, eligible, tcgplayer_market
 from cardsnipe.ebay import EbayWeb
 from cardsnipe.facebook import FacebookMarketplace
-from cardsnipe.matcher import Match, detect_condition_issue
+from cardsnipe.matcher import detect_condition_issue
 from cardsnipe.watchlist import Target
 
 MAX_SEARCHES = 8
@@ -117,7 +117,7 @@ class DiscoveryScanner:
         deadline = time.monotonic() + MAX_RUN_SECONDS
         browser = Browser(self.settings)
         ebay, facebook = EbayWeb(self.settings, browser), FacebookMarketplace(self.settings, browser)
-        found, unavailable, errors, failures = {}, set(), [], {}
+        found, unavailable, errors, failures, active = {}, set(), [], {}, set()
         scanned = pages = new = saved = priced = bargains = 0
         stopped = False
         try:
@@ -165,10 +165,16 @@ class DiscoveryScanner:
                 new += int(not self.store.is_seen(listing))
                 row = self.store.record_listing(listing, None, discovery_at=started,
                                                 discovery_routes=entry["routes"], promotion=promotion_text(listing))
+                entry["row_id"] = row.id
+                entry["price_checked_at"] = row.price_checked_at
                 saved += int(not row.dismissed)
-            # shortcut: price at most 12 exact singles per scan; add a resumable queue if coverage becomes too small.
+                if not row.dismissed:
+                    active.add(listing.key)
+            # Price a bounded set from this pass; saved finds can be checked separately.
             candidates = [entry["listing"] for entry in found.values()
-                          if entry["listing"].currency == "CAD" and eligible(entry["listing"].title)
+                          if entry["listing"].key in active and not entry["price_checked_at"]
+                          and entry["listing"].currency == "CAD"
+                          and eligible(entry["listing"].title)
                           and not detect_condition_issue(entry["listing"].condition)
                           and entry["listing"].total_price is not None and entry["listing"].price > 1]
             if candidates and not self.stop.is_set() and time.monotonic() < deadline:
@@ -186,18 +192,11 @@ class DiscoveryScanner:
                                 break
                             try:
                                 product = tcgplayer_market(browser, listing.title)
-                                if not product:
-                                    continue
-                                value = round(product["price"] * fx, 2)
-                                match = Match(Target(name="Broad browser price check", keywords=[], use_market=False),
-                                              listing, listing.total_price, 0, None, cap=0,
-                                              market_value=value, value_source=f"TCGplayer browser · BoC FX {fx:g}",
-                                              value_bucket="raw")
-                                self.store.record_listing(listing, match, discovery_at=started,
-                                                          discovery_routes=found[listing.key]["routes"],
-                                                          promotion=promotion_text(listing))
-                                priced += 1
-                                bargains += int(match.under_value_pct > 0)
+                                value = round(product["price"] * fx, 2) if product else None
+                                if self.store.set_discovery_price(found[listing.key]["row_id"], value,
+                                                                  f"TCGplayer browser · BoC FX {fx:g}" if value else ""):
+                                    priced += int(value is not None)
+                                    bargains += int(value is not None and value > listing.total_price)
                             except Exception as exc:
                                 errors.append(f"price check for {listing.title!r}: {str(exc).splitlines()[0]}")
                 except Exception as exc:
@@ -213,3 +212,46 @@ class DiscoveryScanner:
         return {"message": f"{'Stopped' if stopped else 'Finished'}: {saved} candidates saved from {pages} searches. {priced} exact singles priced, {bargains} possible bargains. {len(errors)} errors.",
                 "scanned": scanned, "new_listings": new, "candidates": saved, "pages_done": pages,
                 "page_limit": len(plan), "priced": priced, "bargains": bargains, "errors": errors, "stopped": stopped}
+
+
+def price_saved_singles(settings, store, stop=None, progress=None):
+    """Check the next 12 saved exact singles through public browser pages."""
+    rows, _ = store.discovery_results()
+    candidates = [row for row in rows if row.price_checked_at is None and row.currency == "CAD"
+                  and row.total_price is not None and row.price > 1 and eligible(row.title)
+                  and not detect_condition_issue(row.condition)]
+    candidates.sort(key=lambda row: row.source != "facebook")
+    candidates = candidates[:12]
+    if not candidates:
+        return {"message": "No unchecked exact singles remain in saved finds.", "checked": 0, "priced": 0,
+                "bargains": 0, "errors": []}
+    browser = Browser(settings)
+    checked = priced = bargains = 0
+    errors = []
+    deadline = time.monotonic() + MAX_RUN_SECONDS
+    try:
+        fx = bank_of_canada_usd_cad(browser)
+        if fx is None:
+            return {"message": "Bank of Canada rate was unreadable. No listings were marked checked.",
+                    "checked": 0, "priced": 0, "bargains": 0, "errors": ["USD/CAD rate unavailable"]}
+        for row in candidates:
+            if (stop is not None and stop.is_set()) or time.monotonic() >= deadline:
+                break
+            if progress:
+                progress(message=f"Checking saved singles: {checked}/12 checked…", checked=checked,
+                         priced=priced, bargains=bargains)
+            try:
+                product = tcgplayer_market(browser, row.title)
+                value = round(product["price"] * fx, 2) if product else None
+                if store.set_discovery_price(row.id, value, f"TCGplayer browser · BoC FX {fx:g}" if value else ""):
+                    checked += 1
+                    priced += int(value is not None)
+                    bargains += int(value is not None and value > row.total_price)
+            except Exception as exc:
+                errors.append(f"{row.title!r}: {str(exc).splitlines()[0]}")
+                if len(errors) >= 3:
+                    break
+    finally:
+        browser.quit()
+    return {"message": f"Checked {checked} saved singles. {priced} exact prices, {bargains} possible bargains. {len(errors)} errors.",
+            "checked": checked, "priced": priced, "bargains": bargains, "errors": errors}

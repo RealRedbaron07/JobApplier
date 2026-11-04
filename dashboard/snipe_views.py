@@ -14,7 +14,7 @@ from config import Config
 from cardsnipe.pricing import VALUATION_VERSION, PriceService, usd_rate
 from cardsnipe.discovery import (COOLDOWN_SECONDS, DISCOVERY_MODES, MAX_SEARCHES, RESULTS_PER_SEARCH,
                                  DiscoveryScanner, browser_search_links as _browser_search_links,
-                                 is_discovery_candidate, search_plan)
+                                 is_discovery_candidate, price_saved_singles, search_plan)
 from cardsnipe.runner import revalue_store, scanner_session
 from cardsnipe.settings import SnipeSettings
 from cardsnipe.store import ScanRun, ScheduledBid, SeenListing, Store
@@ -316,6 +316,20 @@ def _run_broad_scan(settings, source):
         _scan_state.update(result, running=False, finished=_iso(datetime.now(timezone.utc)))
 
 
+def _run_saved_price_check(settings):
+    def progress(**state):
+        with _scan_lock:
+            _scan_state.update(state)
+
+    try:
+        with scanner_session(settings):
+            result = price_saved_singles(settings, get_store(), stop=_discovery_stop, progress=progress)
+    except Exception as exc:
+        result = {"message": "Saved price check failed. " + str(exc), "errors": [str(exc)]}
+    with _scan_lock:
+        _scan_state.update(result, running=False, finished=_iso(datetime.now(timezone.utc)))
+
+
 def _discovery_status():
     _, latest = get_store().discovery_results()
     remaining = 0
@@ -359,10 +373,32 @@ def snipe_discovery_scan():
 @snipe_bp.post("/api/snipe/discovery/stop")
 def snipe_discovery_stop():
     with _scan_lock:
-        if not _scan_state["running"] or _scan_state.get("operation") != "broad":
-            return jsonify({"error": "No broad scan is running."}), 409
+        if not _scan_state["running"] or _scan_state.get("operation") not in {"broad", "price-check"}:
+            return jsonify({"error": "No browser scan is running."}), 409
         _discovery_stop.set()
         _scan_state.update(message="Stopping after the current page…")
+        return jsonify(_scan_state), 202
+
+
+@snipe_bp.post("/api/snipe/discovery/price-check")
+def snipe_discovery_price_check():
+    with _scan_lock:
+        if not Config.BROWSER_SCANS_ENABLED:
+            return jsonify({"error": "Browser scans are disabled"}), 403
+        if _scan_state["running"]:
+            return jsonify({"error": "A browser scan or scanner sign-in is already running."}), 409
+        settings = replace(_settings(), ebay_app_id="", ebay_cert_id="", live=False, fb_auto_message=False,
+                           notify_macos=False, open_in_browser=False, webhook_url="")
+        try:
+            with scanner_session(settings):
+                pass
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 409
+        _discovery_stop.clear()
+        _scan_state.update(running=True, operation="price-check", errors=[], checked=0, priced=0, bargains=0,
+                           started=_iso(datetime.now(timezone.utc)), finished=None,
+                           message="Starting saved price check. Up to 12 public browser searches…")
+        threading.Thread(target=_run_saved_price_check, args=(settings,), daemon=True).start()
         return jsonify(_scan_state), 202
 
 

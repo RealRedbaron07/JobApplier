@@ -57,7 +57,8 @@ def bank_of_canada_usd_cad(browser):
 
 def tcgplayer_market(browser, title):
     browser.get("https://www.tcgplayer.com/search/pokemon/product?productLineName=pokemon&q=" + quote_plus(title))
-    browser.wait_until(lambda: bool(browser.js("return document.querySelector('.product-card__product')")), 8)
+    if not browser.wait_until(lambda: bool(browser.js("return document.querySelector('.product-card__product')")), 8):
+        raise RuntimeError("TCGplayer search results were unreadable; this card was not checked")
     products = browser.js("""return [...document.querySelectorAll('.product-card__product')].map(card => ({
       set: card.querySelector('.product-card__set-name')?.innerText || '',
       number: (card.querySelector('.product-card__rarity')?.innerText || '').match(/#\\d+\\/\\d+/)?.[0] || '',

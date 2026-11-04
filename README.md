@@ -79,7 +79,7 @@ The scan covers promotions/coupons, newest listings, ending auctions, offers, si
 
 Filter imported candidates using **Min price** and **Max price** together under **Scan results**. Bounds include reported shipping, before tax and other charges; unknown totals are hidden while either bound is set. Blank bounds leave that side open. Optional **Set in title** and **Type in title** fields combine with the price, site and keyword filters. Uncheck Singles, Graded, Sealed, Promos, or Other / unclear to hide multiple product types in both Scan results and Bargain review; your choices stay in this browser. Product types are title-based estimates, and Promo means a promo card rather than a seller discount. **Clear price** resets only the price range. Filters update immediately and do not trigger scans or judge whether a card is a value play.
 
-Use **Condition claim** in Scan results or Bargain review for NM/Mint, LP, MP, heavily played/damaged, or Unknown. It reads seller condition fields and title claims; a blank or generic “Pre-Owned” field is Unknown unless the title gives a specific claim. Graded and sealed products appear under Any condition. No condition is verified from photos.
+Use **Condition** in Scan results or Bargain review for NM/Mint, LP, MP, heavily played/damaged, Unknown, Graded, or Sealed. It reads seller condition fields and title claims; a blank or generic “Pre-Owned” field is Unknown unless the title gives a specific claim. The on-page count shows each category for the selected site. No condition is verified from photos.
 
 **Buying format** filters the same saved candidates to auctions, Buy Now/fixed-price listings, or both. Marketplace listings count as fixed price. The filter combines with price, site, set, type and keywords. Auction prices are current bids, not final prices.
 
@@ -93,9 +93,11 @@ To clear finds you already reviewed, select individual rows or use **Select visi
 
 Marketplace results use the scanner profile's Facebook locale. Turkish "just listed" text is ignored as a title, "Ücretsiz" is read as free, and dot-grouped amounts such as `CA$4.000` are read as CAD 4,000. Free and $1 Marketplace asks are never highlighted as bargain percentages because they may be placeholder prices; verify the seller page. A new scan is needed to replace older misparsed results.
 
-If a source fails during a combined scan, Scan results retains that source's last saved candidates with an **Earlier scan** timestamp and availability warning. Current results from the working source still appear. Previous results are never silently presented as fresh.
+New scans add to the unremoved review queue; they do not clear earlier finds you have not removed. Scan results shows the first 200 matching finds and **Show more saved finds** reveals the next 200. Older listings carry an **Earlier scan** timestamp and need an availability check. This also keeps older finds visible when a source fails during a combined scan.
 
 `Config.BROWSER_SCANS_ENABLED` permits these explicit read-only Chrome scans and scanner sign-in. Broad scans visit public TCGplayer and Bank of Canada pages in Chrome for bounded price checks. `Config.EXTERNAL_ACCESS_ENABLED` stays hard-disabled: no paid API, direct TCGplayer/PriceCharting API call, Collectr sync, career-board fetch, or paid AI service runs from the card scanner. Existing API keys are stripped from the broad scanner settings. The old scanner CLI and targeted network/valuation endpoints remain disabled. The app never bids, buys, or sends seller messages.
+
+In **Bargain review**, **Check next 12 saved singles** prices up to 12 previously unchecked, unremoved exact singles, starting with Marketplace. It uses the same public browser pages and does not repeat the broad listing search. Listings without an exact reference stay in the price-check queue; a positive comparison appears under **Possible bargains**. The action stops after three price-source errors or the scan time limit.
 
 The scanner uses a persistent, separate Chrome profile. Your normal browser's Facebook login is not copied into it. If Marketplace asks for authentication, expand **Marketplace scanner sign-in**, sign in once, and click **Finish scanner sign-in**. The sign-in window stays open until you finish or cancel. Do not enter credentials into a short-lived scan window.
 

@@ -206,7 +206,7 @@ test('one click starts a broad scan and completion imports visible results witho
   assert.deepEqual(page.opened, []);
   running = false;
   await page.context.loadBroadStatus();
-  assert.equal(page.element('#broad-result-count').textContent, '1 of 1 candidates');
+  assert.equal(page.element('#broad-result-count').textContent, '1 of 1 saved finds');
   assert.match(page.element('#broad-results-table').innerHTML, /Any card &lt;script&gt;/);
   assert.match(page.element('#broad-results-table').innerHTML, /Lightly Played/);
   assert.match(page.element('#broad-results-table').innerHTML, /shipping unknown/);
@@ -237,11 +237,11 @@ function priceFilterPage(includePricedMarketplace = false) {
 test('price bounds include shipping and endpoints, exclude unknown totals, and never start a scan', async () => {
   const page = priceFilterPage();
   await page.context.loadDiscoveryResults();
-  assert.equal(page.element('#broad-result-count').textContent, '6 of 6 candidates');
+  assert.equal(page.element('#broad-result-count').textContent, '6 of 6 saved finds');
   page.element('#broad-min-price').value = '15.00';
   page.element('#broad-max-price').value = '20.00';
   page.element('#broad-max-price').listeners.input();
-  assert.equal(page.element('#broad-result-count').textContent, '2 of 6 candidates');
+  assert.equal(page.element('#broad-result-count').textContent, '2 of 6 saved finds');
   const html = page.element('#broad-results-table').innerHTML;
   assert.match(html, /shipping-included/);
   assert.match(html, /upper-boundary/);
@@ -252,7 +252,7 @@ test('price bounds include shipping and endpoints, exclude unknown totals, and n
   await page.context.loadDiscoveryResults();
   assert.equal(page.element('#broad-min-price').value, '15.00');
   assert.equal(page.element('#broad-max-price').value, '20.00');
-  assert.equal(page.element('#broad-result-count').textContent, '2 of 6 candidates');
+  assert.equal(page.element('#broad-result-count').textContent, '2 of 6 saved finds');
 });
 
 test('one-sided bounds, zero and clearing work with existing source and keyword filters', async () => {
@@ -260,22 +260,22 @@ test('one-sided bounds, zero and clearing work with existing source and keyword 
   await page.context.loadDiscoveryResults();
   page.element('#broad-max-price').value = '20';
   page.context.renderDiscoveryResults();
-  assert.equal(page.element('#broad-result-count').textContent, '3 of 6 candidates');
+  assert.equal(page.element('#broad-result-count').textContent, '3 of 6 saved finds');
   page.element('#broad-min-price').value = '0';
   page.element('#broad-max-price').value = '0';
   page.context.renderDiscoveryResults();
-  assert.equal(page.element('#broad-result-count').textContent, '1 of 6 candidates');
+  assert.equal(page.element('#broad-result-count').textContent, '1 of 6 saved finds');
   assert.match(page.element('#broad-results-table').innerHTML, /free-pickup/);
   page.element('#broad-min-price').value = '15';
   page.element('#broad-max-price').value = '';
   page.context.renderDiscoveryResults();
-  assert.equal(page.element('#broad-result-count').textContent, '3 of 6 candidates');
+  assert.equal(page.element('#broad-result-count').textContent, '3 of 6 saved finds');
   page.element('#broad-result-source').value = 'ebay';
   page.element('#broad-result-query').value = 'unknown';
   page.context.renderDiscoveryResults();
-  assert.equal(page.element('#broad-result-count').textContent, '0 of 6 candidates');
+  assert.equal(page.element('#broad-result-count').textContent, '0 of 6 saved finds');
   page.element('#broad-price-clear').click();
-  assert.equal(page.element('#broad-result-count').textContent, '2 of 6 candidates');
+  assert.equal(page.element('#broad-result-count').textContent, '2 of 6 saved finds');
   assert.equal(page.element('#broad-result-source').value, 'ebay');
   assert.equal(page.element('#broad-result-query').value, 'unknown');
   assert.equal(page.requests.length, 1);
@@ -289,7 +289,7 @@ test('set and type title filters combine with the high and low price limits with
   page.element('#broad-result-set').value = 'Evolving Skies';
   page.element('#broad-result-type').value = 'PSA';
   page.element('#broad-result-type').listeners.input();
-  assert.equal(page.element('#broad-result-count').textContent, '1 of 6 candidates');
+  assert.equal(page.element('#broad-result-count').textContent, '1 of 6 saved finds');
   assert.match(page.element('#broad-results-table').innerHTML, /shipping-included/);
   assert.doesNotMatch(page.element('#broad-results-table').innerHTML, /upper-boundary|above-with-shipping/);
   assert.doesNotMatch(page.element('#broad-results-table').innerHTML, /under value|worth buying|value play/);
@@ -306,14 +306,19 @@ test('condition filter treats seller title claims separately from unknown and ca
   assert.equal(page.context.conditionClaim({title: 'Pikachu LP', condition: 'Pre-Owned'}), 'lp');
   assert.equal(page.context.conditionClaim({title: 'Pikachu NM', condition: 'Moderately Played'}), 'mp');
   assert.equal(page.context.conditionClaim({title: 'Pikachu no scratches', condition: ''}), 'unknown');
-  assert.equal(page.context.conditionClaim({title: 'PSA 10 Pikachu', condition: ''}), 'other');
+  assert.equal(page.context.conditionClaim({title: 'PSA 10 Pikachu', condition: ''}), 'graded');
+  assert.equal(page.context.conditionClaim({title: 'Pikachu sealed booster box', condition: ''}), 'sealed');
   page.element('#broad-result-source').value = '';
   page.element('#broad-condition').value = 'unknown';
   page.element('#broad-condition').listeners.change();
-  assert.equal(page.element('#broad-result-count').textContent, '5 of 7 candidates');
+  assert.equal(page.element('#broad-result-count').textContent, '5 of 7 saved finds');
   page.element('#broad-condition').value = 'nm';
   page.element('#broad-condition').listeners.change();
-  assert.equal(page.element('#broad-result-count').textContent, '0 of 7 candidates');
+  assert.equal(page.element('#broad-result-count').textContent, '0 of 7 saved finds');
+  page.element('#broad-condition').value = 'graded';
+  page.element('#broad-condition').listeners.change();
+  assert.equal(page.element('#broad-result-count').textContent, '2 of 7 saved finds');
+  assert.match(page.element('#broad-condition-breakdown').textContent, /Graded 2/);
 });
 
 test('auction and fixed-price filters combine with price and site without starting a scan', async () => {
@@ -323,18 +328,18 @@ test('auction and fixed-price filters combine with price and site without starti
   page.element('#broad-max-price').value = '20';
   page.element('#broad-result-format').value = 'auction';
   page.element('#broad-result-format').listeners.change();
-  assert.equal(page.element('#broad-result-count').textContent, '1 of 6 candidates');
+  assert.equal(page.element('#broad-result-count').textContent, '1 of 6 saved finds');
   assert.match(page.element('#broad-results-table').innerHTML, /upper-boundary/);
   assert.doesNotMatch(page.element('#broad-results-table').innerHTML, /shipping-included/);
   page.element('#broad-result-format').value = 'bin';
   page.element('#broad-result-format').listeners.change();
-  assert.equal(page.element('#broad-result-count').textContent, '1 of 6 candidates');
+  assert.equal(page.element('#broad-result-count').textContent, '1 of 6 saved finds');
   assert.match(page.element('#broad-results-table').innerHTML, /shipping-included/);
   page.element('#broad-result-source').value = 'facebook';
   page.element('#broad-result-source').listeners.change();
-  assert.equal(page.element('#broad-result-count').textContent, '0 of 6 candidates');
+  assert.equal(page.element('#broad-result-count').textContent, '0 of 6 saved finds');
   page.element('#broad-price-clear').click();
-  assert.equal(page.element('#broad-result-count').textContent, '1 of 6 candidates');
+  assert.equal(page.element('#broad-result-count').textContent, '1 of 6 saved finds');
   assert.match(page.element('#broad-results-table').innerHTML, /free-pickup/);
   assert.equal(page.requests.length, 1);
 });
@@ -347,7 +352,7 @@ test('Marketplace leads are visible and a checked reference shows a percentage w
   assert.doesNotMatch(page.element('#broad-results-table').innerHTML, /Possible bargain:/);
   page.element('#broad-facebook-leads').click();
   assert.equal(page.element('#broad-result-source').value, 'facebook');
-  assert.equal(page.element('#broad-result-count').textContent, '2 of 7 candidates');
+  assert.equal(page.element('#broad-result-count').textContent, '2 of 7 saved finds');
   assert.match(page.element('#broad-results-table').innerHTML, /free-pickup/);
   page.element('#broad-results-table').listeners.change({target: {dataset: {reference: 'facebook:5:CAD'}, value: '20'}});
   assert.match(page.element('#broad-results-table').innerHTML, /Free \/ \$1 may be a placeholder/);
@@ -511,7 +516,7 @@ test('invalid and reversed price ranges show an error instead of misleading resu
     page.element('#broad-min-price').value = min;
     page.element('#broad-max-price').value = max;
     page.context.renderDiscoveryResults();
-    assert.equal(page.element('#broad-result-count').textContent, '0 of 6 candidates');
+    assert.equal(page.element('#broad-result-count').textContent, '0 of 6 saved finds');
     assert.match(page.element('#broad-price-help').textContent, /cannot exceed|non-negative/);
   }
   page.element('#broad-min-price').value = '';
@@ -519,5 +524,5 @@ test('invalid and reversed price ranges show an error instead of misleading resu
   page.element('#broad-min-price').validity = {badInput: true};
   page.context.renderDiscoveryResults();
   assert.equal(page.element('#broad-min-price').attributes['aria-invalid'], 'true');
-  assert.equal(page.element('#broad-result-count').textContent, '0 of 6 candidates');
+  assert.equal(page.element('#broad-result-count').textContent, '0 of 6 saved finds');
 });

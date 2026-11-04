@@ -41,6 +41,7 @@ class SeenListing(Base):
     location = Column(String(255))
     condition = Column(Text)
     discovery_at = Column(DateTime)
+    price_checked_at = Column(DateTime)
     discovery_routes = Column(Text)
     promotion = Column(Text)
     first_seen = Column(DateTime, default=utcnow)
@@ -216,6 +217,11 @@ class Store:
             if row is None:
                 row = SeenListing(source=listing.source, listing_id=listing.listing_id)
                 session.add(row)
+            same_listing = (row.title == listing.title and row.price == listing.price
+                            and row.shipping == listing.shipping and row.total_price == listing.total_price
+                            and row.currency == listing.currency)
+            fresh_price = (discovery_at is not None and match is None and same_listing and row.price_checked_at
+                           and (utcnow() - _aware(row.price_checked_at)).total_seconds() < 6 * 3600)
             row.title = listing.title
             row.price = listing.price
             row.shipping = listing.shipping
@@ -233,11 +239,28 @@ class Store:
                 row.discovery_at = discovery_at
                 row.discovery_routes = json.dumps(discovery_routes or [])
                 row.promotion = promotion
-            self._apply_match(row, None if row.dismissed else match)
+            if not fresh_price or row.dismissed:
+                self._apply_match(row, None if row.dismissed else match)
+                if discovery_at is not None and match is None:
+                    row.price_checked_at = None
             if discovery_at is not None:
                 row.matched_target = None
             session.commit()
             return row
+
+    def set_discovery_price(self, row_id: int, value: float | None, source: str = "") -> bool:
+        with self.session() as session:
+            row = session.get(SeenListing, row_id)
+            if row is None or row.dismissed or row.discovery_at is None:
+                return False
+            row.price_checked_at = utcnow()
+            row.market_value = value
+            row.value_source = source or None
+            row.value_bucket = "raw" if value else None
+            row.savings_pct = (value - row.total_price) / value * 100 if value and row.total_price is not None else None
+            row.matched_target = None
+            session.commit()
+            return True
 
     @staticmethod
     def _apply_match(row: SeenListing, match: Match | None) -> None:
@@ -479,29 +502,11 @@ class Store:
             return session.query(ScanRun).order_by(ScanRun.started.desc()).limit(limit).all()
 
     def discovery_results(self):
-        import json
-
         with self.session() as session:
             latest = session.query(ScanRun).filter_by(kind="broad").order_by(ScanRun.started.desc()).first()
-            rows = (session.query(SeenListing).filter_by(discovery_at=latest.started, dismissed=False)
-                    .order_by(SeenListing.promotion.desc(), SeenListing.price.asc()).limit(500).all()) if latest else []
-            if latest:
-                try:
-                    errors = json.loads(latest.errors or "[]")
-                except ValueError:
-                    errors = []
-                for source in ("ebay", "facebook"):
-                    if (source not in (latest.sources or "").split(",") or any(row.source == source for row in rows)
-                            or not any(error.startswith(source + " ") for error in errors)):
-                        continue
-                    previous = (session.query(SeenListing.discovery_at)
-                                .filter(SeenListing.source == source, SeenListing.dismissed.isnot(True),
-                                        SeenListing.discovery_at.isnot(None), SeenListing.discovery_at < latest.started)
-                                .order_by(SeenListing.discovery_at.desc()).first())
-                    if previous:
-                        rows += (session.query(SeenListing)
-                                 .filter_by(source=source, discovery_at=previous[0], dismissed=False)
-                                 .order_by(SeenListing.promotion.desc(), SeenListing.price.asc()).limit(500).all())
+            rows = (session.query(SeenListing)
+                    .filter(SeenListing.discovery_at.isnot(None), SeenListing.dismissed.isnot(True))
+                    .order_by(SeenListing.discovery_at.desc(), SeenListing.id.desc()).all()) if latest else []
             return rows, latest
 
     def summary(self) -> dict:
