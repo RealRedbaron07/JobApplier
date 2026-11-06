@@ -21,6 +21,8 @@ RESULTS_PER_SEARCH = 60
 COOLDOWN_SECONDS = 60
 PAGE_INTERVAL_SECONDS = 2
 MAX_RUN_SECONDS = 180
+PRICE_CHECKS_PER_RUN = 40
+PRICE_CHECK_SECONDS = 360
 DISCOVERY_MODES = (
     ("all", "All listings", "Every buying format, newest first"),
     ("sale", "Sales & coupons", "Seller promotions and marked reductions"),
@@ -177,13 +179,15 @@ class DiscoveryScanner:
                           and eligible(entry["listing"].title)
                           and not detect_condition_issue(entry["listing"].condition)
                           and entry["listing"].total_price is not None and entry["listing"].price > 1]
-            if candidates and not self.stop.is_set() and time.monotonic() < deadline:
+            # Pricing gets its own time budget so a slow search phase does not starve it.
+            deadline = time.monotonic() + PRICE_CHECK_SECONDS
+            if candidates and not self.stop.is_set():
                 try:
                     fx = bank_of_canada_usd_cad(browser)
                     if fx is None:
                         errors.append("price check: Bank of Canada USD/CAD rate was not readable; no comparisons made")
                     else:
-                        for listing in candidates[:12]:
+                        for listing in candidates[:PRICE_CHECKS_PER_RUN]:
                             if self.stop.is_set() or time.monotonic() >= deadline:
                                 break
                             self.progress(message=f"Checking exact card prices: {priced} priced so far…",
@@ -215,20 +219,20 @@ class DiscoveryScanner:
 
 
 def price_saved_singles(settings, store, stop=None, progress=None):
-    """Check the next 12 saved exact singles through public browser pages."""
+    """Check the next batch of saved exact singles through public browser pages."""
     rows, _ = store.discovery_results()
     candidates = [row for row in rows if row.price_checked_at is None and row.currency == "CAD"
                   and row.total_price is not None and row.price > 1 and eligible(row.title)
                   and not detect_condition_issue(row.condition)]
     candidates.sort(key=lambda row: row.source != "facebook")
-    candidates = candidates[:12]
+    candidates = candidates[:PRICE_CHECKS_PER_RUN]
     if not candidates:
         return {"message": "No unchecked exact singles remain in saved finds.", "checked": 0, "priced": 0,
                 "bargains": 0, "errors": []}
     browser = Browser(settings)
     checked = priced = bargains = 0
     errors = []
-    deadline = time.monotonic() + MAX_RUN_SECONDS
+    deadline = time.monotonic() + PRICE_CHECK_SECONDS
     try:
         fx = bank_of_canada_usd_cad(browser)
         if fx is None:
@@ -238,7 +242,7 @@ def price_saved_singles(settings, store, stop=None, progress=None):
             if (stop is not None and stop.is_set()) or time.monotonic() >= deadline:
                 break
             if progress:
-                progress(message=f"Checking saved singles: {checked}/12 checked…", checked=checked,
+                progress(message=f"Checking saved singles: {checked}/{len(candidates)} checked…", checked=checked,
                          priced=priced, bargains=bargains)
             try:
                 product = tcgplayer_market(browser, row.title)
@@ -249,7 +253,7 @@ def price_saved_singles(settings, store, stop=None, progress=None):
                     bargains += int(value is not None and value > row.total_price)
             except Exception as exc:
                 errors.append(f"{row.title!r}: {str(exc).splitlines()[0]}")
-                if len(errors) >= 3:
+                if len(errors) >= 5:
                     break
     finally:
         browser.quit()

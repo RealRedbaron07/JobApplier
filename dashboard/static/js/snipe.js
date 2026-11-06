@@ -3,7 +3,7 @@
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money = (currency, value) => value == null ? '—' : `${currency || ''} ${Number(value).toFixed(2)}`.trim();
-const TITLES = {discover:'Browse cards', bargains:'Bargain review', overview:'Saved overview', deals:'Saved matches', bids:'Auction history', values:'Price references', collection:'My portfolio', watchlist:'Watchlist & budget', scans:'Past scans', listings:'Saved listings'};
+const TITLES = {discover:'Find cards', bargains:'Bargains', saved:'Saved', overview:'Saved overview', deals:'Watchlist matches', bids:'Auction history', values:'Price references', collection:'My portfolio', watchlist:'Watchlist & budget', scans:'Past scans', listings:'All listings'};
 const BUCKETS = ['raw', '7', '8', '9', '9.5', '10'];
 const BUCKET_LABEL = {raw: 'Raw market reference', '7': 'PSA 7', '8': 'PSA 8', '9': 'PSA 9', '9.5': 'Grade 9.5', '10': 'PSA 10'};
 const listingPrice = row => row.total_price == null && row.price != null
@@ -132,7 +132,7 @@ async function loadOverview() {
     <div class="deal-row">
       <div><a href="${esc(row.url)}" target="_blank" rel="noopener">${esc(row.title)}</a><small>${lanePill(row)} ${esc(gradeText(row))} · ${esc(row.matched_target)} · checked ${ago(row.last_seen)}</small></div>
       <div class="deal-price">${esc(listingPrice(row))}<small>${esc(underText(row))}${row.market_value ? ` (${esc(money(row.currency, row.market_value))})` : ''}</small></div>
-    </div>`).join('') : '<div class="empty compact-empty">No independently priced matches. Browse cards to run a broad scan and review all collected candidates.</div>';
+    </div>`).join('') : '<div class="empty compact-empty">No independently priced matches. Use Find cards to run a scan and review all collected candidates.</div>';
 
   bars($('#by-target'), summary.deals_by_target, 'No matches recorded yet');
   bars($('#by-source'), summary.deals_by_source, 'No matches recorded yet');
@@ -149,7 +149,7 @@ async function loadOverview() {
   $('#scan-spark').innerHTML = runs.length ? `<div class="spark">${runs.map(r =>
     `<i class="${r.errors.length ? 'has-errors' : r.deals ? 'has-deals' : ''}" style="height:${Math.max(5, Math.round((r.scanned || 0) / maxScanned * 100))}%" title="${esc(r.started)} · ${r.scanned} scanned · ${r.deals} new alerts${r.errors.length ? ' · errors' : ''}"></i>`).join('')}</div>` : '<div class="empty compact-empty">No scans recorded.</div>';
   const recentErrors = scans.scans.slice(0, 5).flatMap(r => r.errors.map(e => ({when: r.started, text: e})));
-  $('#scan-errors').innerHTML = recentErrors.length ? '<p class="detail-meta">Errors from saved scan runs. Current scan status appears in Browse cards.</p>' + recentErrors.slice(0, 4).map(e => `<div class="err">${esc(ago(e.when))}. ${esc(e.text)}</div>`).join('') : '<div class="ok" style="font-size:11px">No errors in saved recent scans.</div>';
+  $('#scan-errors').innerHTML = recentErrors.length ? '<p class="detail-meta">Errors from saved scan runs. Current scan status is on Find cards.</p>' + recentErrors.slice(0, 4).map(e => `<div class="err">${esc(ago(e.when))}. ${esc(e.text)}</div>`).join('') : '<div class="ok" style="font-size:11px">No errors in saved recent scans.</div>';
 }
 
 // ── deals ───────────────────────────────────────────────────────────────────
@@ -356,14 +356,14 @@ function candidateDiscount(row) {
     ? (reference - row.total_price) / reference * 100 : null;
 }
 function candidateComparisonText(row, discount = candidateDiscount(row)) {
-  const source = Number(candidateReferences[candidateKey(row)]) > 0 ? 'your reference' : `${row.value_source || 'market reference'} (condition and printing unverified)`;
-  if (discount != null) return discount > 0 ? `Possible bargain: ${discount.toFixed(1)}% below ${source}`
-    : discount < 0 ? `${Math.abs(discount).toFixed(1)}% above ${source}` : `At ${source}`;
+  const source = Number(candidateReferences[candidateKey(row)]) > 0 ? 'your price' : 'TCGplayer';
+  if (discount != null) return discount > 0 ? `${discount.toFixed(0)}% below ${source}`
+    : discount < 0 ? `${Math.abs(discount).toFixed(0)}% above ${source}` : `At ${source}`;
   if (row.source === 'facebook' && row.price != null && row.price <= 1)
-    return 'Free / $1 may be a placeholder; confirm seller price';
-  return row.total_price == null ? 'Total unknown; check shipping first' : 'No exact browser price found; enter your reference to compare';
+    return '$0–1 is usually a placeholder';
+  return row.total_price == null ? 'Shipping unknown' : 'Not priced';
 }
-const candidateReferenceInput = row => `<div class="reference-control"><label class="compact-control">Your reference (${esc(row.currency)})<input class="candidate-reference" data-reference="${esc(candidateKey(row))}" aria-label="Your reference price for ${esc(row.title)}" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="Enter price" value="${esc(candidateReferences[candidateKey(row)] ?? '')}"></label><button class="button secondary small" type="button" data-compare="${esc(candidateKey(row))}">Compare</button></div>`;
+const candidateReferenceInput = row => `<div class="reference-control"><label class="compact-control">Your price<input class="candidate-reference" data-reference="${esc(candidateKey(row))}" aria-label="Your reference price for ${esc(row.title)}" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="${esc(row.currency)}" value="${esc(candidateReferences[candidateKey(row)] ?? '')}"></label><button class="button secondary small" type="button" data-compare="${esc(candidateKey(row))}">Compare</button></div>`;
 const PRODUCT_KINDS = ['single', 'graded', 'sealed', 'promo', 'other'];
 const PRODUCT_LABELS = {single: 'Single', graded: 'Graded', sealed: 'Sealed', promo: 'Promo', other: 'Other / unclear'};
 const PRODUCT_KINDS_KEY = 'cardsnipe_visible_product_kinds_v1';
@@ -401,7 +401,7 @@ function conditionText(row) {
 function conditionBreakdown(rows) {
   const counts = Object.fromEntries(Object.keys(CONDITION_LABELS).map(kind => [kind, 0]));
   rows.forEach(row => { counts[conditionClaim(row)]++; });
-  return `Condition claims in this site, before other filters: ${Object.entries(counts).map(([kind, count]) => `${CONDITION_LABELS[kind]} ${count}`).join(' · ')}. These are seller claims, not photo checks.`;
+  return `Conditions: ${Object.entries(counts).map(([kind, count]) => `${CONDITION_LABELS[kind]} ${count}`).join(' · ')}`;
 }
 
 function renderDiscoveryResults() {
@@ -435,42 +435,41 @@ function renderDiscoveryResults() {
   for (const [id, site, label] of [['#broad-all-leads', '', 'All'], ['#broad-ebay-leads', 'ebay', 'eBay'], ['#broad-facebook-leads', 'facebook', 'Marketplace']]) {
     const button = $(id);
     const matching = discoveryResultData.listings.filter(row => productKindVisible(row) && (!site || row.source === site));
-    const earlier = matching.filter(row => row.discovery_at && row.discovery_at !== scan?.started).length;
-    button.textContent = `${label} ${matching.length}${earlier ? ` (${earlier} earlier)` : ''}`;
+    button.textContent = `${label} ${matching.length}`;
     button.setAttribute('aria-pressed', String(source === site));
   }
-  $('#broad-price-help').textContent = priceError || `Price filters${scan?.currency ? ` (${scan.currency})` : ''} include reported shipping, before tax. Unknown totals are hidden while a price range is set. Marketplace listings count as fixed price. Set and type match listing titles only; verify on the seller page. Filters do not start a scan.`;
-  $('#broad-result-count').textContent = scan ? `${rows.length} of ${discoveryResultData.listings.length} saved finds${rows.length > broadLimit ? ` · ${broadLimit} shown` : ''}` : 'No scan yet';
+  $('#broad-price-help').textContent = priceError || `Price filters${scan?.currency ? ` (${scan.currency})` : ''} include reported shipping, before tax.`;
+  $('#broad-result-count').textContent = scan ? `${rows.length} of ${discoveryResultData.listings.length}` : 'No scan yet';
   $('#broad-result-meta').textContent = scan
-    ? `Latest scan ${new Date(scan.started).toLocaleString()} · ${scan.scanned} rows read · ${scan.errors.length} source errors${scan.budget != null ? ` · older scan capped at ${money(scan.currency, scan.budget)} listed price` : ''}. Unremoved finds from earlier scans stay here with their original scan time. Open older listings to confirm availability.`
-    : 'Promotions and asking prices are leads. Below-market value is not independently verified.';
+    ? `Last scan ${new Date(scan.started).toLocaleString()}${scan.errors.length ? ` · ${scan.errors.length} errors` : ''}`
+    : '';
   $('#broad-more').hidden = rows.length <= broadLimit;
-  $('#broad-more').textContent = `Show more saved finds (${Math.min(200, rows.length - broadLimit)} next)`;
-  $('#broad-results-table').innerHTML = rows.length ? rows.slice(0, broadLimit).map(row => {
-    const discount = candidateDiscount(row);
-    return `<tr class="${discount > 0 ? 'candidate-bargain' : ''}">
-    <td><a href="${esc(row.url)}" target="_blank" rel="noopener">${esc(row.title)}</a><span class="sub">${esc(row.source)} · ${PRODUCT_LABELS[productKind(row)]} · ${row.listing_type === 'auction' ? 'Auction, current bid can rise' : 'Listed asking price'}${row.location ? ` · ${esc(row.location)}` : ''}</span>${row.discovery_at && row.discovery_at !== scan?.started ? `<span class="sub over-budget">Earlier scan ${esc(new Date(row.discovery_at).toLocaleString())}; open listing to confirm availability</span>` : ''}</td>
-    <td>${row.promotion ? `<div class="candidate-promotion">${esc(row.promotion)}</div>` : ''}${row.discovery_routes.map(route => `<span class="sub">${esc(route)}</span>`).join('')}</td>
-    <td><strong>${row.price == null ? 'Price varies / unavailable' : esc(listingPrice(row))}</strong>${row.shipping != null && row.shipping > 0 ? `<span class="sub">Includes ${esc(money(row.currency, row.shipping))} shipping</span>` : ''}<span class="sub">Before tax and other charges</span></td>
-    <td>${candidateReferenceInput(row)}<span class="sub">${esc(candidateComparisonText(row, discount))}</span></td>
-    <td>${esc(conditionText(row))}</td><td>${esc(ago(row.last_seen))}</td>
-    <td><input type="checkbox" data-select-listing="${row.id}" aria-label="Select ${esc(row.title)}"><button class="button secondary small" data-dismiss="${row.id}">Remove</button></td>
-  </tr>`;
-  }).join('') : `<tr><td colspan="7" class="empty">${priceError || (scan ? 'No unremoved finds match these filters. Check the condition counts and other filters above.' : 'Click Scan all cards automatically to collect listings here.')}</td></tr>`;
+  $('#broad-more').textContent = `Show more (${Math.min(200, rows.length - broadLimit)})`;
+  $('#broad-results-table').innerHTML = rows.length ? rows.slice(0, broadLimit).map(row => bargainCard(row)).join('')
+    : `<div class="empty">${priceError || (scan ? 'Nothing matches these filters.' : 'Click Scan now to find listings.')}</div>`;
   bindDismiss('#broad-results-table', loadDiscoveryResults);
   updateSelection('broad-results-table');
 }
 
-function bargainCard(row) {
+const savedButton = row => `<button class="button small save-button${row.saved_at ? ' is-saved' : ''}" type="button" data-save="${row.id}" aria-pressed="${row.saved_at ? 'true' : 'false'}">${row.saved_at ? '★ Saved' : '☆ Save'}</button>`;
+function bargainCard(row, {savedView = false} = {}) {
   const discount = candidateDiscount(row);
-  const earlier = row.discovery_at && row.discovery_at !== discoveryResultData.scan?.started;
-  const askLabel = row.listing_type === 'auction' ? 'Current bid' : 'Seller ask';
-  const shippingLabel = row.shipping == null ? 'Shipping not reported' : `Shipping ${money(row.currency, row.shipping)}`;
-  const setNotes = discount > 0 ? matchingSetTrends(row.title).map(trend => `<span class="set-trend-note">Title match: ${esc(trend.set_name)} · ${esc(trend.metric)} ${trend.change_pct > 0 ? '+' : ''}${trend.change_pct.toFixed(1)}% (${esc(trend.first_date)} to ${esc(trend.latest_date)}, ${esc(trend.source)} import). Set movement does not price this card.</span>`).join('') : '';
-  return `<article class="bargain-card ${discount > 0 ? 'positive' : ''}">
-    <header><div><h4><input type="checkbox" data-select-listing="${row.id}" aria-label="Select ${esc(row.title)}"> ${esc(row.title)}</h4><span class="sub">${esc(row.source === 'facebook' ? 'Marketplace' : 'eBay')} · ${PRODUCT_LABELS[productKind(row)]} · ${row.listing_type === 'auction' ? 'Auction, bid can rise' : 'Fixed price'} · ${esc(conditionText(row))}${earlier ? ` · Earlier scan ${esc(new Date(row.discovery_at).toLocaleString())}` : ''}</span></div>${discount > 0 ? `<span class="bargain-percent">${discount.toFixed(1)}% below</span>` : ''}</header>
-    <div class="bargain-actions"><div><strong>${esc(listingPrice(row))}</strong><span class="sub">${askLabel} ${esc(money(row.currency, row.price))} · ${esc(shippingLabel)}${row.source === 'facebook' ? ' · travel and delivery extra' : ''}</span></div>${candidateReferenceInput(row)}<a class="button secondary small" href="${esc(row.url)}" target="_blank" rel="noopener">Open seller listing ↗</a>${row.market_value ? `<a class="button secondary small" href="https://www.tcgplayer.com/search/pokemon/product?productLineName=pokemon&q=${encodeURIComponent(row.title)}" target="_blank" rel="noopener">Check TCGplayer search ↗</a>` : ''}<button class="button secondary small" type="button" data-dismiss="${row.id}">Remove</button></div>
-    <span class="sub">${esc(candidateComparisonText(row, discount))}${row.market_value ? ` · Reference ${esc(money(row.currency, row.market_value))}` : ''}${earlier ? ' · Confirm availability and current price' : ''}</span>${setNotes}
+  const earlier = !savedView && row.discovery_at && discoveryResultData.scan && row.discovery_at !== discoveryResultData.scan.started;
+  const setNotes = discount > 0 ? matchingSetTrends(row.title).map(trend => `<span class="set-trend-note">Set trend: ${esc(trend.set_name)} · ${esc(trend.metric)} ${trend.change_pct > 0 ? '+' : ''}${trend.change_pct.toFixed(1)}% (${esc(trend.source)}). Set movement does not price this card.</span>`).join('') : '';
+  const number = (String(row.title || '').match(/\b\d{1,3}\/\d{1,3}\b/) || [row.title])[0];
+  return `<article class="bargain-card ${discount > 0 ? 'positive candidate-bargain' : ''}${row.saved_at ? ' saved' : ''}">
+    <header>
+      <div class="card-title">${savedView ? '' : `<input type="checkbox" data-select-listing="${row.id}" aria-label="Select ${esc(row.title)}">`}<div><h4><a href="${esc(row.url)}" target="_blank" rel="noopener">${esc(row.title)}</a></h4>
+      <span class="sub"><span class="source-tag ${row.source === 'facebook' ? 'fb' : 'eb'}">${esc(row.source === 'facebook' ? 'Marketplace' : 'eBay')}</span> ${['graded', 'sealed'].includes(productKind(row)) ? '' : `${PRODUCT_LABELS[productKind(row)]} · `}${esc(conditionText(row))}${row.listing_type === 'auction' ? ' · Auction' : ''}${row.location ? ` · ${esc(row.location)}` : ''}${row.last_seen ? ` · ${esc(ago(row.last_seen))}` : ''}</span>
+      ${earlier ? '<span class="sub over-budget">Earlier scan · may be sold</span>' : ''}${savedView && row.dismissed ? '<span class="sub">Removed from results, kept here</span>' : ''}</div></div>
+      ${discount > 0 ? `<span class="bargain-percent">${discount.toFixed(0)}% off</span>` : ''}
+    </header>
+    <div class="card-body">
+      <div class="card-price"><strong>${row.price == null ? 'Price varies' : esc(listingPrice(row))}</strong>
+        <span class="${discount > 0 ? 'compare-good' : 'sub'}">${esc(candidateComparisonText(row, discount))}${row.market_value ? ` · TCGplayer ${esc(money(row.currency, row.market_value))}` : ''}</span>${setNotes}</div>
+      ${candidateReferenceInput(row)}
+      <div class="card-actions">${savedButton(row)}<a class="button secondary small" href="${esc(row.url)}" target="_blank" rel="noopener">Open listing ↗</a>${row.market_value ? `<a class="button secondary small" href="https://www.tcgplayer.com/search/pokemon/product?productLineName=pokemon&q=${encodeURIComponent(number)}" target="_blank" rel="noopener">TCGplayer ↗</a>` : ''}${savedView ? '' : `<button class="button secondary small remove-button" type="button" data-dismiss="${row.id}">Remove</button>`}</div>
+    </div>
   </article>`;
 }
 function matchingSetTrends(title) {
@@ -522,15 +521,15 @@ function renderBargainReview() {
   const unchecked = rows.filter(row => !(candidateDiscount(row) > 0))
     .sort((a, b) => Number(b.discovery_at === discoveryResultData.scan?.started) - Number(a.discovery_at === discoveryResultData.scan?.started));
   const allCompared = discoveryResultData.listings.filter(row => productKindVisible(row) && candidateDiscount(row) > 0).length;
-  $('#bargain-badge').textContent = `${allCompared} potential bargains`;
-  $('#bargain-review-counts').innerHTML = `<span><strong>${compared.length}</strong> possible bargains for these filters</span><span><strong>${unchecked.length}</strong> unpriced or above reference</span>`;
+  $('#bargain-badge').textContent = `${allCompared} bargain${allCompared === 1 ? '' : 's'}`;
+  $('#bargain-review-counts').innerHTML = `<span><strong>${compared.length}</strong> bargain${compared.length === 1 ? '' : 's'}</span>`+`<span><strong>${unchecked.length}</strong> not priced or not cheaper</span>`;
   $('#bargain-reviewed').innerHTML = compared.length ? compared.map(bargainCard).join('')
-    : '<div class="empty">No positive exact-card comparisons yet. Run a new browser scan or check an unpriced listing below.</div>';
+    : '<div class="empty">No bargains yet. Click Price-check above or run a new scan.</div>';
   $('#bargain-check-count').textContent = `(${unchecked.length})`;
   $('#bargain-candidates').innerHTML = unchecked.length ? unchecked.slice(0, bargainLimit).map(bargainCard).join('')
-    : '<div class="empty">No unchecked listings for this site. Change the site or product filters, or scan again.</div>';
+    : '<div class="empty">Nothing here.</div>';
   $('#bargain-more').hidden = unchecked.length <= bargainLimit;
-  $('#bargain-more').textContent = `Show more listings (${Math.min(20, unchecked.length - bargainLimit)} next)`;
+  $('#bargain-more').textContent = `Show more (${Math.min(20, unchecked.length - bargainLimit)} next)`;
   bindDismiss('#bargain-reviewed', loadDiscoveryResults);
   bindDismiss('#bargain-candidates', loadDiscoveryResults);
   updateSelection('view-bargains');
@@ -552,18 +551,18 @@ async function loadBroadStatus() {
     const priceChecking = busy && data.operation === 'price-check';
     const signingIn = busy && data.operation === 'login';
     $('#broad-scan').disabled = busy || data.cooldown_seconds > 0 || !data.browser_scans_enabled;
-    $('#broad-scan').textContent = scanning ? 'Scanning all cards…' : data.cooldown_seconds > 0 ? `Scan again in ${data.cooldown_seconds}s` : 'Scan all cards automatically';
+    $('#broad-scan').textContent = scanning ? 'Scanning…' : data.cooldown_seconds > 0 ? `Scan again in ${data.cooldown_seconds}s` : 'Scan now';
     $('#broad-source').disabled = busy;
     $('#broad-stop').hidden = !scanning;
     $('#broad-stop').disabled = false;
     $('#broad-progress').hidden = !scanning;
     $('#broad-progress').max = data.page_limit || data.max_searches;
     $('#broad-progress').value = data.pages_done || 0;
-    $('#broad-status').textContent = (data.message || 'Ready to scan.') + (scanning ? ` ${data.pages_done || 0}/${data.page_limit} searches · ${data.candidates || 0} candidates so far.` : '');
+    $('#broad-status').textContent = (data.message || 'Ready to scan.') + (scanning ? ` ${data.pages_done || 0}/${data.page_limit} searches · ${data.candidates || 0} found.` : '');
     $('#bargain-auto-check').disabled = busy || !data.browser_scans_enabled;
     $('#bargain-auto-status').textContent = data.operation === 'price-check'
       ? `${data.message || 'Checking saved singles…'}${(data.errors || []).length ? ` ${data.errors.join(' · ')}` : ''}`
-      : 'Public browser pages only. No paid API.';
+      : '';
     $('#broad-errors').innerHTML = (data.errors || []).map(error => `<p class="err">${esc(error)}</p>`).join('');
     $('#facebook-login').disabled = busy || !data.browser_scans_enabled;
     $('#facebook-finish').hidden = !signingIn;
@@ -589,6 +588,16 @@ $('#broad-stop').addEventListener('click', async () => {
   $('#broad-stop').disabled = true;
   try { await api('/api/snipe/discovery/stop', {method: 'POST'}); await loadBroadStatus(); }
   catch (err) { toast(err.message, true); }
+});
+$('#clear-all-finds').addEventListener('click', async () => {
+  if (!confirm('Clear all saved finds? This cannot be undone. Run a new scan after clearing.')) return;
+  $('#clear-all-finds').disabled = true;
+  try {
+    const result = await api('/api/snipe/discovery/clear', {method: 'POST'});
+    toast(result.message);
+    await loadDiscoveryResults();
+  } catch (err) { toast(err.message, true); }
+  finally { $('#clear-all-finds').disabled = false; }
 });
 $('#bargain-auto-check').addEventListener('click', async () => {
   $('#bargain-auto-check').disabled = true;
@@ -672,7 +681,7 @@ async function loadDiscover() {
 function renderWatchlist(data) {
   watchlistData = data;
   if (!budgetDirty) $('#card-budget').value = data.budget ?? '';
-  $('#budget-badge').textContent = data.budget == null ? 'Set card budget' : `Per card: ${money(data.currency, data.budget)}`;
+  if ($('#budget-badge')) $('#budget-badge').textContent = data.budget == null ? 'Set card budget' : `Per card: ${money(data.currency, data.budget)}`;
   $('#watchlist-targets').innerHTML = data.targets.length ? data.targets.map(t => `
     <div class="target-card ${t.enabled ? '' : 'disabled'}">
       <header><strong>${esc(t.name)}</strong><div class="target-actions"><button class="button secondary small" data-edit="${esc(t.name)}">Edit</button><button class="button secondary small" data-toggle="${esc(t.name)}" data-enabled="${t.enabled}">${t.enabled ? 'Pause' : 'Resume'}</button><button class="button secondary small" data-remove="${esc(t.name)}">Remove</button></div></header>
@@ -803,7 +812,7 @@ async function loadListings() {
     <td><a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.title)}</a>${r.condition ? `<span class="sub">Seller condition: ${esc(r.condition)}</span>` : ''}${r.location ? `<span class="sub">${esc(r.location)}</span>` : ''}</td>
     <td>${esc(r.listing_type)}</td><td>${esc(listingPrice(r))}</td>
     <td>${r.matched_target ? `${lanePill(r)} <span class="sub">${esc(r.matched_target)}</span>` : '<span class="detail-meta">no</span>'}</td>
-    <td><input type="checkbox" data-select-listing="${r.id}" aria-label="Select ${esc(r.title)}"><button class="button secondary small" data-dismiss="${r.id}">Remove</button></td>
+    <td><div class="row-actions"><input type="checkbox" data-select-listing="${r.id}" aria-label="Select ${esc(r.title)}">${savedButton(r)}<button class="button secondary small remove-button" data-dismiss="${r.id}">Remove</button></div></td>
   </tr>`).join('') : '<tr><td colspan="7" class="empty">Nothing seen yet.</td></tr>';
   bindDismiss('#listings-table', loadListings);
   updateSelection('listings-table');
@@ -847,7 +856,34 @@ function bindDismiss(root, reload) {
 }
 
 // ── wiring ──────────────────────────────────────────────────────────────────
-const LOADERS = {discover: loadDiscover, bargains: async () => Promise.all([loadDiscoveryResults(), loadSetTrends()]), collection: loadCollection, overview: loadOverview, deals: loadDeals, bids: loadBids, values: loadValues, watchlist: loadWatchlist, scans: loadScans, listings: loadListings};
+let savedData = [];
+function renderSaved() {
+  $('#saved-count').textContent = savedData.length ? `${savedData.length} saved` : '';
+  $('#saved-list').innerHTML = savedData.length ? savedData.map(row => bargainCard(row, {savedView: true})).join('')
+    : '<div class="empty">Nothing saved yet. Click ☆ Save on any listing or bargain.</div>';
+  $('#saved-badge') && ($('#saved-badge').textContent = savedData.length ? String(savedData.length) : '');
+}
+async function loadSaved() {
+  savedData = (await api('/api/snipe/saved')).listings;
+  renderSaved();
+}
+async function toggleSaved(event) {
+  const btn = event.target?.closest?.('[data-save]');
+  if (!btn) return;
+  const id = Number(btn.dataset.save);
+  const saving = btn.getAttribute('aria-pressed') !== 'true';
+  btn.disabled = true;
+  try {
+    const {listing} = await api(`/api/snipe/listings/${id}/save`, {method: 'POST', body: JSON.stringify({saved: saving})});
+    for (const row of discoveryResultData.listings) if (row.id === id) row.saved_at = listing.saved_at;
+    savedData = saving ? [listing, ...savedData.filter(row => row.id !== id)] : savedData.filter(row => row.id !== id);
+    renderDiscoveryResults(); renderBargainReview(); renderSaved();
+    if (document.getElementById('view-listings')?.classList.contains('active')) loadListings().catch(() => {});
+    toast(saving ? 'Saved' : 'Removed from saved');
+  } catch (err) { toast(err.message, true); btn.disabled = false; }
+}
+$('main')?.addEventListener('click', toggleSaved);
+const LOADERS = {saved: loadSaved, discover: loadDiscover, bargains: async () => Promise.all([loadDiscoveryResults(), loadSetTrends()]), collection: loadCollection, overview: loadOverview, deals: loadDeals, bids: loadBids, values: loadValues, watchlist: loadWatchlist, scans: loadScans, listings: loadListings};
 
 async function refreshAll() {
   const failed = [];

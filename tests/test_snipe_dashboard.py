@@ -240,6 +240,59 @@ def test_remove_selected_listings_hides_them_without_touching_other_finds(snipe_
         assert client.post("/api/snipe/listings/remove-selected", json={"ids": bad}).status_code == 400
 
 
+def test_clear_all_discovery_finds_dismisses_all_and_allows_fresh_scan(snipe_client):
+    from datetime import datetime, timezone
+    from cardsnipe.store import SeenListing, ScanRun
+
+    client, store, _ = snipe_client
+    # Create discovery finds (listings with discovery_at set from a broad scan)
+    with store.session() as session:
+        now = datetime.now(timezone.utc)
+        session.add(ScanRun(kind="broad", started=now, finished=now, sources="all", scanned=2, new_listings=2))
+        session.add(SeenListing(source="ebay", listing_id="d1", title="Test Card 1", discovery_at=now))
+        session.add(SeenListing(source="facebook", listing_id="d2", title="Test Card 2", discovery_at=now))
+        session.commit()
+    before = client.get("/api/snipe/discovery/results").get_json()
+    assert len(before["listings"]) == 2
+    result = client.post("/api/snipe/discovery/clear").get_json()
+    assert result["cleared"] == 2
+    assert "cleared" in result["message"].lower()
+    after = client.get("/api/snipe/discovery/results").get_json()
+    assert len(after["listings"]) == 0
+    # Clearing again returns 0
+    assert client.post("/api/snipe/discovery/clear").get_json()["cleared"] == 0
+
+
+def test_saving_a_listing_keeps_it_through_remove_and_clear_all(snipe_client):
+    from datetime import datetime, timezone
+    from cardsnipe.store import SeenListing, ScanRun
+
+    client, store, _ = snipe_client
+    with store.session() as session:
+        now = datetime.now(timezone.utc)
+        session.add(ScanRun(kind="broad", started=now, finished=now, sources="all", scanned=2, new_listings=2))
+        keep = SeenListing(source="facebook", listing_id="s1", title="Deoxys Delta Species 4/110", discovery_at=now)
+        other = SeenListing(source="ebay", listing_id="s2", title="Other card", discovery_at=now)
+        session.add_all([keep, other])
+        session.commit()
+        keep_id = keep.id
+    assert client.get("/api/snipe/saved").get_json()["listings"] == []
+    saved = client.post(f"/api/snipe/listings/{keep_id}/save", json={}).get_json()["listing"]
+    assert saved["saved_at"]
+    assert client.post(f"/api/snipe/listings/{keep_id}/save", json={"saved": "yes"}).status_code == 400
+    assert client.post("/api/snipe/listings/999999/save", json={}).status_code == 404
+
+    assert client.post("/api/snipe/discovery/clear").get_json()["cleared"] == 1
+    results = client.get("/api/snipe/discovery/results").get_json()["listings"]
+    assert [row["id"] for row in results] == [keep_id]
+    client.delete(f"/api/snipe/listings/{keep_id}")
+    saved_rows = client.get("/api/snipe/saved").get_json()["listings"]
+    assert [row["id"] for row in saved_rows] == [keep_id] and saved_rows[0]["dismissed"]
+
+    assert client.post(f"/api/snipe/listings/{keep_id}/save", json={"saved": False}).get_json()["listing"]["saved_at"] is None
+    assert client.get("/api/snipe/saved").get_json()["listings"] == []
+
+
 def test_saved_listing_search_and_older_pages_cover_history(snipe_client):
     client, store, _ = snipe_client
     _populate(store)

@@ -71,6 +71,7 @@ def _listing_dict(row: SeenListing) -> dict:
         "action": row.action, "action_detail": row.action_detail, "action_at": _iso(row.action_at),
         "market_value": row.market_value, "value_source": row.value_source, "value_bucket": row.value_bucket,
         "irregular": bool(row.irregular), "irregular_reason": row.irregular_reason,
+        "saved_at": _iso(row.saved_at), "dismissed": bool(row.dismissed),
     }
 
 
@@ -397,7 +398,7 @@ def snipe_discovery_price_check():
         _discovery_stop.clear()
         _scan_state.update(running=True, operation="price-check", errors=[], checked=0, priced=0, bargains=0,
                            started=_iso(datetime.now(timezone.utc)), finished=None,
-                           message="Starting saved price check. Up to 12 public browser searches…")
+                           message="Starting saved price check. Up to 40 public browser searches…")
         threading.Thread(target=_run_saved_price_check, args=(settings,), daemon=True).start()
         return jsonify(_scan_state), 202
 
@@ -407,6 +408,13 @@ def snipe_discovery_results():
     rows, latest = get_store().discovery_results()
     return jsonify({"listings": [_listing_dict(row) for row in rows if is_discovery_candidate(row)],
                     "scan": _scan_dict(latest) if latest else None})
+
+
+@snipe_bp.post("/api/snipe/discovery/clear")
+def snipe_discovery_clear():
+    """Clear all saved discovery finds so the next scan starts fresh."""
+    count = get_store().clear_discovery_finds()
+    return jsonify({"cleared": count, "message": f"Cleared {count} finds. Saved listings were kept."})
 
 
 @snipe_bp.get("/snipe")
@@ -467,6 +475,23 @@ def snipe_dismiss_listing(row_id: int):
     if not get_store().dismiss_listing(row_id):
         return jsonify({"error": "Listing not found."}), 404
     return jsonify({"message": "Removed"})
+
+
+@snipe_bp.post("/api/snipe/listings/<int:row_id>/save")
+def snipe_save_listing(row_id: int):
+    """Save (or unsave with {"saved": false}) a listing so it is kept for later."""
+    saved = _payload().get("saved", True)
+    if not isinstance(saved, bool):
+        return jsonify({"error": "saved must be true or false."}), 400
+    row = get_store().set_saved(row_id, saved)
+    if row is None:
+        return jsonify({"error": "Listing not found."}), 404
+    return jsonify({"listing": _listing_dict(row), "message": "Saved" if saved else "Removed from saved"})
+
+
+@snipe_bp.get("/api/snipe/saved")
+def snipe_saved_listings():
+    return jsonify({"listings": [_listing_dict(row) for row in get_store().saved_listings()]})
 
 
 @snipe_bp.post("/api/snipe/listings/remove-selected")

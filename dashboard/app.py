@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from datetime import datetime, timezone
 from ipaddress import ip_address
@@ -33,6 +34,15 @@ from dashboard.snipe_views import snipe_bp  # noqa: E402 - needs ROOT on sys.pat
 app = Flask(__name__)
 app.config.update(JSON_SORT_KEYS=False, MAX_CONTENT_LENGTH=4 * 1024 * 1024)
 app.register_blueprint(snipe_bp)
+
+
+@app.url_defaults
+def static_cache_bust(endpoint, values):
+    """Version static files by modification time so browsers never run stale CSS/JS."""
+    if endpoint == "static" and "filename" in values:
+        path = os.path.join(app.static_folder, values["filename"])
+        if os.path.isfile(path):
+            values["v"] = int(os.stat(path).st_mtime)
 
 
 @app.before_request
@@ -83,6 +93,8 @@ def privacy_headers(response):
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "no-referrer")
     response.headers.setdefault("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
+    if response.mimetype == "text/html":
+        response.headers.setdefault("Cache-Control", "no-cache")
     if request.path.startswith("/api/"):
         response.headers.setdefault("Cache-Control", "no-store")
     return response

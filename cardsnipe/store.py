@@ -42,6 +42,7 @@ class SeenListing(Base):
     condition = Column(Text)
     discovery_at = Column(DateTime)
     price_checked_at = Column(DateTime)
+    saved_at = Column(DateTime)
     discovery_routes = Column(Text)
     promotion = Column(Text)
     first_seen = Column(DateTime, default=utcnow)
@@ -508,6 +509,36 @@ class Store:
                     .filter(SeenListing.discovery_at.isnot(None), SeenListing.dismissed.isnot(True))
                     .order_by(SeenListing.discovery_at.desc(), SeenListing.id.desc()).all()) if latest else []
             return rows, latest
+
+    def set_saved(self, row_id: int, saved: bool):
+        """Save or unsave a listing. Saved listings survive Remove and Clear all."""
+        with self.session() as session:
+            row = session.get(SeenListing, row_id)
+            if row is None:
+                return None
+            row.saved_at = (row.saved_at or utcnow()) if saved else None
+            session.commit()
+            session.refresh(row)
+            session.expunge(row)
+            return row
+
+    def saved_listings(self):
+        with self.session() as session:
+            return (session.query(SeenListing).filter(SeenListing.saved_at.isnot(None))
+                    .order_by(SeenListing.saved_at.desc(), SeenListing.id.desc()).all())
+
+    def clear_discovery_finds(self) -> int:
+        """Dismiss all unsaved discovery finds so the next scan starts fresh. Returns count removed."""
+        with self.session() as session:
+            now = utcnow()
+            count = (session.query(SeenListing)
+                     .filter(SeenListing.discovery_at.isnot(None), SeenListing.dismissed.isnot(True),
+                             SeenListing.saved_at.is_(None))
+                     .update({SeenListing.dismissed: True, SeenListing.action: "cleared",
+                              SeenListing.action_detail: "cleared all finds", SeenListing.action_at: now},
+                             synchronize_session=False))
+            session.commit()
+            return count
 
     def summary(self) -> dict:
         """Headline numbers for the dashboard."""

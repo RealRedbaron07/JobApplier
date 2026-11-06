@@ -15,31 +15,53 @@ def eligible(title):
             and not detect_grade(title) and not detect_condition_issue(title))
 
 
+def _number_key(number):
+    return "/".join(part.lstrip("0") or "0" for part in (number or "").lstrip("#").split("/"))
+
+
 def _words(text):
     return re.findall(r"[a-z0-9]+", (text or "").lower())
 
 
+def _name_words(name):
+    # TCGplayer names can carry suffixes like "Greninja BREAK - 2016 (Cody Walinski)" or "Dodrio (34)".
+    name = re.sub(r"\([^)]*\)", " ", name or "")
+    return _words(name.split(" - ")[0])
+
+
 def pick_product(products, title):
-    """Require one exact number, name and set in the seller title."""
+    """Match one product by exact card number and name; use the set to break ties.
+
+    Sellers often leave the set out ("Miraidon 028/084 Holo"), so a unique
+    number + name match is accepted. When several printings share the number
+    and name, the set words in the title must pick exactly one.
+    """
     number = NUMBER.search(title or "")
     if not number or not eligible(title):
         return None
-    title_words = _words(title)
+    title_words = set(_words(title))
     matches = []
     for product in products:
-        if product.get("number", "").lstrip("#") != number.group(1):
+        if _number_key(product.get("number")) != _number_key(number.group(1)):
             continue
-        name = _words(product.get("name"))
-        set_name = _words(product.get("set", "").split(":")[-1])
-        if not name or not set_name or any(word not in title_words for word in name):
-            continue
-        if not all(word in title_words for word in set_name):
+        name = _name_words(product.get("name"))
+        if not name or any(word not in title_words for word in name):
             continue
         if VARIANT.search(product.get("set", "") + " " + product.get("name", "")):
             continue
         if product.get("price", 0) > 0:
             matches.append(product)
+    if len(matches) > 1:
+        with_set = [p for p in matches
+                    if (words := _words(p.get("set", "").split(":")[-1])) and all(w in title_words for w in words)]
+        matches = with_set
     return matches[0] if len(matches) == 1 else None
+
+
+def search_query(title):
+    """TCGplayer finds the card by its number; the full seller title usually returns nothing."""
+    number = NUMBER.search(title or "")
+    return number.group(1) if number else (title or "")
 
 
 def bank_of_canada_usd_cad(browser):
@@ -56,9 +78,14 @@ def bank_of_canada_usd_cad(browser):
 
 
 def tcgplayer_market(browser, title):
-    browser.get("https://www.tcgplayer.com/search/pokemon/product?productLineName=pokemon&q=" + quote_plus(title))
-    if not browser.wait_until(lambda: bool(browser.js("return document.querySelector('.product-card__product')")), 8):
+    browser.get("https://www.tcgplayer.com/search/pokemon/product?productLineName=pokemon&q="
+                + quote_plus(search_query(title)))
+    state = lambda: browser.js("""return document.querySelector('.product-card__product') ? 'results'
+      : /\\b0 results\\b|no results/i.test(document.body ? document.body.innerText : '') ? 'empty' : ''""")
+    if not browser.wait_until(state, 10):
         raise RuntimeError("TCGplayer search results were unreadable; this card was not checked")
+    if state() == "empty":
+        return None
     products = browser.js("""return [...document.querySelectorAll('.product-card__product')].map(card => ({
       set: card.querySelector('.product-card__set-name')?.innerText || '',
       number: (card.querySelector('.product-card__rarity')?.innerText || '').match(/#\\d+\\/\\d+/)?.[0] || '',
