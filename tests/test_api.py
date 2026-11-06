@@ -26,6 +26,15 @@ def _create(client):
     return response.get_json()["job"]
 
 
+def test_unrelated_job_can_be_deleted(dashboard_client):
+    client, session_factory, _ = dashboard_client
+    job = _create(client)
+    assert client.delete(f"/api/jobs/{job['id']}").status_code == 200
+    assert client.get(f"/api/jobs/{job['id']}").status_code == 404
+    with session_factory() as session:
+        assert session.get(Job, job["id"]) is None
+
+
 def test_dashboard_shell_renders_supported_workflows(dashboard_client):
     client, _, _ = dashboard_client
     response = client.get("/")
@@ -35,6 +44,30 @@ def test_dashboard_shell_renders_supported_workflows(dashboard_client):
         assert label in html
     assert "Create reviewed handoff" in html
     assert "Nothing is auto-submitted" in html
+
+
+def test_dashboards_poll_live_and_job_links_open_outward(dashboard_client):
+    client, _, _ = dashboard_client
+    main = client.get("/static/js/main.js")
+    assert main.status_code == 200
+    jobs = main.get_data(as_text=True)
+    assert "JOB_POLL_MS = 20000" in jobs
+    assert "document.hidden" in jobs
+    assert "skipTracker" in jobs
+    assert "detailFormDirty" in jobs
+    assert 'target="_blank"' in jobs and 'rel="noopener noreferrer"' in jobs
+    assert "jobTitleLink" in jobs and "jobOpenLink" in jobs
+
+    snipe = client.get("/static/js/snipe.js")
+    assert snipe.status_code == 200
+    cards = snipe.get_data(as_text=True)
+    assert "SNIPE_POLL_MS = 30000" in cards
+    assert "LIVE_VIEWS = ['collection', 'overview', 'deals', 'listings']" in cards
+    assert "window.addEventListener('focus', pollSnipe)" in cards
+    assert "document.hidden" in cards
+    assert "refreshWouldWipe" in cards
+    page = client.get("/snipe")
+    assert page.status_code == 200 and b"snipe.js" in page.data
 
 
 def test_end_to_end_package_is_draft_only(dashboard_client):

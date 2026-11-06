@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from datetime import datetime, timezone
 from ipaddress import ip_address
@@ -17,7 +18,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from config import Config
-from database.models import ApplicationRecord, Contact, FollowUp, Job, Session, TailoredDraft
+from database.models import ApplicationRecord, Contact, FollowUp, Job, SavedLink, Session, TailoredDraft
 from job_os.analytics import summarize_jobs
 from job_os.drafts import generate_application_answers, recruiter_message
 from job_os.io import export_csv, export_json, parse_csv, parse_json_backup
@@ -33,6 +34,15 @@ from dashboard.snipe_views import snipe_bp  # noqa: E402 - needs ROOT on sys.pat
 app = Flask(__name__)
 app.config.update(JSON_SORT_KEYS=False, MAX_CONTENT_LENGTH=4 * 1024 * 1024)
 app.register_blueprint(snipe_bp)
+
+
+@app.url_defaults
+def static_cache_bust(endpoint, values):
+    """Version static files by modification time so browsers never run stale CSS/JS."""
+    if endpoint == "static" and "filename" in values:
+        path = os.path.join(app.static_folder, values["filename"])
+        if os.path.isfile(path):
+            values["v"] = int(os.stat(path).st_mtime)
 
 
 @app.before_request
@@ -51,6 +61,20 @@ def local_request_boundary():
             parsed = urlparse(origin)
             if parsed.scheme not in {"http", "https"} or parsed.netloc != request.host:
                 return jsonify({"error": "Cross-origin changes to local JobApplier data are blocked."}), 403
+    if request.endpoint == "boards_refresh" and not Config.CAREER_BOARD_CHECKS_ENABLED:
+        return jsonify({"error": "Career board checks are disabled."}), 403
+    external_action = request.endpoint in {
+        "snipe.snipe_valuations_refresh",
+        "snipe.snipe_collection_sync", "snipe.snipe_collection_revalue",
+    } or (request.endpoint == "snipe.snipe_scan" and request.method == "POST")
+    browser_action = request.endpoint == "snipe.snipe_facebook_login" or (
+        request.endpoint == "snipe.snipe_facebook_login_action" and request.view_args.get("action") == "finish"
+    )
+    if browser_action and not (Config.BROWSER_SCANS_ENABLED or Config.EXTERNAL_ACCESS_ENABLED):
+        return jsonify({"error": "Browser access is disabled", "local_only": True}), 403
+    if external_action and not Config.EXTERNAL_ACCESS_ENABLED:
+        return jsonify({"error": "External APIs and price-provider fetching are disabled. Use the browser-only broad scanner for listings.",
+                        "local_only": not Config.BROWSER_SCANS_ENABLED}), 403
 
 
 def _is_loopback_peer(value: str | None) -> bool:
@@ -71,6 +95,8 @@ def privacy_headers(response):
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "no-referrer")
     response.headers.setdefault("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
+    if response.mimetype == "text/html":
+        response.headers.setdefault("Cache-Control", "no-cache")
     if request.path.startswith("/api/"):
         response.headers.setdefault("Cache-Control", "no-store")
     return response
@@ -298,7 +324,10 @@ def index():
 
 @app.get("/api/health")
 def health():
-    return jsonify({"status": "ok", "local_first": True, "auto_submit": False, "automation_level": _automation_level()})
+    return jsonify({"status": "ok", "local_first": True, "local_only": not (Config.EXTERNAL_ACCESS_ENABLED or Config.BROWSER_SCANS_ENABLED),
+                    "external_access_enabled": Config.EXTERNAL_ACCESS_ENABLED, "auto_submit": False,
+                    "browser_scans_enabled": Config.BROWSER_SCANS_ENABLED,
+                    "automation_level": _automation_level()})
 
 
 @app.route("/api/profile", methods=["GET", "PUT"])
@@ -314,6 +343,109 @@ def profile_settings():
         profile = save_profile(payload)
         return jsonify({"message": "Profile saved locally", "profile": profile})
     return jsonify(load_profile())
+
+
+@app.get("/api/boards")
+def boards_list():
+    from job_os.boards import default_path, load_boards
+
+    return jsonify({"boards": load_boards(default_path())})
+
+
+@app.post("/api/boards")
+def boards_add():
+    from job_os.boards import BoardError, add_board, default_path
+
+    payload = request.get_json(silent=True) or {}
+    try:
+        board = add_board(default_path(), str(payload.get("url") or ""), str(payload.get("name") or ""))
+    except BoardError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"message": f"Added {board.name} ({board.kind})", "board": {"name": board.name, "url": board.url, "kind": board.kind}})
+
+
+@app.delete("/api/boards")
+def boards_remove():
+    from job_os.boards import default_path, remove_board
+
+    url = (request.args.get("url") or (request.get_json(silent=True) or {}).get("url") or "").strip()
+    if not url:
+        return jsonify({"error": "url is required"}), 400
+    if not remove_board(default_path(), url):
+        return jsonify({"error": "No board with that URL"}), 404
+    return jsonify({"message": "Board removed"})
+
+
+@app.post("/api/boards/refresh")
+def boards_refresh():
+    """Pull the newest relevant postings from saved company boards. Never submits an application."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    import requests
+
+    from job_os.boards import (MAX_AGE_DAYS, board_from_dict, default_path, fetch_postings, is_recent,
+                               is_relevant, load_boards, workday_detail)
+
+    payload = request.get_json(silent=True) or {}
+    try:
+        max_age = max(1, min(60, int(payload.get("max_age_days") or MAX_AGE_DAYS)))
+    except (TypeError, ValueError):
+        return jsonify({"error": "max_age_days must be a number of days."}), 400
+    boards = [board_from_dict(raw) for raw in load_boards(default_path())]
+    http = requests.Session()
+    http.headers["User-Agent"] = "JobApplier/1.0 (local career-board reader)"
+
+    def pull(board):
+        try:
+            return board, fetch_postings(board, http), None
+        except Exception as exc:  # one bad board must not stop the others
+            return board, [], f"{board.name}: {str(exc).splitlines()[0][:160]}"
+
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        results = list(pool.map(pull, boards))
+    errors = [error for _, _, error in results if error]
+    candidates = []
+    for board, postings, _ in results:
+        for post in postings:
+            if post.job_url and is_relevant(post.title) and is_recent(post.posted_date, max_age):
+                candidates.append((board, post))
+    candidates.sort(key=lambda item: item[1].posted_date or "", reverse=True)
+    unique = {}
+    for board, post in candidates:
+        unique.setdefault(post.job_url, (board, post))
+    candidates = list(unique.values())
+
+    added, skipped = [], 0
+    session = Session()
+    try:
+        profile = load_profile()
+        known = {url for (url,) in session.query(Job.job_url).filter(Job.job_url.in_([p.job_url for _, p in candidates])).all()}
+        fresh = [(board, post) for board, post in candidates if post.job_url not in known][:60]
+        skipped = len(candidates) - len(fresh)
+        for board, post in fresh:
+            if board.kind == "workday" and post.platform == "workday":
+                try:
+                    workday_detail(board, post, http)
+                except Exception:
+                    pass  # keep the list entry; the description can be pasted later
+            if not is_recent(post.posted_date, max_age):
+                continue
+            parsed = parse_job_description(post.description, {
+                "title": post.title, "company": post.company, "location": post.location,
+                "job_url": post.job_url, "source": "company_site", "platform": post.platform,
+                "posting_date": post.posted_date or "",
+            })
+            session.add(_new_job(parsed, profile))
+            added.append(f"{post.company}: {post.title}" + (f" ({post.posted_date})" if post.posted_date else ""))
+        session.commit()
+    finally:
+        session.close()
+    return jsonify({
+        "added": len(added), "skipped": skipped, "errors": errors, "titles": added[:12], "boards": len(boards),
+        "max_age_days": max_age,
+        "message": f"Added {len(added)} new postings from the last {max_age} days across {len(boards)} boards"
+                   + (f" · {skipped} already tracked" if skipped else "") + (f" · {len(errors)} board errors" if errors else ""),
+    })
 
 
 @app.post("/api/jobs/parse")
@@ -406,9 +538,13 @@ def job_detail(job_id: int):
         if not job:
             return jsonify({"error": "Job not found"}), 404
         if request.method == "DELETE":
-            job.application_status = "archived"
+            session.query(ApplicationRecord).filter_by(job_id=job.id).delete()
+            session.query(TailoredDraft).filter_by(job_id=job.id).delete()
+            session.query(FollowUp).filter_by(job_id=job.id).delete()
+            session.query(SavedLink).filter_by(job_id=job.id).delete()
+            session.delete(job)
             session.commit()
-            return jsonify({"message": "Job archived"})
+            return jsonify({"message": "Job removed"})
         if request.method == "PATCH":
             payload = request.get_json(silent=True) or {}
             if not isinstance(payload, dict):

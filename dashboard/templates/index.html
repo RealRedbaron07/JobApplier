@@ -48,7 +48,17 @@
       <section class="view" id="view-add-job">
         <div class="grid add-grid">
           <article class="panel">
-            <div class="panel-head"><div><p class="eyebrow">SAFE INGESTION</p><h3>Paste a job description</h3></div></div>
+            <div class="panel-head"><div><p class="eyebrow">SAVED COMPANY SITES</p><h3>Career boards</h3></div><button class="button small" type="button" id="refresh-boards">Check boards for new jobs</button></div>
+            <p class="detail-meta">Finds intern, co-op, new-grad and junior tech roles posted in the last 14 days, newest first. Reads public job lists only and never applies. Add any company's Workday, Greenhouse, Lever or Ashby board.</p>
+            <form id="board-form" class="form-grid">
+              <label>Company<input name="name" placeholder="Shopify"></label>
+              <label>Board URL<input name="url" required placeholder="https://boards.greenhouse.io/shopify"></label>
+              <button class="button" type="submit">Add board</button>
+            </form>
+            <div id="board-results" class="detail-meta board-results"></div><div id="board-list" class="stack"></div>
+          </article>
+          <article class="panel">
+            <div class="panel-head"><div><p class="eyebrow">OR PASTE</p><h3>Paste a job description</h3></div></div>
             <form id="job-form">
               <div class="form-grid"><label>Job title<input name="title" placeholder="Software Developer Intern"></label><label>Company<input name="company" placeholder="Company name"></label></div>
               <div class="form-grid"><label>Location<input name="location" placeholder="Toronto, ON / Remote Canada"></label><label>Source<select name="source"><option>manual</option><option>company_site</option><option>referral</option><option>official_api</option><option>career_fair</option></select></label></div>
@@ -79,7 +89,7 @@
       <section class="view" id="view-tracker">
         <article class="panel">
           <div class="toolbar"><label class="compact-control">Search<input id="job-search" class="search" placeholder="Company, role, or location"></label><label class="compact-control">Status<select id="status-filter"><option value="all">All statuses</option></select></label><label class="compact-control">Fit<select id="category-filter"><option value="all">All fit levels</option><option>strong_apply</option><option>apply</option><option>maybe</option><option>low_priority</option><option>skip</option><option value="not_scored">not scored</option></select></label><a class="button secondary small" href="/api/export?format=csv">Export CSV</a><a class="button secondary small" href="/api/export?format=json">Backup JSON</a><a class="button secondary small" href="/api/export?format=summary">Summary</a></div>
-          <div class="table-wrap"><table><caption class="sr-only">Tracked job applications</caption><thead><tr><th>Fit</th><th>Opportunity</th><th>Location</th><th>Status</th><th>Deadline</th><th>Next action</th></tr></thead><tbody id="jobs-table"></tbody></table></div>
+          <div class="table-wrap"><table><caption class="sr-only">Tracked job applications</caption><thead><tr><th>Fit</th><th>Opportunity</th><th>Location</th><th>Status</th><th>Deadline</th><th>Next action</th><th></th></tr></thead><tbody id="jobs-table"></tbody></table></div>
         </article>
       </section>
 
