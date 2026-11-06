@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from cardsnipe.browser import Browser, SourceUnavailable
-from cardsnipe.bargains import bank_of_canada_usd_cad, eligible, tcgplayer_market
+from cardsnipe.bargains import PRICE_VERSION, bank_of_canada_usd_cad, eligible, stale_reference, tcgplayer_market
 from cardsnipe.ebay import EbayWeb
 from cardsnipe.facebook import FacebookMarketplace
 from cardsnipe.matcher import detect_condition_issue
@@ -35,8 +35,8 @@ def priceable(title):
 def price_listing(browser, title):
     """TCGplayer raw NM market price for this card. Slabs are looked up by their raw card."""
     if slab_eligible(title):
-        return tcgplayer_market(browser, raw_title(title)), "TCGplayer raw NM (crack check)"
-    return tcgplayer_market(browser, title), "TCGplayer browser"
+        return tcgplayer_market(browser, raw_title(title)), f"TCGplayer raw NM (crack check, {PRICE_VERSION})"
+    return tcgplayer_market(browser, title), f"TCGplayer {PRICE_VERSION}"
 
 
 def pick_candidates(items, title_of):
@@ -195,7 +195,7 @@ class DiscoveryScanner:
                 row = self.store.record_listing(listing, None, discovery_at=started,
                                                 discovery_routes=entry["routes"], promotion=promotion_text(listing))
                 entry["row_id"] = row.id
-                entry["price_checked_at"] = row.price_checked_at
+                entry["price_checked_at"] = None if stale_reference(row.value_source) else row.price_checked_at
                 saved += int(not row.dismissed)
                 if not row.dismissed:
                     active.add(listing.key)
@@ -249,7 +249,8 @@ class DiscoveryScanner:
 def price_saved_singles(settings, store, stop=None, progress=None):
     """Check the next batch of saved exact singles through public browser pages."""
     rows, _ = store.discovery_results()
-    candidates = [row for row in rows if row.price_checked_at is None and row.currency == "CAD"
+    candidates = [row for row in rows if (row.price_checked_at is None or stale_reference(row.value_source))
+                  and row.currency == "CAD"
                   and row.total_price is not None and row.price > 1 and priceable(row.title)
                   and not detect_condition_issue(row.condition)]
     candidates.sort(key=lambda row: row.source != "facebook")

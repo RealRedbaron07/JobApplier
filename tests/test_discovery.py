@@ -139,7 +139,7 @@ def test_broad_scan_prices_exact_single_without_a_paid_api(browser_scan, monkeyp
     assert report["priced"] == report["bargains"] == 1
     assert row.market_value == 14 and row.savings_pct == pytest.approx((14 - 5) / 14 * 100)
     assert row.matched_target is None and store.recent_deals() == []
-    assert row.value_source.startswith("TCGplayer browser")
+    assert row.value_source.startswith("TCGplayer") and "plain print" in row.value_source
     store.revalue(lambda listing: None)
     assert store.discovery_results()[0][0].market_value == 14
 

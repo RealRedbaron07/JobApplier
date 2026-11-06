@@ -17,6 +17,7 @@ from cardsnipe.discovery import (COOLDOWN_SECONDS, DISCOVERY_MODES, MAX_SEARCHES
                                  is_discovery_candidate, price_saved_singles, search_plan)
 from cardsnipe.runner import revalue_store, scanner_session
 from cardsnipe.settings import SnipeSettings
+from cardsnipe.bargains import stale_reference
 from cardsnipe.store import ScanRun, ScheduledBid, SeenListing, Store
 from cardsnipe.watchlist import Target, load_watchlist, optional_budget, remove_target, save_watchlist, target_from_dict
 
@@ -69,7 +70,9 @@ def _listing_dict(row: SeenListing) -> dict:
         "promotion": row.promotion or "", "discovery_routes": json.loads(row.discovery_routes or "[]"),
         "lane": row.lane, "grade": row.grade, "tag_score": row.tag_score, "notified": bool(row.notified),
         "action": row.action, "action_detail": row.action_detail, "action_at": _iso(row.action_at),
-        "market_value": row.market_value, "value_source": row.value_source, "value_bucket": row.value_bucket,
+        # Prices saved before print-specific pricing may be 1st Edition prices; hide them until re-checked.
+        "market_value": None if stale_reference(row.value_source) else row.market_value,
+        "value_source": "" if stale_reference(row.value_source) else row.value_source, "value_bucket": row.value_bucket,
         "irregular": bool(row.irregular), "irregular_reason": row.irregular_reason,
         "saved_at": _iso(row.saved_at), "dismissed": bool(row.dismissed),
         **_slab_fields(row),
@@ -83,7 +86,8 @@ def _slab_fields(row: SeenListing) -> dict:
     grade = slab_grade(row.title or "")
     if not grade:
         return {"slab": None, "crack": None, "slab_notes": []}
-    return {"slab": f"{grade[0]} {grade[1]:g}", "crack": crack_lane(row.title, row.total_price, row.market_value),
+    value = None if stale_reference(row.value_source) else row.market_value
+    return {"slab": f"{grade[0]} {grade[1]:g}", "crack": crack_lane(row.title, row.total_price, value),
             "slab_notes": slab_notes(row.title)}
 
 

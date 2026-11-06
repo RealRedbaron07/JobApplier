@@ -39,3 +39,21 @@ def test_reprints_need_set_words_to_break_ties_and_suffixes_are_ignored():
 def test_leading_zeros_in_card_numbers_still_match():
     product = {"name": "Dodrio", "number": "#034/064", "set": "Jungle", "price": 4.8}
     assert pick_product([product], "Pokemon Jungle Dodrio 34/64 Trading Card") == product
+
+
+def test_plain_print_price_ignores_first_edition_and_reverse_prices():
+    from cardsnipe.bargains import plain_printing_price, printing_prices, stale_reference
+    text = ("Near Mint Comparison Prices\nMarket prices for alternative printings and conditions\n"
+            "1st Edition Holofoil:\t$123.59\tUnlimited Holofoil:\t$39.76\nPrice Points \n"
+            "Near Mint Unlimited Holofoil\nMarket Price\t$39.76\n")
+    assert plain_printing_price(printing_prices(text)) == 39.76
+    assert plain_printing_price({"Holofoil": 5.0, "Reverse Holofoil": 9.0}) == 5.0
+    assert plain_printing_price({"1st Edition Holofoil": 120.0}) is None
+    assert stale_reference("TCGplayer browser · BoC FX 1.4") and not stale_reference("TCGplayer plain print · BoC FX 1.4")
+    assert not stale_reference("") and not stale_reference("manual")
+
+
+def test_reprint_only_results_are_not_priced_as_the_original():
+    reprint = {"name": "Rocket's Zapdos", "number": "#15/132", "set": "Celebrations: Classic Collection", "price": 2.99}
+    assert pick_product([reprint], "Rocket's Zapdos 15/132 Gym Challenge Holo") is None
+    assert pick_product([reprint], "Rocket's Zapdos 15/132 Celebrations Classic Collection") == reprint
