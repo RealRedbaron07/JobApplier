@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import date, timedelta
+
 import pytest
 
 from job_os.boards import Board, BoardError, Posting, add_board, classify, fetch_postings
@@ -61,7 +63,6 @@ def test_fetch_greenhouse_and_workday(monkeypatch):
 def test_board_refresh_adds_company_postings_once(dashboard_client, monkeypatch, tmp_path):
     from config import Config
 
-    monkeypatch.setattr(Config, "EXTERNAL_ACCESS_ENABLED", True)
     client, _, _ = dashboard_client
     monkeypatch.setenv("COMPANY_BOARDS_PATH", str(tmp_path / "boards.json"))
     added = add_board(str(tmp_path / "boards.json"), "https://jobs.lever.co/spotify", name="Spotify")
@@ -69,7 +70,7 @@ def test_board_refresh_adds_company_postings_once(dashboard_client, monkeypatch,
 
     def fake_fetch(board, session=None, limit=50):
         return [Posting("Data Intern", "Spotify", "Toronto", "https://jobs.lever.co/spotify/abc",
-                        "Fall 2026 internship. Required: Python, SQL.", "2026-10-01", "lever")]
+                        "Fall 2026 internship. Required: Python, SQL.", date.today().isoformat(), "lever")]
 
     monkeypatch.setattr("job_os.boards.fetch_postings", fake_fetch)
     first = client.post("/api/boards/refresh")
@@ -79,3 +80,38 @@ def test_board_refresh_adds_company_postings_once(dashboard_client, monkeypatch,
     jobs = client.get("/api/jobs").get_json()["jobs"]
     assert jobs[0]["source"] == "company_site" and jobs[0]["title"] == "Data Intern"
     assert client.post("/api/boards", json={"url": "https://www.linkedin.com/jobs/search"}).status_code == 400
+
+
+def test_refresh_keeps_only_recent_relevant_postings_newest_first(dashboard_client, monkeypatch, tmp_path):
+    client, _, _ = dashboard_client
+    path = tmp_path / "boards.json"
+    monkeypatch.setenv("COMPANY_BOARDS_PATH", str(path))
+    from job_os.boards import save_boards
+    save_boards(str(path), [{"name": "Acme", "url": "https://jobs.lever.co/acme", "kind": "lever", "token": "acme"}])
+    today = date.today()
+
+    def fake_fetch(board, session=None, limit=200):
+        return [
+            Posting("Software Developer Intern", "Acme", "Toronto", "https://x/1", "Python", (today - timedelta(days=3)).isoformat(), "lever"),
+            Posting("Data Analyst Co-op", "Acme", "Toronto", "https://x/2", "SQL", today.isoformat(), "lever"),
+            Posting("Senior Staff Engineer", "Acme", "Toronto", "https://x/3", "Go", today.isoformat(), "lever"),
+            Posting("QA Intern", "Acme", "Toronto", "https://x/4", "Tests", (today - timedelta(days=40)).isoformat(), "lever"),
+        ]
+
+    monkeypatch.setattr("job_os.boards.fetch_postings", fake_fetch)
+    data = client.post("/api/boards/refresh", json={}).get_json()
+    assert data["added"] == 2
+    assert data["titles"][0].startswith("Acme: Data Analyst Co-op") and "Software Developer Intern" in data["titles"][1]
+
+
+def test_workday_posted_text_and_relevance_rules():
+    from job_os.boards import is_recent, is_relevant, starter_boards, workday_posted_date
+    today = date(2026, 11, 6)
+    assert workday_posted_date("Posted Today", today) == "2026-11-06"
+    assert workday_posted_date("Posted Yesterday", today) == "2026-11-05"
+    assert workday_posted_date("Posted 3 Days Ago", today) == "2026-11-03"
+    assert workday_posted_date("Posted 30+ Days Ago", today) == "2026-10-07"
+    assert is_recent("2026-10-30", 14, today) and not is_recent("2026-10-01", 14, today) and is_recent(None)
+    assert is_relevant("Software Developer Intern") and is_relevant("Data Analyst")
+    assert not is_relevant("Senior Software Engineer") and not is_relevant("Mortgage Specialist")
+    assert any(board["kind"] == "workday" for board in starter_boards())

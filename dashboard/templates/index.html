@@ -48,14 +48,14 @@
       <section class="view" id="view-add-job">
         <div class="grid add-grid">
           <article class="panel">
-            <div class="panel-head"><div><p class="eyebrow">SAVED COMPANY SITES</p><h3>Career boards</h3></div><button class="button secondary small" type="button" id="refresh-boards" disabled title="External fetching is disabled">External fetching disabled</button></div>
-            <p class="detail-meta">LinkedIn posts go stale. Add the company's own board (Workday, Greenhouse, Lever, or Ashby). Checking reads the public job list only and never applies.</p>
+            <div class="panel-head"><div><p class="eyebrow">SAVED COMPANY SITES</p><h3>Career boards</h3></div><button class="button small" type="button" id="refresh-boards">Check boards for new jobs</button></div>
+            <p class="detail-meta">Finds intern, co-op, new-grad and junior tech roles posted in the last 14 days, newest first. Reads public job lists only and never applies. Add any company's Workday, Greenhouse, Lever or Ashby board.</p>
             <form id="board-form" class="form-grid">
               <label>Company<input name="name" placeholder="Shopify"></label>
               <label>Board URL<input name="url" required placeholder="https://boards.greenhouse.io/shopify"></label>
               <button class="button" type="submit">Add board</button>
             </form>
-            <div id="board-list" class="stack"></div>
+            <div id="board-results" class="detail-meta board-results"></div><div id="board-list" class="stack"></div>
           </article>
           <article class="panel">
             <div class="panel-head"><div><p class="eyebrow">OR PASTE</p><h3>Paste a job description</h3></div></div>

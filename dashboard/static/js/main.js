@@ -101,9 +101,15 @@ document.getElementById('board-form')?.addEventListener('submit', async event =>
 document.getElementById('refresh-boards')?.addEventListener('click', async () => {
   const btn = document.getElementById('refresh-boards');
   btn.disabled = true; btn.textContent = 'Checking…';
-  try { const data = await api('/api/boards/refresh', {method: 'POST'}); toast(data.message, !!data.errors?.length); await loadDashboard(); }
+  try {
+    const data = await api('/api/boards/refresh', {method: 'POST', body: JSON.stringify({})});
+    toast(data.message, !data.added && !!data.errors?.length);
+    const box = document.getElementById('board-results');
+    if (box) box.innerHTML = (data.titles || []).length ? `<strong>Newest added</strong><ul>${data.titles.map(t => `<li>${esc(t)}</li>`).join('')}</ul>` + (data.errors.length ? `<p class="detail-meta">${data.errors.map(esc).join(' · ')}</p>` : '') : esc(data.message);
+    await loadDashboard();
+  }
   catch (err) { toast(err.message, true); }
-  btn.disabled = false; btn.textContent = 'Check boards';
+  btn.disabled = false; btn.textContent = 'Check boards for new jobs';
 });
 
 async function loadJobs(options = {}) {

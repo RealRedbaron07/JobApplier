@@ -61,8 +61,10 @@ def local_request_boundary():
             parsed = urlparse(origin)
             if parsed.scheme not in {"http", "https"} or parsed.netloc != request.host:
                 return jsonify({"error": "Cross-origin changes to local JobApplier data are blocked."}), 403
+    if request.endpoint == "boards_refresh" and not Config.CAREER_BOARD_CHECKS_ENABLED:
+        return jsonify({"error": "Career board checks are disabled."}), 403
     external_action = request.endpoint in {
-        "boards_refresh", "snipe.snipe_valuations_refresh",
+        "snipe.snipe_valuations_refresh",
         "snipe.snipe_collection_sync", "snipe.snipe_collection_revalue",
     } or (request.endpoint == "snipe.snipe_scan" and request.method == "POST")
     browser_action = request.endpoint == "snipe.snipe_facebook_login" or (
@@ -376,39 +378,73 @@ def boards_remove():
 
 @app.post("/api/boards/refresh")
 def boards_refresh():
-    """Pull new postings from saved company boards. Never submits an application."""
-    from job_os.boards import board_from_dict, default_path, fetch_postings, load_boards
+    """Pull the newest relevant postings from saved company boards. Never submits an application."""
+    from concurrent.futures import ThreadPoolExecutor
 
-    added, skipped, errors = [], 0, []
+    import requests
+
+    from job_os.boards import (MAX_AGE_DAYS, board_from_dict, default_path, fetch_postings, is_recent,
+                               is_relevant, load_boards, workday_detail)
+
+    payload = request.get_json(silent=True) or {}
+    try:
+        max_age = max(1, min(60, int(payload.get("max_age_days") or MAX_AGE_DAYS)))
+    except (TypeError, ValueError):
+        return jsonify({"error": "max_age_days must be a number of days."}), 400
+    boards = [board_from_dict(raw) for raw in load_boards(default_path())]
+    http = requests.Session()
+    http.headers["User-Agent"] = "JobApplier/1.0 (local career-board reader)"
+
+    def pull(board):
+        try:
+            return board, fetch_postings(board, http), None
+        except Exception as exc:  # one bad board must not stop the others
+            return board, [], f"{board.name}: {str(exc).splitlines()[0][:160]}"
+
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        results = list(pool.map(pull, boards))
+    errors = [error for _, _, error in results if error]
+    candidates = []
+    for board, postings, _ in results:
+        for post in postings:
+            if post.job_url and is_relevant(post.title) and is_recent(post.posted_date, max_age):
+                candidates.append((board, post))
+    candidates.sort(key=lambda item: item[1].posted_date or "", reverse=True)
+    unique = {}
+    for board, post in candidates:
+        unique.setdefault(post.job_url, (board, post))
+    candidates = list(unique.values())
+
+    added, skipped = [], 0
     session = Session()
     try:
         profile = load_profile()
-        for raw in load_boards(default_path()):
-            board = board_from_dict(raw)
-            try:
-                postings = fetch_postings(board)
-            except Exception as exc:
-                errors.append(f"{board.name}: {exc}")
+        known = {url for (url,) in session.query(Job.job_url).filter(Job.job_url.in_([p.job_url for _, p in candidates])).all()}
+        fresh = [(board, post) for board, post in candidates if post.job_url not in known][:60]
+        skipped = len(candidates) - len(fresh)
+        for board, post in fresh:
+            if board.kind == "workday" and post.platform == "workday":
+                try:
+                    workday_detail(board, post, http)
+                except Exception:
+                    pass  # keep the list entry; the description can be pasted later
+            if not is_recent(post.posted_date, max_age):
                 continue
-            for post in postings:
-                if not post.job_url or session.query(Job.id).filter_by(job_url=post.job_url).first():
-                    skipped += 1
-                    continue
-                if len(added) >= 40:
-                    break
-                parsed = parse_job_description(post.description, {
-                    "title": post.title, "company": post.company, "location": post.location,
-                    "job_url": post.job_url, "source": "company_site", "platform": post.platform,
-                    "posting_date": post.posted_date or "",
-                })
-                session.add(_new_job(parsed, profile))
-                added.append(f"{post.company}: {post.title}")
+            parsed = parse_job_description(post.description, {
+                "title": post.title, "company": post.company, "location": post.location,
+                "job_url": post.job_url, "source": "company_site", "platform": post.platform,
+                "posting_date": post.posted_date or "",
+            })
+            session.add(_new_job(parsed, profile))
+            added.append(f"{post.company}: {post.title}" + (f" ({post.posted_date})" if post.posted_date else ""))
         session.commit()
     finally:
         session.close()
     return jsonify({
-        "added": len(added), "skipped": skipped, "errors": errors, "titles": added[:12],
-        "message": f"Added {len(added)} company-site postings" + (f" · {len(errors)} board errors" if errors else ""),
+        "added": len(added), "skipped": skipped, "errors": errors, "titles": added[:12], "boards": len(boards),
+        "max_age_days": max_age,
+        "message": f"Added {len(added)} new postings from the last {max_age} days across {len(boards)} boards"
+                   + (f" · {skipped} already tracked" if skipped else "") + (f" · {len(errors)} board errors" if errors else ""),
     })
 
 
