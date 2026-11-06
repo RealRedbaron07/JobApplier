@@ -4,6 +4,39 @@ const statuses = ['discovered','interested','resume_tailored','applied','follow_
 const esc = value => String(value ?? '').replace(/[&<>'"]/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]));
 const fmtDate = value => value ? new Intl.DateTimeFormat('en-CA', {dateStyle:'medium'}).format(new Date(value)) : '—';
 const label = value => String(value || '').replaceAll('_', ' ');
+const JOB_POLL_MS = 20000;
+
+function isTextField(el) {
+  if (!el) return false;
+  if (el.isContentEditable) return true;
+  const tag = el.tagName;
+  if (tag === 'TEXTAREA') return true;
+  if (tag !== 'INPUT') return false;
+  const type = (el.type || 'text').toLowerCase();
+  return !['button', 'submit', 'reset', 'checkbox', 'radio', 'file', 'hidden', 'range', 'color', 'image'].includes(type);
+}
+
+function focusedTextIn(root) {
+  const el = document.activeElement;
+  return !!(root && el && root.contains(el) && isTextField(el));
+}
+
+function jobTitleLink(job) {
+  const title = esc(job.title);
+  if (!job.job_url) return title;
+  return `<a class="job-link" href="${esc(job.job_url)}" target="_blank" rel="noopener noreferrer">${title}</a>`;
+}
+
+function jobOpenLink(job) {
+  if (!job.job_url) return '';
+  return `<a class="job-link button secondary small" href="${esc(job.job_url)}" target="_blank" rel="noopener noreferrer" aria-label="Open ${esc(job.title)} posting">Open</a>`;
+}
+
+function detailFormDirty() {
+  const form = document.getElementById('detail-tracker-form');
+  if (!form) return false;
+  return [...form.querySelectorAll('input, textarea')].some(el => el.value !== (el.dataset.initial ?? ''));
+}
 
 async function api(url, options = {}) {
   const response = await fetch(url, {headers:{'Content-Type':'application/json', ...(options.headers || {})}, ...options});
@@ -44,20 +77,45 @@ function switchView(view) {
   if (view === 'followups') Promise.all([loadFollowups(), loadContacts()]);
   if (view === 'contacts') loadContacts();
   if (view === 'settings') loadProfile();
+  if (view === 'add-job') loadBoards();
 }
 
 document.querySelectorAll('[data-view], [data-view-link]').forEach(button => button.addEventListener('click', () => switchView(button.dataset.view || button.dataset.viewLink)));
 
-async function loadJobs() {
+async function loadBoards() {
+  const box = document.getElementById('board-list');
+  if (!box) return;
+  const data = await api('/api/boards');
+  box.innerHTML = data.boards.length ? data.boards.map(board => `<div class="attention"><div class="job-copy"><strong>${esc(board.name)}</strong><small>${esc(board.kind)} · ${esc(board.url)}</small></div><button class="button secondary small" data-remove-board="${esc(board.url)}">Remove</button></div>`).join('') : '<div class="empty compact-empty">No boards yet.</div>';
+  box.querySelectorAll('[data-remove-board]').forEach(btn => btn.addEventListener('click', async () => {
+    try { await api(`/api/boards?url=${encodeURIComponent(btn.dataset.removeBoard)}`, {method: 'DELETE'}); await loadBoards(); }
+    catch (err) { toast(err.message, true); }
+  }));
+}
+document.getElementById('board-form')?.addEventListener('submit', async event => {
+  event.preventDefault();
+  const form = new FormData(event.target);
+  try { const data = await api('/api/boards', {method: 'POST', body: JSON.stringify({name: form.get('name'), url: form.get('url')})}); toast(data.message); event.target.reset(); await loadBoards(); }
+  catch (err) { toast(err.message, true); }
+});
+document.getElementById('refresh-boards')?.addEventListener('click', async () => {
+  const btn = document.getElementById('refresh-boards');
+  btn.disabled = true; btn.textContent = 'Checking…';
+  try { const data = await api('/api/boards/refresh', {method: 'POST'}); toast(data.message, !!data.errors?.length); await loadDashboard(); }
+  catch (err) { toast(err.message, true); }
+  btn.disabled = false; btn.textContent = 'Check boards';
+});
+
+async function loadJobs(options = {}) {
   const data = await api('/api/jobs?limit=500');
   state.jobs = data.jobs;
-  renderTracker();
+  if (!options.skipTracker) renderTracker();
   fillJobSelectors();
   return data.jobs;
 }
 
-async function loadDashboard() {
-  const [analytics] = await Promise.all([api('/api/analytics'), loadJobs()]);
+async function loadDashboard(options = {}) {
+  const [analytics] = await Promise.all([api('/api/analytics'), loadJobs(options)]);
   const totals = analytics.totals;
   document.getElementById('metrics').innerHTML = [
     ['Tracked roles', totals.jobs, `${analytics.companies} companies`],
@@ -67,10 +125,10 @@ async function loadDashboard() {
   ].map(([name,value,note]) => `<div class="metric"><small>${esc(name)}</small><strong>${esc(value)}</strong><em>${esc(note)}</em></div>`).join('');
 
   const priority = [...state.jobs].filter(job => ['strong_apply','apply'].includes(job.fit_category) && !['applied','rejected','archived'].includes(job.application_status)).slice(0,5);
-  document.getElementById('priority-jobs').innerHTML = priority.length ? priority.map(job => `<button class="job-row" data-job="${job.id}"><span class="score">${job.match_score}</span><span class="job-copy"><strong>${esc(job.title)}</strong><small>${esc(job.company)} · ${esc(job.location)}</small></span><span class="pill">${esc(label(job.fit_category))}</span></button>`).join('') : '<div class="empty">Add a job post to build your priority queue.</div>';
+  document.getElementById('priority-jobs').innerHTML = priority.length ? priority.map(job => `<div class="job-row"><button type="button" class="job-main" data-job="${job.id}"><span class="score">${job.match_score}</span><span class="job-copy"><strong>${esc(job.title)}</strong><small>${esc(job.company)} · ${esc(job.location)}</small></span><span class="pill">${esc(label(job.fit_category))}</span></button>${jobOpenLink(job)}</div>`).join('') : '<div class="empty">Add a job post to build your priority queue.</div>';
   document.querySelectorAll('[data-job]').forEach(el => el.addEventListener('click', () => openJob(el.dataset.job)));
   const attention = state.jobs.filter(job => job.safety_flags?.length || job.follow_up_date || job.deadline).slice(0,5);
-  document.getElementById('attention-list').innerHTML = attention.length ? attention.map(job => `<div class="attention"><i>${job.safety_flags?.length ? '!' : '→'}</i><div class="job-copy"><strong>${esc(job.company)} — ${esc(job.title)}</strong><small>${esc(job.safety_flags?.[0]?.message || (job.follow_up_date ? `Follow up ${fmtDate(job.follow_up_date)}` : `Deadline ${fmtDate(job.deadline)}`))}</small></div></div>`).join('') : '<div class="empty">No deadlines or risk flags need attention.</div>';
+  document.getElementById('attention-list').innerHTML = attention.length ? attention.map(job => `<div class="attention"><i>${job.safety_flags?.length ? '!' : '→'}</i><div class="job-copy"><strong>${esc(job.company)} — ${esc(job.title)}</strong><small>${esc(job.safety_flags?.[0]?.message || (job.follow_up_date ? `Follow up ${fmtDate(job.follow_up_date)}` : `Deadline ${fmtDate(job.deadline)}`))}</small></div>${jobOpenLink(job)}</div>`).join('') : '<div class="empty">No deadlines or risk flags need attention.</div>';
 }
 
 function renderTracker() {
@@ -80,12 +138,14 @@ function renderTracker() {
   const rows = state.jobs.filter(job => (!search || `${job.title} ${job.company} ${job.location}`.toLowerCase().includes(search)) && (status === 'all' || job.application_status === status) && (category === 'all' || job.fit_category === category));
   document.getElementById('jobs-table').innerHTML = rows.length ? rows.map(job => `<tr>
     <td><button class="score ${job.match_score < 52 ? 'low' : ''}" data-open-job="${job.id}">${job.match_score}</button></td>
-    <td class="opportunity">${esc(job.title)}<small>${esc(job.company)} · <span class="pill ${job.safety_flags?.length ? 'warn':''}">${esc(label(job.fit_category))}</span></small></td>
+    <td class="opportunity">${jobTitleLink(job)}<small>${esc(job.company)} · <span class="pill ${job.safety_flags?.length ? 'warn':''}">${esc(label(job.fit_category))}</span></small></td>
     <td>${esc(job.location || 'Unspecified')}<br><small>${esc(label(job.work_mode))}</small></td>
     <td><select class="status-select" data-status-job="${job.id}">${(job.allowed_statuses || statuses).map(item => `<option value="${item}" ${item === job.application_status ? 'selected':''}>${label(item)}</option>`).join('')}</select></td>
     <td>${fmtDate(job.deadline)}</td><td class="next-action">${esc(job.next_action)}</td>
-  </tr>`).join('') : '<tr><td colspan="6" class="empty">No jobs match these filters.</td></tr>';
+    <td><button class="button secondary small" data-remove-job="${job.id}">Remove</button></td>
+  </tr>`).join('') : '<tr><td colspan="7" class="empty">No jobs match these filters.</td></tr>';
   document.querySelectorAll('[data-open-job]').forEach(el => el.addEventListener('click', () => openJob(el.dataset.openJob)));
+  document.querySelectorAll('[data-remove-job]').forEach(el => el.addEventListener('click', () => removeJob(el.dataset.removeJob)));
   document.querySelectorAll('[data-status-job]').forEach(el => el.addEventListener('change', async () => {
     const previous = state.jobs.find(job => String(job.id) === el.dataset.statusJob)?.application_status;
     const payload = {application_status:el.value};
@@ -101,10 +161,16 @@ function renderTracker() {
 
 function fillJobSelectors() {
   const options = '<option value="">Select a tracked job</option>' + state.jobs.map(job => `<option value="${job.id}">${esc(job.company)} — ${esc(job.title)} (${job.match_score})</option>`).join('');
-  ['tailor-job','followup-job'].forEach(id => { const el = document.getElementById(id); if (el) { const current = el.value; el.innerHTML = options; el.value = current; } });
+  ['tailor-job','followup-job'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el || document.activeElement === el) return;
+    const current = el.value;
+    el.innerHTML = options;
+    if ([...el.options].some(option => option.value === current)) el.value = current;
+  });
 }
 
-async function openJob(id) {
+async function openJob(id, options = {}) {
   try {
     const [job, draftData] = await Promise.all([api(`/api/jobs/${id}`), api(`/api/jobs/${id}/drafts`)]);
     const explanation = job.match_explanation || {};
@@ -113,26 +179,43 @@ async function openJob(id) {
       const preview = (typeof draft.content === 'string' ? draft.content : JSON.stringify(draft.content, null, 2)).slice(0, 6000);
       return `<div class="draft-row"><span><strong>${esc(label(draft.type))}</strong><small>${fmtDate(draft.created_date)} · ${esc(draft.review_status)} · safety ${draft.safety_report?.passed ? 'passed' : 'review'}</small></span><code>${esc(draft.file_path || 'Stored in database')}</code></div><details class="draft-preview"><summary>View stored draft</summary><pre>${esc(preview)}</pre></details>`;
     }).join('') : '<p class="empty compact-empty">No drafts yet.</p>';
-    document.getElementById('job-detail').innerHTML = `<div class="detail-head"><p class="eyebrow">${esc(label(job.fit_category))} · ${job.match_score}/100</p><h2 id="job-dialog-title">${esc(job.title)}</h2><p>${esc(job.company)} · ${esc(job.location)} · ${esc(label(job.work_mode))}</p><p class="detail-meta">${esc(job.source)} · ${esc(label(job.job_type))} · Posted ${fmtDate(job.posted_date)} · Deadline ${fmtDate(job.deadline)} · ${esc(salary)}</p></div>
+    const dialog = document.getElementById('job-dialog');
+    const scrollTop = dialog.open ? dialog.scrollTop : 0;
+    dialog.dataset.jobId = String(id);
+    document.getElementById('job-detail').innerHTML = `<div class="detail-head"><p class="eyebrow">${esc(label(job.fit_category))} · ${job.match_score}/100</p><h2 id="job-dialog-title">${jobTitleLink(job)}</h2><p>${esc(job.company)} · ${esc(job.location)} · ${esc(label(job.work_mode))}</p><p class="detail-meta">${esc(job.source)} · ${esc(label(job.job_type))} · Posted ${fmtDate(job.posted_date)} · Deadline ${fmtDate(job.deadline)} · ${esc(salary)}</p></div>
       ${job.safety_flags.map(flag => `<div class="warning-flag"><strong>${esc(flag.code)}</strong> — ${esc(flag.message)}</div>`).join('')}
-      <div class="detail-actions"><button class="button" data-prepare="${job.id}">Prepare package</button><button class="button secondary" data-tailor="${job.id}">Resume suggestions</button><button class="button secondary" data-answers="${job.id}">Draft answers</button><button class="button secondary" data-handoff="${job.id}" ${Number(state.profile?.automation_level ?? 3) < 4 ? 'disabled title="Requires automation level 4"' : ''}>Reviewed handoff</button>${job.job_url ? `<a class="button dark" href="${esc(job.job_url)}" target="_blank" rel="noopener noreferrer">Open official application ↗</a>`:''}</div>
+      <div class="detail-actions"><button class="button" data-prepare="${job.id}">Prepare package</button><button class="button secondary" data-tailor="${job.id}">Resume suggestions</button><button class="button secondary" data-answers="${job.id}">Draft answers</button><button class="button secondary" data-handoff="${job.id}" ${Number(state.profile?.automation_level ?? 3) < 4 ? 'disabled title="Requires automation level 4"' : ''}>Reviewed handoff</button>${job.job_url ? `<a class="button dark" href="${esc(job.job_url)}" target="_blank" rel="noopener noreferrer">Open official application ↗</a>`:''}<button class="button secondary" data-remove-job="${job.id}">Remove unrelated</button></div>
       <div class="detail-columns"><div class="detail-card"><h4>Why it fits</h4><ul class="compact-list">${(explanation.why_it_fits || []).map(x => `<li>${esc(x)}</li>`).join('')}</ul><h4>Matched skills</h4><p>${(explanation.matched_skills || []).map(x => `<span class="pill">${esc(x)}</span>`).join(' ') || 'None detected'}</p></div><div class="detail-card"><h4>Risks & missing skills</h4><ul class="compact-list">${(explanation.risks || []).map(x => `<li>${esc(x)}</li>`).join('')}</ul><p><strong>Resume:</strong> ${esc(job.resume_profile)}</p><p><strong>Project:</strong> ${esc(job.suggested_project)}</p></div></div>
       <div class="detail-card next-card"><h4>Suggested next action</h4><p>${esc(job.next_action)}</p></div>
       <div class="detail-columns"><div class="detail-card"><h4>Application checklist</h4><ul class="compact-list"><li>Verify eligibility, dates, and location</li><li>Review every generated claim</li><li>Prepare: ${esc((job.required_documents || []).join(', ') || 'resume')}</li><li>Submit manually on the official portal</li><li>Return and explicitly mark applied</li></ul><p><strong>Start:</strong> ${esc(job.start_date || 'Unspecified')} · <strong>Term:</strong> ${esc(job.term_length || 'Unspecified')}</p><h4>Score breakdown</h4>${Object.entries(job.score_breakdown || {}).map(([name,item]) => `<div class="score-line"><span>${esc(label(name))}</span><b>${item.points}/${item.max}</b></div>`).join('')}</div><div class="detail-card"><form id="detail-tracker-form"><label>Private notes<textarea name="notes" rows="4">${esc(job.notes)}</textarea></label><label>Follow-up date<input name="follow_up_date" type="datetime-local" value="${job.follow_up_date ? esc(job.follow_up_date.slice(0,16)) : ''}"></label><label>Recruiter/contact<input name="contact_name" value="${esc(job.contact_name || '')}"></label><label>Resume version used<input name="resume_version_used" value="${esc(job.resume_version_used || job.tailored_resume_path || '')}"></label><label>Cover-letter version used<input name="cover_letter_version_used" value="${esc(job.cover_letter_version_used || '')}"></label><label>Portal/login note<input name="login_portal" value="${esc(job.login_portal || '')}"></label><button class="button secondary small" type="submit">Save tracker details</button></form></div></div>
       <div class="detail-card"><h4>Draft history</h4>${draftHistory}</div>
       <h4>Posting</h4><div class="description">${esc(job.description)}</div>`;
-    const dialog = document.getElementById('job-dialog'); dialog.showModal();
+    document.querySelectorAll('#detail-tracker-form input, #detail-tracker-form textarea').forEach(el => { el.dataset.initial = el.value; });
+    if (!dialog.open) dialog.showModal();
+    else dialog.scrollTop = scrollTop;
     document.querySelector('[data-prepare]')?.addEventListener('click', () => runDraftAction(id, 'prepare'));
     document.querySelector('[data-tailor]')?.addEventListener('click', () => runDraftAction(id, 'tailor'));
     document.querySelector('[data-answers]')?.addEventListener('click', () => runDraftAction(id, 'answers'));
     document.querySelector('[data-handoff]')?.addEventListener('click', () => createHandoff(id));
+    document.querySelector('#job-detail [data-remove-job]')?.addEventListener('click', () => removeJob(id));
     document.getElementById('detail-tracker-form')?.addEventListener('submit', async event => {
       event.preventDefault();
       const payload = Object.fromEntries(new FormData(event.target));
       await api(`/api/jobs/${id}`, {method:'PATCH', body:JSON.stringify(payload)});
       toast('Tracker details saved locally');
+      document.querySelectorAll('#detail-tracker-form input, #detail-tracker-form textarea').forEach(el => { el.dataset.initial = el.value; });
       await loadJobs();
     });
+  } catch (error) { if (!options.silent) toast(error.message, true); }
+}
+
+async function removeJob(id) {
+  if (!window.confirm('Remove this posting? Use this for unrelated or stale listings.')) return;
+  try {
+    await api(`/api/jobs/${id}`, {method: 'DELETE'});
+    document.getElementById('job-dialog').close();
+    toast('Posting removed');
+    await loadDashboard();
   } catch (error) { toast(error.message, true); }
 }
 
@@ -307,4 +390,22 @@ document.getElementById('profile-form').addEventListener('submit', async event =
 
 document.getElementById('seed-demo').addEventListener('click', async () => { try { const data=await api('/api/seed-demo',{method:'POST'}); toast(data.message); await loadDashboard(); } catch(error){toast(error.message,true);} });
 
+let jobsPollInFlight = false;
+async function pollJobs() {
+  if (document.hidden || jobsPollInFlight) return;
+  jobsPollInFlight = true;
+  try {
+    const table = document.getElementById('jobs-table');
+    // Rewriting the tracker rows drops an open status menu. Add-job and Settings
+    // forms are outside this refresh, so typing there is left in place.
+    await loadDashboard({skipTracker: !!(table && table.contains(document.activeElement))});
+    const dialog = document.getElementById('job-dialog');
+    const jobId = dialog?.dataset.jobId;
+    if (dialog?.open && jobId && !focusedTextIn(dialog) && !detailFormDirty()) await openJob(jobId, {silent: true});
+  } catch (_) { /* keep the last good render until the next tick */ }
+  finally { jobsPollInFlight = false; }
+}
+
 Promise.all([loadDashboard(), loadProfile()]).catch(error => toast(error.message, true));
+setInterval(pollJobs, JOB_POLL_MS);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) pollJobs(); });

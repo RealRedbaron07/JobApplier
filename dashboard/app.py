@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from config import Config
-from database.models import ApplicationRecord, Contact, FollowUp, Job, Session, TailoredDraft
+from database.models import ApplicationRecord, Contact, FollowUp, Job, SavedLink, Session, TailoredDraft
 from job_os.analytics import summarize_jobs
 from job_os.drafts import generate_application_answers, recruiter_message
 from job_os.io import export_csv, export_json, parse_csv, parse_json_backup
@@ -331,6 +331,75 @@ def profile_settings():
     return jsonify(load_profile())
 
 
+@app.get("/api/boards")
+def boards_list():
+    from job_os.boards import default_path, load_boards
+
+    return jsonify({"boards": load_boards(default_path())})
+
+
+@app.post("/api/boards")
+def boards_add():
+    from job_os.boards import BoardError, add_board, default_path
+
+    payload = request.get_json(silent=True) or {}
+    try:
+        board = add_board(default_path(), str(payload.get("url") or ""), str(payload.get("name") or ""))
+    except BoardError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"message": f"Added {board.name} ({board.kind})", "board": {"name": board.name, "url": board.url, "kind": board.kind}})
+
+
+@app.delete("/api/boards")
+def boards_remove():
+    from job_os.boards import default_path, remove_board
+
+    url = (request.args.get("url") or (request.get_json(silent=True) or {}).get("url") or "").strip()
+    if not url:
+        return jsonify({"error": "url is required"}), 400
+    if not remove_board(default_path(), url):
+        return jsonify({"error": "No board with that URL"}), 404
+    return jsonify({"message": "Board removed"})
+
+
+@app.post("/api/boards/refresh")
+def boards_refresh():
+    """Pull new postings from saved company boards. Never submits an application."""
+    from job_os.boards import board_from_dict, default_path, fetch_postings, load_boards
+
+    added, skipped, errors = [], 0, []
+    session = Session()
+    try:
+        profile = load_profile()
+        for raw in load_boards(default_path()):
+            board = board_from_dict(raw)
+            try:
+                postings = fetch_postings(board)
+            except Exception as exc:
+                errors.append(f"{board.name}: {exc}")
+                continue
+            for post in postings:
+                if not post.job_url or session.query(Job.id).filter_by(job_url=post.job_url).first():
+                    skipped += 1
+                    continue
+                if len(added) >= 40:
+                    break
+                parsed = parse_job_description(post.description, {
+                    "title": post.title, "company": post.company, "location": post.location,
+                    "job_url": post.job_url, "source": "company_site", "platform": post.platform,
+                    "posting_date": post.posted_date or "",
+                })
+                session.add(_new_job(parsed, profile))
+                added.append(f"{post.company}: {post.title}")
+        session.commit()
+    finally:
+        session.close()
+    return jsonify({
+        "added": len(added), "skipped": skipped, "errors": errors, "titles": added[:12],
+        "message": f"Added {len(added)} company-site postings" + (f" · {len(errors)} board errors" if errors else ""),
+    })
+
+
 @app.post("/api/jobs/parse")
 def parse_preview():
     blocked = _level_error(1)
@@ -421,9 +490,13 @@ def job_detail(job_id: int):
         if not job:
             return jsonify({"error": "Job not found"}), 404
         if request.method == "DELETE":
-            job.application_status = "archived"
+            session.query(ApplicationRecord).filter_by(job_id=job.id).delete()
+            session.query(TailoredDraft).filter_by(job_id=job.id).delete()
+            session.query(FollowUp).filter_by(job_id=job.id).delete()
+            session.query(SavedLink).filter_by(job_id=job.id).delete()
+            session.delete(job)
             session.commit()
-            return jsonify({"message": "Job archived"})
+            return jsonify({"message": "Job removed"})
         if request.method == "PATCH":
             payload = request.get_json(silent=True) or {}
             if not isinstance(payload, dict):

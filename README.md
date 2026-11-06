@@ -34,7 +34,9 @@ Open **Settings & profile**, change the fields, and select **Save locally**. Thi
 
 ## Add a job
 
-Open **Add job**, enter any known title/company/location/source/application URL, paste the public job description, then:
+Prefer the company's own career board. On **Add job**, paste a Greenhouse, Lever, Ashby, or Workday URL and select **Check boards**. That reads the public job list and scores new postings. It does not log in or apply. LinkedIn is not a source — those posts go stale.
+
+You can still paste a description: enter title/company/location/source/application URL, paste the public job description, then:
 
 1. Select **Preview score** to inspect parsed skills, fit, and risk flags.
 2. Select **Add & score job** to store it locally.
@@ -60,7 +62,7 @@ Use **Application tracker** to move jobs through:
 
 `discovered → interested → resume_tailored → applied → follow_up_needed → interview → offer/rejected → archived`
 
-Mark `applied` only after submitting on the official portal; the UI asks for explicit confirmation and creates a follow-up reminder once. Export using **Export CSV**, **Backup JSON**, or **Summary**. The API also supports:
+Mark `applied` only after submitting on the official portal; the UI asks for explicit confirmation and creates a follow-up reminder once. Job titles in the tracker and the open posting, plus **Open** on the priority queue and attention list, go to `job_url` in a new tab. The score or priority row still opens the detail. While the tab is visible, the priority queue, tracker, metrics, and an open job you are not editing refresh about every 20 seconds. Typing in Add job or Settings is left in place. Export using **Export CSV**, **Backup JSON**, or **Summary**. The API also supports:
 
 ```text
 GET /api/export?format=csv
