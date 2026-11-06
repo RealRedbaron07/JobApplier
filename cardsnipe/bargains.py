@@ -1,9 +1,10 @@
 """Bounded public browser price checks for ungraded, identifiable singles."""
 
 import re
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlencode
 
-from cardsnipe.matcher import detect_condition_issue, detect_grade
+from cardsnipe.condition import TCGPLAYER_NAMES
+from cardsnipe.matcher import detect_grade
 
 NUMBER = re.compile(r"(?<!\d)(\d{1,3}/\d{1,3})(?!\d)")
 EXCLUDE = re.compile(r"\b(?:sealed|booster|etb|box|pack|lot|bundle|jumbo|oversized|proxy|fake|metal|reprint|custom|graded|slab|psa|cgc|bgs|tag|japanese|korean|chinese|german|french|spanish|italian|world championship)\b", re.I)
@@ -41,7 +42,7 @@ def stale_reference(value_source):
 
 def eligible(title):
     return (len(NUMBER.findall(title or "")) == 1 and not EXCLUDE.search(title) and not VARIANT.search(title)
-            and not detect_grade(title) and not detect_condition_issue(title) and not not_a_plain_listing(title))
+            and not detect_grade(title) and not not_a_plain_listing(title))
 
 
 def _number_key(number):
@@ -124,16 +125,38 @@ def printing_prices(text):
     return prices
 
 
-def plain_printing_price(prices):
-    """Price of the plain print (Unlimited / Holofoil / Normal); None when only special prints are listed."""
+def plain_printing(prices):
+    """(print name, price) of the plain print (Unlimited / Holofoil / Normal); (None, None) when unclear."""
     plain = {name: price for name, price in prices.items() if not OTHER_PRINTINGS.search(name) and price > 0}
     for preferred in ("Unlimited Holofoil", "Holofoil", "Unlimited", "Normal"):
         if preferred in plain:
-            return plain[preferred]
-    return next(iter(plain.values()), None) if len(plain) == 1 else None
+            return preferred, plain[preferred]
+    return next(iter(plain.items())) if len(plain) == 1 else (None, None)
 
 
-def tcgplayer_market(browser, title):
+def plain_printing_price(prices):
+    """Price of the plain print; None when only special prints are listed."""
+    return plain_printing(prices)[1]
+
+
+def sold_last_3_months(text):
+    """TCGplayer's 3-month "Total Sold" count for the selected condition and print, if shown."""
+    match = re.search(r"Total Sold:\s*([\d,]+)", text or "")
+    return int(match.group(1).replace(",", "")) if match else None
+
+
+def condition_market_price(text, condition_name, printing):
+    """Market price TCGplayer shows for one condition of one print ("Lightly Played Holofoil")."""
+    match = re.search(re.escape(f"{condition_name} {printing}") + r"\s*\n\s*Market Price\s*\$([\d,]+\.\d{2})", text or "")
+    return float(match.group(1).replace(",", "")) if match else None
+
+
+def tcgplayer_market(browser, title, claim=None):
+    """Plain-print Near Mint market price (USD) for the card in `title`.
+
+    When the seller states a played condition (claim "LP", "MP", "HP" or "DMG"), the same
+    product page is also read for that condition's market price ("condition_price").
+    """
     browser.get("https://www.tcgplayer.com/search/pokemon/product?productLineName=pokemon&q="
                 + quote_plus(search_query(title)))
     state = lambda: browser.js("""return document.querySelector('.product-card__product') ? 'results'
@@ -158,5 +181,19 @@ def tcgplayer_market(browser, title):
     # "Price Points" only appears on product pages, so the previous search page is never parsed.
     if not browser.wait_until(lambda: "Price Points" in browser.page_text() and "Market Price" in browser.page_text(), 12):
         raise RuntimeError("TCGplayer product page was unreadable; this card was not checked")
-    price = plain_printing_price(printing_prices(browser.page_text()))
-    return {**product, "price": price} if price else None
+    text = browser.page_text()
+    printing, price = plain_printing(printing_prices(text))
+    if not price:
+        return None
+    result = {**product, "price": price, "printing": printing, "sold_3m": sold_last_3_months(text),
+              "condition": claim, "condition_price": None}
+    name = TCGPLAYER_NAMES.get(claim)
+    if name and claim != "NM":
+        browser.get(product["url"].split("?")[0] + "?" + urlencode(
+            {"Language": "English", "Condition": name, "Printing": printing}))
+        # The Near Mint page never shows "<condition> <print> / Market Price", so a stale page cannot match.
+        # No price within the wait leaves condition_price empty; the deal math then uses a share of Near Mint.
+        found = lambda: condition_market_price(browser.page_text(), name, printing)
+        if browser.wait_until(lambda: found() is not None, 8):
+            result["condition_price"] = found()
+    return result

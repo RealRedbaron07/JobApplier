@@ -55,6 +55,9 @@ class SeenListing(Base):
     market_value = Column(Float)          # value for the listing's grade bucket, listing currency
     value_source = Column(String(30))     # tcgplayer / pricecharting / ebay_sold
     value_bucket = Column(String(8))
+    # TCGplayer market price for the seller's stated played condition (LP/MP/HP/DMG), listing currency.
+    condition_value = Column(Float)
+    sold_3m = Column(Integer)             # TCGplayer 3-month sold count, a liquidity check
     irregular = Column(Boolean, default=False)
     irregular_reason = Column(String(80))
     dismissed = Column(Boolean, default=False)  # user removed it; stays seen so a rescan cannot bring it back
@@ -249,7 +252,8 @@ class Store:
             session.commit()
             return row
 
-    def set_discovery_price(self, row_id: int, value: float | None, source: str = "") -> bool:
+    def set_discovery_price(self, row_id: int, value: float | None, source: str = "",
+                            condition_value: float | None = None, sold_3m: int | None = None) -> bool:
         with self.session() as session:
             row = session.get(SeenListing, row_id)
             if row is None or row.dismissed or row.discovery_at is None:
@@ -258,6 +262,8 @@ class Store:
             row.market_value = value
             row.value_source = source or None
             row.value_bucket = "raw" if value else None
+            row.condition_value = condition_value if value else None
+            row.sold_3m = sold_3m if value else None
             row.savings_pct = (value - row.total_price) / value * 100 if value and row.total_price is not None else None
             row.matched_target = None
             session.commit()

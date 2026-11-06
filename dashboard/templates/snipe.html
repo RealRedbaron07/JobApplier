@@ -39,28 +39,25 @@
 
       <section class="view active" id="view-discover">
         <article class="panel auto-scan-panel">
-          <p>Searches listings, then price-checks single cards against TCGplayer. Cheap ones show up in Bargains.</p>
           <div class="auto-scan-actions">
-            <label>Sites<select id="broad-source"><option value="all" selected>Marketplace + eBay</option><option value="facebook">Marketplace</option><option value="ebay">eBay</option></select></label>
+            <label class="sr-label">Sites<select id="broad-source" aria-label="Sites to scan"><option value="all" selected>Marketplace + eBay</option><option value="facebook">Marketplace</option><option value="ebay">eBay</option></select></label>
             <button class="button" id="broad-scan">Scan now</button>
             <button class="button secondary" id="broad-stop" hidden>Stop</button>
+            <p id="broad-status" role="status" aria-live="polite">Ready to scan.</p>
           </div>
           <progress id="broad-progress" max="8" value="0" hidden aria-label="Broad scan progress"></progress>
-          <p id="broad-status" role="status" aria-live="polite">Ready to scan.</p>
           <div id="broad-errors" role="status"></div>
           <details class="scanner-signin"><summary>Marketplace sign-in</summary><p class="detail-meta">The scanner uses its own Chrome window. Sign in there once.</p><div class="target-actions"><button class="button secondary small" id="facebook-login">Sign in to Marketplace scanner</button><button class="button secondary small" id="facebook-finish" hidden>Finish scanner sign-in</button><button class="button secondary small" id="facebook-cancel" hidden>Cancel sign-in</button></div></details>
         </article>
         <article class="panel candidates-panel">
-          <div class="panel-head"><div><h3>Results</h3></div><div class="target-actions"><span class="level" id="broad-result-count">No scan yet</span></div></div>
-          <p id="broad-result-meta" class="detail-meta"></p>
-          <div class="toolbar candidate-source-shortcuts" aria-label="Review candidates by site"><button class="button secondary small" id="broad-all-leads" type="button">All candidates</button><button class="button secondary small" id="broad-ebay-leads" type="button">eBay</button><button class="button secondary small" id="broad-facebook-leads" type="button">Marketplace</button></div>
+          <div class="panel-head"><div><h3>Results <span class="level" id="broad-result-count">No scan yet</span></h3><p id="broad-result-meta" class="detail-meta"></p></div><div class="toolbar candidate-source-shortcuts" aria-label="Review candidates by site"><button class="button secondary small" id="broad-all-leads" type="button">All candidates</button><button class="button secondary small" id="broad-ebay-leads" type="button">eBay</button><button class="button secondary small" id="broad-facebook-leads" type="button">Marketplace</button></div></div>
           <div class="toolbar candidate-filters">
             <label class="compact-control" hidden>Site<select id="broad-result-source"><option value="" selected>All sites</option><option value="facebook">Marketplace</option><option value="ebay">eBay</option></select></label>
             <label class="compact-control">Buying format<select id="broad-result-format"><option value="">Auctions + fixed price</option><option value="auction">Auctions</option><option value="bin">Buy Now / fixed price</option></select></label>
             <label class="compact-control">Condition<select id="broad-condition"><option value="">All conditions</option><option value="nm">NM / Mint claim</option><option value="lp">Lightly played claim</option><option value="mp">Moderately played claim</option><option value="hp">Heavily played / damaged</option><option value="unknown">Condition unknown</option><option value="graded">Graded cards</option><option value="sealed">Sealed products</option></select></label>
             <label class="compact-control">Search<input id="broad-result-query" class="search" placeholder="Card name, set…"></label>
           </div>
-          <details class="more-filters"><summary>More filters</summary><div class="toolbar candidate-filters">
+          <details class="more-filters"><summary>More filters, bulk remove &amp; help</summary><div class="toolbar candidate-filters">
             <label class="compact-control">Set<input id="broad-result-set" class="search" placeholder="e.g. Evolving Skies"></label>
             <label class="compact-control">Type<input id="broad-result-type" class="search" placeholder="e.g. PSA, sealed, promo"></label>
             <label class="compact-control price-filter">Min price<input id="broad-min-price" type="number" min="0" step="0.01" inputmode="decimal" placeholder="No minimum" aria-describedby="broad-price-help"></label>
@@ -73,13 +70,11 @@
             <label><input id="broad-kind-promo" type="checkbox" checked> Promos</label>
             <label><input id="broad-kind-other" type="checkbox" checked> Other / unclear</label>
           </div></fieldset>
-          </details>
-          <details class="help"><summary>How prices and conditions work</summary>
+          <div class="toolbar"><button class="button secondary small" type="button" data-select-visible="broad-results-table">Select visible</button><button class="button secondary small" type="button" data-remove-selected="broad-results-table" disabled>Remove selected (0)</button><button class="button secondary small" type="button" id="clear-all-finds">Clear all finds</button></div>
           <p id="broad-price-help" class="detail-meta" role="status" aria-live="polite"></p>
           <p id="broad-condition-breakdown" class="detail-meta" role="status"></p>
-          <p class="detail-meta">Prices include reported shipping, before tax. Condition and type come from the seller's title and are not photo-checked. Bargain % = (TCGplayer price − asking price) ÷ TCGplayer price. Always check the listing before buying.</p>
+          <p class="detail-meta">Price filters include reported shipping, before tax. Condition comes from the seller's text, not the photos. Deals compare all-in cost (with 13% HST on eBay) with the TCGplayer price for the stated condition. Always check the listing before buying.</p>
           </details>
-          <div class="toolbar"><button class="button secondary small" type="button" data-select-visible="broad-results-table">Select visible</button><button class="button secondary small" type="button" data-remove-selected="broad-results-table" disabled>Remove selected (0)</button><button class="button secondary small" type="button" id="clear-all-finds">Clear all finds</button></div>
           <div id="broad-results-table" class="bargain-review-list"><div class="empty">Click Scan now to find listings.</div></div>
           <button class="button secondary small" type="button" id="broad-more" hidden>Show more</button>
         </article>
@@ -114,28 +109,20 @@
 
       <section class="view" id="view-bargains">
         <article class="panel bargain-review-head">
-          <p>Single cards listed below their TCGplayer price (converted to CAD).</p>
-          <div class="toolbar"><button class="button" type="button" id="bargain-auto-check">Price-check 40 more saved cards</button><span id="bargain-auto-status" class="detail-meta" role="status"></span></div>
-          <div id="bargain-review-counts" class="bargain-review-counts" role="status" aria-live="polite">Loading saved results…</div>
-          <div class="toolbar"><label class="compact-control">Site<select id="bargain-source"><option value="" selected>All sites</option><option value="facebook">Marketplace</option><option value="ebay">eBay</option></select></label><label class="compact-control">Condition<select id="bargain-condition"><option value="">All conditions</option><option value="nm">NM / Mint claim</option><option value="lp">Lightly played claim</option><option value="mp">Moderately played claim</option><option value="hp">Heavily played / damaged</option><option value="unknown">Condition unknown</option><option value="graded">Graded cards</option><option value="sealed">Sealed products</option></select></label></div>
-          <p id="bargain-condition-breakdown" class="detail-meta" role="status"></p>
-          <div class="toolbar"><button class="button secondary small" type="button" data-select-visible="view-bargains">Select visible</button><button class="button secondary small" type="button" data-remove-selected="view-bargains" disabled>Remove selected (0)</button></div>
-          <fieldset class="product-kind-filter"><legend>Product types</legend><div>
-            <label><input id="bargain-kind-single" type="checkbox" checked> Singles</label>
-            <label><input id="bargain-kind-graded" type="checkbox" checked> Graded</label>
-            <label><input id="bargain-kind-sealed" type="checkbox" checked> Sealed</label>
-            <label><input id="bargain-kind-promo" type="checkbox" checked> Promos</label>
-            <label><input id="bargain-kind-other" type="checkbox" checked> Other / unclear</label>
-          </div></fieldset>
+          <div class="bargain-top">
+            <div id="bargain-review-counts" class="bargain-tabs" role="tablist" aria-label="Bargain types">Loading saved results…</div>
+            <div class="bargain-top-actions"><select id="bargain-source" aria-label="Site"><option value="" selected>All sites</option><option value="facebook">Marketplace</option><option value="ebay">eBay</option></select><button class="button small" type="button" id="bargain-auto-check">Price-check 40 more</button></div>
+          </div>
+          <p id="bargain-tab-help" class="detail-meta"></p>
+          <p id="bargain-auto-status" class="detail-meta" role="status"></p>
         </article>
-        <article class="panel"><div class="panel-head"><div><h3>Bargains</h3><p class="detail-meta">All-in cost (price + shipping + 13% HST on eBay) at or under 80% of the TCGplayer Near Mint price, with at least $5 profit. <strong>Strong</strong>: 70% or less. Auctions show the highest bid that still meets the rule, since current bids rise. Very cheap finds are flagged to confirm the print, language and condition.</p></div></div><div id="bargain-reviewed" class="bargain-review-list"></div></article>
-        <article class="panel slab-panel"><div class="panel-head"><div><h3>Crack &amp; regrade slabs</h3><p class="detail-meta">PSA 7–9, BGS 8–9.5 and CGC / TAG / SGC 7–9.5 slabs, compared with what the card sells for raw once cracked: 9+ at the full Near Mint price, 8.5 at 95%, 8 at 90%, 7 at 80% (10 points more when the seller says "no whitening" or "clean"). <strong>Crack</strong>: all-in cost at or under 90% of that cracked-out value, with at least $5 profit. <strong>Regrade watch</strong>: BGS 8.5+, or CGC / TAG / SGC 9+, priced within 10% of raw: a PSA 10 resubmission candidate. Check the photos for whitening before cracking.</p></div></div><div id="bargain-slabs" class="bargain-review-list"></div></article>
-        <details class="panel bargain-check-panel" id="bargain-price-check">
-          <summary>Not priced yet <span id="bargain-check-count"></span></summary>
-          <p class="detail-meta">No automatic price found. Type your own price to compare.</p>
-          <div id="bargain-candidates" class="bargain-review-list"></div>
-          <button class="button secondary small" id="bargain-more" type="button" hidden>Show more listings</button>
-        </details>
+        <div id="bargain-reviewed" class="bargain-review-list"></div>
+        <div id="bargain-conditions" class="bargain-review-list" hidden></div>
+        <div id="bargain-slabs" class="bargain-review-list" hidden></div>
+        <div id="bargain-auctions" class="bargain-review-list" hidden></div>
+        <div id="bargain-candidates" class="bargain-review-list" hidden></div>
+        <button class="button secondary small" id="bargain-more" type="button" hidden>Show more listings</button>
+        <details class="panel set-trends-wrap"><summary>Set price history</summary>
         <article class="panel set-trends-panel">
           <div class="panel-head"><div><p class="eyebrow">SET CONTEXT</p><h3>Set price history you imported</h3></div></div>
           <p class="detail-meta">Compare the same set, source, metric and unit across dates. A rising set does not prove an individual listing is underpriced. No market app or paid API is contacted.</p>
@@ -146,6 +133,7 @@
             <p class="detail-meta" id="set-trend-status" role="status" aria-live="polite"></p>
           </details>
         </article>
+        </details>
       </section>
 
       <section class="view" id="view-saved">

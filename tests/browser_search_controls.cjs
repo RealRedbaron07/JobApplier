@@ -410,7 +410,7 @@ test('Bargain review shows only positive comparisons and seller links', async ()
   assert.match(page.element('#bargain-reviewed').innerHTML, /Pikachu card/);
   assert.match(page.element('#bargain-reviewed').innerHTML, /50% below your price/);
   assert.match(page.element('#bargain-reviewed').innerHTML, /Strong \+CAD 30\.00/);
-  assert.match(page.element('#bargain-reviewed').innerHTML, /Open listing/);
+  assert.match(page.element('#bargain-reviewed').innerHTML, /Open ↗/);
   assert.doesNotMatch(page.element('#bargain-reviewed').innerHTML, /free-pickup|shipping-included/);
   assert.doesNotMatch(page.element('#bargain-candidates').innerHTML, /Pikachu card/);
   page.element('#bargain-reviewed').listeners.change({target: {dataset: {reference: 'facebook:6:CAD'}, value: ''}});
@@ -464,10 +464,8 @@ test('product type checkboxes hide multiple categories in Browse and Bargain rev
   assert.equal((page.element('#bargain-reviewed').innerHTML.match(/class="bargain-card /g) || []).length, 4);
   page.element('#broad-kind-sealed').checked = false;
   page.element('#broad-kind-sealed').listeners.change();
-  page.element('#bargain-kind-promo').checked = false;
-  page.element('#bargain-kind-promo').listeners.change();
-  assert.equal(page.element('#bargain-kind-sealed').checked, false);
-  assert.equal(page.element('#broad-kind-promo').checked, false);
+  page.element('#broad-kind-promo').checked = false;
+  page.element('#broad-kind-promo').listeners.change();
   assert.match(page.element('#broad-results-table').innerHTML, /Pikachu card|Charizard PSA/);
   assert.doesNotMatch(page.element('#broad-results-table').innerHTML, /sealed booster box|Pikachu promo card/);
   assert.equal((page.element('#bargain-reviewed').innerHTML.match(/class="bargain-card /g) || []).length, 2);
@@ -486,7 +484,7 @@ test('a user-imported set trend appears only beside a title-matched compared bar
   page.element('#bargain-source').value = 'facebook';
   page.element('#broad-results-table').listeners.change({target: {dataset: {reference: 'facebook:6:CAD'}, value: '60'}});
   assert.match(page.element('#bargain-reviewed').innerHTML, /Set index \+12\.0%/);
-  assert.match(page.element('#bargain-reviewed').innerHTML, /Set movement does not price this card/);
+  assert.match(page.element('#bargain-reviewed').innerHTML, /set-level only/);
   page.element('#bargain-reviewed').listeners.change({target: {dataset: {reference: 'facebook:6:CAD'}, value: ''}});
   assert.doesNotMatch(page.element('#bargain-reviewed').innerHTML, /Set index/);
   assert.equal(page.requests.length, 1, 'Set context must not start a browser scan');

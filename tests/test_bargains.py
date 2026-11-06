@@ -6,8 +6,10 @@ def test_only_clear_single_cards_get_browser_price_checks():
     for title in ("Lugia VSTAR Silver Tempest", "PSA 10 Lugia VSTAR 139/195 Silver Tempest",
                   "Lugia VSTAR 139/195 Japanese Silver Tempest", "Lugia VSTAR 139/195 reverse holo Silver Tempest",
                   "Lugia VSTAR 139/195 211/195 Silver Tempest", "Lugia VSTAR 139/195 jumbo Silver Tempest",
-                  "Lugia VSTAR 139/195 Silver Tempest LP", "Lugia VSTAR 139/195 Silver Tempest damaged"):
+                  ):
         assert not eligible(title)
+    # Played and damaged copies are priced at their own condition, so they are checked too.
+    assert eligible("Lugia VSTAR 139/195 Silver Tempest LP") and eligible("Lugia VSTAR 139/195 Silver Tempest damaged")
 
 
 def test_product_requires_unique_name_number_and_set():
@@ -57,3 +59,13 @@ def test_reprint_only_results_are_not_priced_as_the_original():
     reprint = {"name": "Rocket's Zapdos", "number": "#15/132", "set": "Celebrations: Classic Collection", "price": 2.99}
     assert pick_product([reprint], "Rocket's Zapdos 15/132 Gym Challenge Holo") is None
     assert pick_product([reprint], "Rocket's Zapdos 15/132 Celebrations Classic Collection") == reprint
+
+
+def test_condition_price_is_read_for_the_plain_print():
+    from cardsnipe.bargains import condition_market_price, plain_printing, sold_last_3_months
+    text = ("Near Mint Comparison Prices\nHolofoil:\t$6.39\nPrice Points \nLightly Played Holofoil\n"
+            "Market Price\t$5.74\nMost Recent Sale\t$6.99\nTotal Sold:\t111\tAvg. Daily Sold:\t1\n")
+    assert condition_market_price(text, "Lightly Played", "Holofoil") == 5.74
+    assert condition_market_price(text, "Lightly Played", "Reverse Holofoil") is None
+    assert sold_last_3_months(text) == 111
+    assert plain_printing({"1st Edition Holofoil": 120.0, "Unlimited Holofoil": 40.0}) == ("Unlimited Holofoil", 40.0)

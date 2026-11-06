@@ -5,9 +5,10 @@ from cardsnipe.deals import assess, crack_multiplier, is_bargain, max_buy
 from cardsnipe.slabs import crack_lane, slab_eligible
 
 
-def deal(value, total, source="facebook", listing_type="bin", title="Deoxys 4/110 Holon Phantoms", slab=None):
+def deal(value, total, source="facebook", listing_type="bin", title="Deoxys 4/110 Holon Phantoms", slab=None,
+         condition="Near Mint", played=None):
     return assess(title=title, source=source, listing_type=listing_type, price=total, shipping=0,
-                  total_price=total, value=value, slab=slab)
+                  total_price=total, value=value, slab=slab, condition=condition, checked_condition_value=played)
 
 
 def test_a_few_cents_under_market_is_not_a_bargain():
@@ -63,3 +64,41 @@ def test_other_graders_japanese_and_multi_slab_titles_are_not_price_checked():
     # A card number right after the grade is not a second grade.
     assert slab_eligible("PSA 9 - 4/102 Charizard Base Set")
     assert eligible("Prime Catcher ACE SPEC 157/162 Temporal Forces")
+
+
+def test_seller_condition_claims_and_damage_words():
+    from cardsnipe.condition import condition_claim, red_flags
+    assert condition_claim("Charizard 4/102 LP") == "LP"
+    assert condition_claim("Charizard 4/102", "Lightly played (Excellent)") == "LP"
+    assert condition_claim("Charizard 4/102", "Ungraded - Near mint or better") == "NM"
+    assert condition_claim("Charizard 4/102 never played, pack fresh") == "NM"
+    assert condition_claim("Charizard 4/102 120 HP Holo") is None
+    assert condition_claim("Charizard 4/102 not mint, creased") is None
+    assert condition_claim("Charizard 4/102 damaged") == "DMG"
+    assert red_flags("Lugia 139/195 no whitening, slight crease") == ["crease"]
+    assert red_flags("Lugia 139/195 no whitening no scratches") == []
+
+
+def test_played_cards_are_judged_against_their_own_condition_price():
+    # LP copy at $50: a loss against a $100 NM price is the wrong question; LP market is $63.
+    lp = deal(100, 50, title="Umbreon 215/203 LP", condition="", played=63)
+    assert lp["condition"] == "LP" and lp["basis"] == "LP" and lp["resale_value"] == 63 and lp["tier"] == "good"
+    assert lp["nm_upside"] == 50
+    # No checked LP price: fall back to 85% of NM, marked as an estimate.
+    est = deal(100, 50, title="Umbreon 215/203 LP", condition="")
+    assert est["basis"] == "LP est." and est["resale_value"] == 85 and est["tier"] == "strong"
+
+
+def test_unknown_condition_is_valued_as_lightly_played():
+    unknown = deal(100, 75, condition="", title="Umbreon 215/203")
+    assert unknown["condition"] is None and unknown["resale_value"] == 85 and unknown["tier"] is None
+    assert unknown["nm_upside"] == 25
+
+
+def test_condition_play_needs_clean_hints_and_no_damage_words():
+    title = "Umbreon 215/203 played but no whitening, sleeved since pulled"
+    play = deal(100, 75, title=title, condition="", played=70)
+    assert play["condition"] == "LP" and play["tier"] is None and play["lane"] == "condition"
+    assert not is_bargain(play)
+    assert deal(100, 75, title="Umbreon 215/203 LP", condition="", played=70)["lane"] is None
+    assert deal(100, 75, title=title + " small crease", condition="", played=70)["lane"] is None

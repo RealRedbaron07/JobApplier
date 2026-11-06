@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 
+from cardsnipe.condition import LABELS, clean_hints, condition_claim, condition_value, red_flags
 from cardsnipe.matcher import detect_clean_hints
 
 # eBay.ca collects Ontario HST on the item and shipping. Marketplace is local cash.
@@ -62,14 +63,23 @@ def crack_multiplier(grade: float, title: str = "") -> float:
 
 
 def assess(*, title: str, source: str, listing_type: str, price: float | None, shipping: float | None,
-           total_price: float | None, value: float | None, slab: tuple[str, float] | None = None) -> dict:
+           total_price: float | None, value: float | None, slab: tuple[str, float] | None = None,
+           condition: str | None = "", checked_condition_value: float | None = None) -> dict:
     """Verdict for one priced listing.
 
-    tier: "strong" | "good" | None. lane: "single" | "crack" | "regrade" | None.
-    profit is the resale value (raw NM, or the cracked-out value for slabs) minus all-in.
+    value is the raw Near Mint price. Singles are judged against the seller's claimed
+    condition (unknown = Lightly Played until photos show otherwise).
+    tier: "strong" | "good" | None. lane: "single" | "condition" | "crack" | "regrade" | None.
+    "condition" is a condition play: not a deal at the claimed condition, but a deal if it is
+    actually Near Mint, with clean hints in the title and no damage words.
+    profit is the resale value (claimed-condition value, or cracked-out value for slabs) minus all-in.
+    nm_upside is Near Mint value minus all-in, shown when the claim is below Near Mint.
     """
+    claim = condition_claim(title, condition or "")
     empty = {"tier": None, "lane": None, "all_in": all_in(total_price, source), "profit": None,
-             "pct_of_value": None, "resale_value": None, "max_buy": None, "flags": [], "auction": False}
+             "pct_of_value": None, "resale_value": None, "max_buy": None, "flags": [], "auction": False,
+             "condition": claim, "condition_label": LABELS[claim], "basis": None, "nm_upside": None,
+             "red_flags": [], "clean_hints": []}
     if not value or value <= 0 or total_price is None or (price is not None and price <= 1):
         return empty
     cost = empty["all_in"]
@@ -89,24 +99,34 @@ def assess(*, title: str, source: str, listing_type: str, price: float | None, s
         if resale < value:
             flags.append(f"cracked {company} {grade:g} valued at {resale / value:.0%} of raw NM")
         limit = max_buy(resale, source, shipping, CRACK_PCT)
+        basis = "slab"
+        damage, clean, nm_upside = [], [], None
     else:
-        resale = value
-        pct = cost / value * 100
-        profit = value - cost
+        resale, basis = condition_value(value, claim, checked_condition_value)
+        damage, clean = red_flags(title, condition or ""), clean_hints(title, condition or "")
+        pct = cost / resale * 100
         tier = None
-        if profit >= MIN_PROFIT:
+        if resale - cost >= MIN_PROFIT:
             tier = "strong" if pct <= STRONG_PCT else "good" if pct <= GOOD_PCT else None
         lane = "single" if tier else None
-        limit = max_buy(value, source, shipping)
+        nm_upside = round(value - cost, 2) if claim != "NM" else None
+        if (not tier and claim != "NM" and clean and not damage and claim not in ("HP", "DMG")
+                and value - cost >= MIN_PROFIT and cost <= value * GOOD_PCT / 100):
+            lane = "condition"
+            flags.append("condition play: only worth it if the photos show Near Mint")
+        if damage:
+            flags.append("seller mentions " + ", ".join(damage))
+        limit = max_buy(resale, source, shipping)
     if pct < TOO_GOOD_PCT:
         flags.append("too cheap to trust: confirm print, language, condition and that it is real")
     if auction:
         flags.append("current bid, final price will rise")
     if tax_pct(source):
         flags.append(f"includes {tax_pct(source):g}% HST")
-    return {"tier": tier, "lane": lane, "all_in": cost, "profit": round(resale - cost, 2),
+    return {**empty, "tier": tier, "lane": lane, "all_in": cost, "profit": round(resale - cost, 2),
             "pct_of_value": round(pct, 1), "resale_value": resale, "max_buy": limit,
-            "flags": flags, "auction": auction}
+            "flags": flags, "auction": auction, "basis": basis, "nm_upside": nm_upside,
+            "red_flags": damage, "clean_hints": clean}
 
 
 def is_bargain(verdict: dict) -> bool:

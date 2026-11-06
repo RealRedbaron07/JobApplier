@@ -13,7 +13,7 @@ from cardsnipe.browser import Browser, SourceUnavailable
 from cardsnipe.bargains import PRICE_VERSION, bank_of_canada_usd_cad, eligible, stale_reference, tcgplayer_market
 from cardsnipe.ebay import EbayWeb
 from cardsnipe.facebook import FacebookMarketplace
-from cardsnipe.matcher import detect_condition_issue
+from cardsnipe.condition import condition_claim
 from cardsnipe.deals import assess, is_bargain
 from cardsnipe.slabs import raw_title, slab_eligible, slab_grade
 from cardsnipe.watchlist import Target
@@ -33,11 +33,25 @@ def priceable(title):
     return eligible(title) or slab_eligible(title)
 
 
-def price_listing(browser, title):
-    """TCGplayer raw NM market price for this card. Slabs are looked up by their raw card."""
+def price_listing(browser, title, condition=""):
+    """TCGplayer raw NM market price for this card. Slabs are looked up by their raw card.
+
+    Raw singles listed as played also get that condition's market price.
+    """
     if slab_eligible(title):
         return tcgplayer_market(browser, raw_title(title)), f"TCGplayer raw NM (crack check, {PRICE_VERSION})"
-    return tcgplayer_market(browser, title), f"TCGplayer {PRICE_VERSION}"
+    return tcgplayer_market(browser, title, condition_claim(title, condition)), f"TCGplayer {PRICE_VERSION}"
+
+
+def save_price(store, row_id, product, label, fx):
+    """Store the CAD prices from one TCGplayer check. Returns the NM value, or None if unmatched."""
+    value = round(product["price"] * fx, 2) if product else None
+    played = product.get("condition_price") if product else None
+    if not store.set_discovery_price(row_id, value, f"{label} · BoC FX {fx:g}" if value else "",
+                                     condition_value=round(played * fx, 2) if played else None,
+                                     sold_3m=product.get("sold_3m") if product else None):
+        return False, None
+    return True, value
 
 
 def verdict(item, value):
@@ -50,11 +64,24 @@ def verdict(item, value):
         value = None
     return assess(title=item.title, source=item.source, listing_type=item.listing_type, price=item.price,
                   shipping=item.shipping, total_price=item.total_price, value=value,
-                  slab=slab_grade(item.title) if slab_eligible(item.title) else None)
+                  slab=slab_grade(item.title) if slab_eligible(item.title) else None,
+                  condition=getattr(item, "condition", "") or "",
+                  checked_condition_value=getattr(item, "condition_value", None))
 
 
-def counts_as_bargain(item, value):
-    return value is not None and is_bargain(verdict(item, value))
+def counts_as_bargain(item, value, condition_value=None):
+    if value is None:
+        return False
+    deal = assess(title=item.title, source=item.source, listing_type=item.listing_type, price=item.price,
+                  shipping=item.shipping, total_price=item.total_price, value=value if priceable(item.title) else None,
+                  slab=slab_grade(item.title) if slab_eligible(item.title) else None,
+                  condition=item.condition or "", checked_condition_value=condition_value)
+    return is_bargain(deal)
+
+
+def _played_cad(product, fx):
+    played = product.get("condition_price") if product else None
+    return round(played * fx, 2) if played else None
 
 
 def pick_candidates(items, title_of):
@@ -222,7 +249,6 @@ class DiscoveryScanner:
                           if entry["listing"].key in active and not entry["price_checked_at"]
                           and entry["listing"].currency == "CAD"
                           and priceable(entry["listing"].title)
-                          and not detect_condition_issue(entry["listing"].condition)
                           and entry["listing"].total_price is not None and entry["listing"].price > 1],
                                          lambda listing: listing.title)
             # Pricing gets its own time budget so a slow search phase does not starve it.
@@ -241,12 +267,11 @@ class DiscoveryScanner:
                             if self.stop.wait(PAGE_INTERVAL_SECONDS):
                                 break
                             try:
-                                product, label = price_listing(browser, listing.title)
-                                value = round(product["price"] * fx, 2) if product else None
-                                if self.store.set_discovery_price(found[listing.key]["row_id"], value,
-                                                                  f"{label} · BoC FX {fx:g}" if value else ""):
+                                product, label = price_listing(browser, listing.title, listing.condition)
+                                saved, value = save_price(self.store, found[listing.key]["row_id"], product, label, fx)
+                                if saved:
                                     priced += int(value is not None)
-                                    bargains += int(counts_as_bargain(listing, value))
+                                    bargains += int(counts_as_bargain(listing, value, _played_cad(product, fx)))
                             except Exception as exc:
                                 errors.append(f"price check for {listing.title!r}: {str(exc).splitlines()[0]}")
                 except Exception as exc:
@@ -269,8 +294,7 @@ def price_saved_singles(settings, store, stop=None, progress=None):
     rows, _ = store.discovery_results()
     candidates = [row for row in rows if (row.price_checked_at is None or stale_reference(row.value_source))
                   and row.currency == "CAD"
-                  and row.total_price is not None and row.price > 1 and priceable(row.title)
-                  and not detect_condition_issue(row.condition)]
+                  and row.total_price is not None and row.price > 1 and priceable(row.title)]
     candidates.sort(key=lambda row: row.source != "facebook")
     candidates = pick_candidates(candidates, lambda row: row.title)
     if not candidates:
@@ -292,12 +316,12 @@ def price_saved_singles(settings, store, stop=None, progress=None):
                 progress(message=f"Checking saved singles: {checked}/{len(candidates)} checked…", checked=checked,
                          priced=priced, bargains=bargains)
             try:
-                product, label = price_listing(browser, row.title)
-                value = round(product["price"] * fx, 2) if product else None
-                if store.set_discovery_price(row.id, value, f"{label} · BoC FX {fx:g}" if value else ""):
+                product, label = price_listing(browser, row.title, row.condition)
+                saved, value = save_price(store, row.id, product, label, fx)
+                if saved:
                     checked += 1
                     priced += int(value is not None)
-                    bargains += int(counts_as_bargain(row, value))
+                    bargains += int(counts_as_bargain(row, value, _played_cad(product, fx)))
             except Exception as exc:
                 errors.append(f"{row.title!r}: {str(exc).splitlines()[0]}")
                 if len(errors) >= 5:

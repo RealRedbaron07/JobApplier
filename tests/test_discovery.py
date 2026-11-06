@@ -133,7 +133,7 @@ def test_broad_scan_prices_exact_single_without_a_paid_api(browser_scan, monkeyp
     card = listing("facebook", title="Lugia VSTAR 139/195 Silver Tempest", price=5, shipping=0)
     monkeypatch.setattr(discovery.FacebookMarketplace, "find", lambda *a, **kw: [card])
     monkeypatch.setattr(discovery, "bank_of_canada_usd_cad", lambda browser: 1.4)
-    monkeypatch.setattr(discovery, "tcgplayer_market", lambda browser, title: {"price": 10, "name": "Lugia VSTAR"})
+    monkeypatch.setattr(discovery, "tcgplayer_market", lambda browser, title, claim=None: {"price": 10, "name": "Lugia VSTAR"})
     report = discovery.DiscoveryScanner(settings, store).scan("facebook")
     row = store.discovery_results()[0][0]
     assert report["priced"] == report["bargains"] == 1
@@ -333,7 +333,7 @@ def test_saved_price_check_advances_past_unmatched_cards_and_keeps_removed_out(b
     store.record_scan(started, started, ["facebook"], False, 3, 3, 0, 0, 0, [], kind="broad")
     monkeypatch.setattr(discovery, "bank_of_canada_usd_cad", lambda browser: 1.4)
     checked = []
-    def product(browser, title):
+    def product(browser, title, claim=None):
         checked.append(title)
         return {"price": 20} if title.endswith("0") else None
     monkeypatch.setattr(discovery, "tcgplayer_market", product)

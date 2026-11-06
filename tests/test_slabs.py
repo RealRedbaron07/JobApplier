@@ -34,6 +34,6 @@ def test_price_checks_interleave_slabs_with_raw_singles_and_look_up_the_raw_card
     titles = ["PSA 9 Charizard 4/102 Base Set", "Pikachu 58/102 Base Set", "BGS 8.5 Mew 151/165 151"]
     assert discovery.pick_candidates(titles, str) == [titles[0], titles[1], titles[2]]
     seen = []
-    monkeypatch.setattr(discovery, "tcgplayer_market", lambda browser, title: seen.append(title) or {"price": 1})
+    monkeypatch.setattr(discovery, "tcgplayer_market", lambda browser, title, claim=None: seen.append(title) or {"price": 1})
     _, label = discovery.price_listing(None, titles[0])
     assert seen == ["Charizard 4/102 Base Set"] and "crack" in label

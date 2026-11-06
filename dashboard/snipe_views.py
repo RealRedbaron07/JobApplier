@@ -73,6 +73,7 @@ def _listing_dict(row: SeenListing) -> dict:
         # Prices saved before print-specific pricing may be 1st Edition prices; hide them until re-checked.
         "market_value": None if stale_reference(row.value_source) else row.market_value,
         "value_source": "" if stale_reference(row.value_source) else row.value_source, "value_bucket": row.value_bucket,
+        "condition_value": row.condition_value, "sold_3m": row.sold_3m,
         "irregular": bool(row.irregular), "irregular_reason": row.irregular_reason,
         "saved_at": _iso(row.saved_at), "dismissed": bool(row.dismissed),
         **_slab_fields(row),
