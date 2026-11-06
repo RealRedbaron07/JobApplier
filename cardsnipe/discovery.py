@@ -14,15 +14,40 @@ from cardsnipe.bargains import bank_of_canada_usd_cad, eligible, tcgplayer_marke
 from cardsnipe.ebay import EbayWeb
 from cardsnipe.facebook import FacebookMarketplace
 from cardsnipe.matcher import detect_condition_issue
+from cardsnipe.slabs import raw_title, slab_eligible
 from cardsnipe.watchlist import Target
 
-MAX_SEARCHES = 8
+MAX_SEARCHES = 10
 RESULTS_PER_SEARCH = 60
 COOLDOWN_SECONDS = 60
 PAGE_INTERVAL_SECONDS = 2
-MAX_RUN_SECONDS = 180
+MAX_RUN_SECONDS = 240
 PRICE_CHECKS_PER_RUN = 40
-PRICE_CHECK_SECONDS = 360
+SLAB_CHECKS_PER_RUN = 20
+PRICE_CHECK_SECONDS = 480
+
+
+def priceable(title):
+    """Raw single or mid-grade slab that a TCGplayer raw price can be compared with."""
+    return eligible(title) or slab_eligible(title)
+
+
+def price_listing(browser, title):
+    """TCGplayer raw NM market price for this card. Slabs are looked up by their raw card."""
+    if slab_eligible(title):
+        return tcgplayer_market(browser, raw_title(title)), "TCGplayer raw NM (crack check)"
+    return tcgplayer_market(browser, title), "TCGplayer browser"
+
+
+def pick_candidates(items, title_of):
+    """Up to PRICE_CHECKS_PER_RUN raw singles plus SLAB_CHECKS_PER_RUN slabs, in order."""
+    raw = [item for item in items if eligible(title_of(item))][:PRICE_CHECKS_PER_RUN]
+    slabs = [item for item in items if slab_eligible(title_of(item))][:SLAB_CHECKS_PER_RUN]
+    picked = []
+    for pair in zip(slabs, raw):  # interleave so a short time budget still covers both kinds
+        picked.extend(pair)
+    longer = slabs if len(slabs) > len(raw) else raw
+    return picked + longer[min(len(slabs), len(raw)):]
 DISCOVERY_MODES = (
     ("all", "All listings", "Every buying format, newest first"),
     ("sale", "Sales & coupons", "Seller promotions and marked reductions"),
@@ -54,6 +79,8 @@ def search_plan(source="all"):
     searches = [("facebook", "all", query) for query in
                 ("pokemon single card", "pokemon graded card", "pokemon sealed")]
     searches += [("ebay", mode, "pokemon cards") for mode in ("sale", "all", "auction", "offers")]
+    # Mid-grade slabs for crack-and-regrade checks.
+    searches += [("ebay", "all", "pokemon psa 7 8 9"), ("ebay", "all", "pokemon bgs cgc tag graded")]
     searches += [("ebay", "all", "pokemon sealed")]
     return [item for item in searches if source == "all" or item[0] == source][:MAX_SEARCHES]
 
@@ -173,12 +200,13 @@ class DiscoveryScanner:
                 if not row.dismissed:
                     active.add(listing.key)
             # Price a bounded set from this pass; saved finds can be checked separately.
-            candidates = [entry["listing"] for entry in found.values()
+            candidates = pick_candidates([entry["listing"] for entry in found.values()
                           if entry["listing"].key in active and not entry["price_checked_at"]
                           and entry["listing"].currency == "CAD"
-                          and eligible(entry["listing"].title)
+                          and priceable(entry["listing"].title)
                           and not detect_condition_issue(entry["listing"].condition)
-                          and entry["listing"].total_price is not None and entry["listing"].price > 1]
+                          and entry["listing"].total_price is not None and entry["listing"].price > 1],
+                                         lambda listing: listing.title)
             # Pricing gets its own time budget so a slow search phase does not starve it.
             deadline = time.monotonic() + PRICE_CHECK_SECONDS
             if candidates and not self.stop.is_set():
@@ -187,7 +215,7 @@ class DiscoveryScanner:
                     if fx is None:
                         errors.append("price check: Bank of Canada USD/CAD rate was not readable; no comparisons made")
                     else:
-                        for listing in candidates[:PRICE_CHECKS_PER_RUN]:
+                        for listing in candidates:
                             if self.stop.is_set() or time.monotonic() >= deadline:
                                 break
                             self.progress(message=f"Checking exact card prices: {priced} priced so far…",
@@ -195,10 +223,10 @@ class DiscoveryScanner:
                             if self.stop.wait(PAGE_INTERVAL_SECONDS):
                                 break
                             try:
-                                product = tcgplayer_market(browser, listing.title)
+                                product, label = price_listing(browser, listing.title)
                                 value = round(product["price"] * fx, 2) if product else None
                                 if self.store.set_discovery_price(found[listing.key]["row_id"], value,
-                                                                  f"TCGplayer browser · BoC FX {fx:g}" if value else ""):
+                                                                  f"{label} · BoC FX {fx:g}" if value else ""):
                                     priced += int(value is not None)
                                     bargains += int(value is not None and value > listing.total_price)
                             except Exception as exc:
@@ -222,10 +250,10 @@ def price_saved_singles(settings, store, stop=None, progress=None):
     """Check the next batch of saved exact singles through public browser pages."""
     rows, _ = store.discovery_results()
     candidates = [row for row in rows if row.price_checked_at is None and row.currency == "CAD"
-                  and row.total_price is not None and row.price > 1 and eligible(row.title)
+                  and row.total_price is not None and row.price > 1 and priceable(row.title)
                   and not detect_condition_issue(row.condition)]
     candidates.sort(key=lambda row: row.source != "facebook")
-    candidates = candidates[:PRICE_CHECKS_PER_RUN]
+    candidates = pick_candidates(candidates, lambda row: row.title)
     if not candidates:
         return {"message": "No unchecked exact singles remain in saved finds.", "checked": 0, "priced": 0,
                 "bargains": 0, "errors": []}
@@ -245,9 +273,9 @@ def price_saved_singles(settings, store, stop=None, progress=None):
                 progress(message=f"Checking saved singles: {checked}/{len(candidates)} checked…", checked=checked,
                          priced=priced, bargains=bargains)
             try:
-                product = tcgplayer_market(browser, row.title)
+                product, label = price_listing(browser, row.title)
                 value = round(product["price"] * fx, 2) if product else None
-                if store.set_discovery_price(row.id, value, f"TCGplayer browser · BoC FX {fx:g}" if value else ""):
+                if store.set_discovery_price(row.id, value, f"{label} · BoC FX {fx:g}" if value else ""):
                     checked += 1
                     priced += int(value is not None)
                     bargains += int(value is not None and value > row.total_price)

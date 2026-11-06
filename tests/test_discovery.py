@@ -50,7 +50,7 @@ def test_marketplace_placeholder_prices_and_location_only_titles_are_excluded():
 
 def test_marketplace_searches_run_first_without_specific_card_targets():
     plan = discovery.search_plan()
-    assert len(plan) == 8
+    assert len(plan) == discovery.MAX_SEARCHES == 10
     assert [name for name, _, _ in plan[:3]] == ["facebook"] * 3
     assert all("pokemon" in query for _, _, query in plan)
 
@@ -107,9 +107,9 @@ def test_broad_scan_is_bounded_and_imports_without_targets_prices_or_condition_f
     monkeypatch.setattr(discovery.FacebookMarketplace, "find", facebook_search)
     report = discovery.DiscoveryScanner(settings, store).scan()
     rows, scan = store.discovery_results()
-    assert len(searches) == report["pages_done"] == 8
-    assert len(rows) == report["candidates"] == report["scanned"] == 480
-    assert report["new_listings"] == 480 and report["errors"] == []
+    assert len(searches) == report["pages_done"] == 10
+    assert len(rows) == report["candidates"] == report["scanned"] == 600
+    assert report["new_listings"] == 600 and report["errors"] == []
     assert scan.kind == "broad" and scan.budget is None and scan.currency == "CAD"
     assert scan.deals == 0 and scan.bids_scheduled == 0 and not scan.live
     assert all(row.market_value is None and row.matched_target is None for row in rows)
@@ -123,8 +123,8 @@ def test_broad_scan_deduplicates_and_preserves_routes_without_fake_discount_math
     monkeypatch.setattr(discovery.EbayWeb, "search_page", lambda *a: [listing()])
     report = discovery.DiscoveryScanner(settings, store).scan("ebay")
     rows, _ = store.discovery_results()
-    assert report["scanned"] == 5 and report["candidates"] == report["new_listings"] == 1
-    assert len(rows) == 1 and len(json.loads(rows[0].discovery_routes)) == 5
+    assert report["scanned"] == 7 and report["candidates"] == report["new_listings"] == 1
+    assert len(rows) == 1 and len(json.loads(rows[0].discovery_routes)) == 7
     assert rows[0].savings_pct is None and rows[0].market_value is None
 
 
@@ -404,7 +404,7 @@ def test_one_click_broad_endpoint_runs_with_an_empty_watchlist_and_cannot_launch
     monkeypatch.setattr(views, "DiscoveryScanner", Scanner)
     try:
         response = client.post("/api/snipe/discovery/scan", json={"source": "all", "live": True, "max_searches": 9999})
-        assert response.status_code == 202 and response.get_json()["max_searches"] == 8
+        assert response.status_code == 202 and response.get_json()["max_searches"] == 10
         assert not response.get_json()["paid_apis_enabled"] and started.wait(2)
         assert client.post("/api/snipe/discovery/scan", json={}).status_code == 409
         assert client.post("/api/snipe/discovery/stop").status_code == 202

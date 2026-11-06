@@ -72,7 +72,19 @@ def _listing_dict(row: SeenListing) -> dict:
         "market_value": row.market_value, "value_source": row.value_source, "value_bucket": row.value_bucket,
         "irregular": bool(row.irregular), "irregular_reason": row.irregular_reason,
         "saved_at": _iso(row.saved_at), "dismissed": bool(row.dismissed),
+        **_slab_fields(row),
     }
+
+
+def _slab_fields(row: SeenListing) -> dict:
+    """Crack-and-regrade verdict for mid-grade slabs priced against raw NM."""
+    from cardsnipe.slabs import crack_lane, slab_grade, slab_notes
+
+    grade = slab_grade(row.title or "")
+    if not grade:
+        return {"slab": None, "crack": None, "slab_notes": []}
+    return {"slab": f"{grade[0]} {grade[1]:g}", "crack": crack_lane(row.title, row.total_price, row.market_value),
+            "slab_notes": slab_notes(row.title)}
 
 
 def _bid_dict(row: ScheduledBid) -> dict:

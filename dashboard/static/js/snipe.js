@@ -462,11 +462,15 @@ function bargainCard(row, {savedView = false} = {}) {
       <div class="card-title">${savedView ? '' : `<input type="checkbox" data-select-listing="${row.id}" aria-label="Select ${esc(row.title)}">`}<div><h4><a href="${esc(row.url)}" target="_blank" rel="noopener">${esc(row.title)}</a></h4>
       <span class="sub"><span class="source-tag ${row.source === 'facebook' ? 'fb' : 'eb'}">${esc(row.source === 'facebook' ? 'Marketplace' : 'eBay')}</span> ${['graded', 'sealed'].includes(productKind(row)) ? '' : `${PRODUCT_LABELS[productKind(row)]} · `}${esc(conditionText(row))}${row.listing_type === 'auction' ? ' · Auction' : ''}${row.location ? ` · ${esc(row.location)}` : ''}${row.last_seen ? ` · ${esc(ago(row.last_seen))}` : ''}</span>
       ${earlier ? '<span class="sub over-budget">Earlier scan · may be sold</span>' : ''}${savedView && row.dismissed ? '<span class="sub">Removed from results, kept here</span>' : ''}</div></div>
-      ${discount > 0 ? `<span class="bargain-percent">${discount.toFixed(0)}% off</span>` : ''}
+      ${row.crack === 'crack' ? `<span class="bargain-percent crack-pill">Crack +${esc(money(row.currency, row.market_value - row.total_price))}</span>`
+        : row.crack === 'regrade' ? '<span class="bargain-percent regrade-pill">Regrade watch</span>'
+        : discount > 0 ? `<span class="bargain-percent">${discount.toFixed(0)}% off</span>` : ''}
     </header>
     <div class="card-body">
       <div class="card-price"><strong>${row.price == null ? 'Price varies' : esc(listingPrice(row))}</strong>
-        <span class="${discount > 0 ? 'compare-good' : 'sub'}">${esc(candidateComparisonText(row, discount))}${row.market_value ? ` · TCGplayer ${esc(money(row.currency, row.market_value))}` : ''}</span>${setNotes}</div>
+        ${row.slab && row.market_value ? `<span class="${row.crack === 'crack' ? 'compare-good' : 'sub'}">${esc(row.slab)} slab · raw NM worth ${esc(money(row.currency, row.market_value))}</span>`
+          : `<span class="${discount > 0 ? 'compare-good' : 'sub'}">${esc(candidateComparisonText(row, discount))}${row.market_value ? ` · TCGplayer ${esc(money(row.currency, row.market_value))}` : ''}</span>`}
+        ${(row.slab_notes || []).length ? `<span class="slab-notes">${row.slab_notes.map(note => `<span>${esc(note)}</span>`).join('')}</span>` : ''}${setNotes}</div>
       ${candidateReferenceInput(row)}
       <div class="card-actions">${savedButton(row)}<a class="button secondary small" href="${esc(row.url)}" target="_blank" rel="noopener">Open listing ↗</a>${row.market_value ? `<a class="button secondary small" href="https://www.tcgplayer.com/search/pokemon/product?productLineName=pokemon&q=${encodeURIComponent(number)}" target="_blank" rel="noopener">TCGplayer ↗</a>` : ''}${savedView ? '' : `<button class="button secondary small remove-button" type="button" data-dismiss="${row.id}">Remove</button>`}</div>
     </div>
@@ -516,15 +520,20 @@ function renderBargainReview() {
   $('#bargain-condition-breakdown').textContent = conditionBreakdown(discoveryResultData.listings.filter(row => productKindVisible(row) && (!source || row.source === source)));
   const rows = discoveryResultData.listings.filter(row => productKindVisible(row) && (!source || row.source === source)
     && (!condition || conditionClaim(row) === condition));
-  const compared = rows.filter(row => candidateDiscount(row) > 0)
+  const slabs = rows.filter(row => row.crack)
+    .sort((a, b) => (b.crack === 'crack') - (a.crack === 'crack') || candidateDiscount(b) - candidateDiscount(a));
+  const compared = rows.filter(row => !row.slab && candidateDiscount(row) > 0)
     .sort((a, b) => candidateDiscount(b) - candidateDiscount(a));
-  const unchecked = rows.filter(row => !(candidateDiscount(row) > 0))
+  const unchecked = rows.filter(row => !row.crack && !(!row.slab && candidateDiscount(row) > 0))
     .sort((a, b) => Number(b.discovery_at === discoveryResultData.scan?.started) - Number(a.discovery_at === discoveryResultData.scan?.started));
-  const allCompared = discoveryResultData.listings.filter(row => productKindVisible(row) && candidateDiscount(row) > 0).length;
+  const allCompared = discoveryResultData.listings.filter(row => productKindVisible(row)
+    && (row.crack === 'crack' || (!row.slab && candidateDiscount(row) > 0))).length;
   $('#bargain-badge').textContent = `${allCompared} bargain${allCompared === 1 ? '' : 's'}`;
   $('#bargain-review-counts').innerHTML = `<span><strong>${compared.length}</strong> bargain${compared.length === 1 ? '' : 's'}</span>`+`<span><strong>${unchecked.length}</strong> not priced or not cheaper</span>`;
   $('#bargain-reviewed').innerHTML = compared.length ? compared.map(bargainCard).join('')
     : '<div class="empty">No bargains yet. Click Price-check above or run a new scan.</div>';
+  $('#bargain-slabs').innerHTML = slabs.length ? slabs.map(row => bargainCard(row)).join('')
+    : '<div class="empty">No slabs worth cracking yet. Scans now include PSA, BGS, CGC and TAG searches.</div>';
   $('#bargain-check-count').textContent = `(${unchecked.length})`;
   $('#bargain-candidates').innerHTML = unchecked.length ? unchecked.slice(0, bargainLimit).map(bargainCard).join('')
     : '<div class="empty">Nothing here.</div>';
@@ -532,6 +541,7 @@ function renderBargainReview() {
   $('#bargain-more').textContent = `Show more (${Math.min(20, unchecked.length - bargainLimit)} next)`;
   bindDismiss('#bargain-reviewed', loadDiscoveryResults);
   bindDismiss('#bargain-candidates', loadDiscoveryResults);
+  bindDismiss('#bargain-slabs', loadDiscoveryResults);
   updateSelection('view-bargains');
 }
 
@@ -658,7 +668,7 @@ function saveCandidateReference(event) {
   renderDiscoveryResults();
   renderBargainReview();
 }
-for (const selector of ['#broad-results-table', '#bargain-reviewed', '#bargain-candidates']) {
+for (const selector of ['#broad-results-table', '#bargain-reviewed', '#bargain-candidates', '#bargain-slabs']) {
   $(selector).addEventListener('change', event => {
     if (event.target?.dataset?.selectListing) updateSelection(selector === '#broad-results-table' ? 'broad-results-table' : 'view-bargains');
     else saveCandidateReference(event);
@@ -919,7 +929,7 @@ const REPLACED_ROOTS = {
   scans: ['#scans-table'],
   listings: ['#listings-table'],
   discover: ['#broad-results-table'],
-  bargains: ['#bargain-reviewed', '#bargain-candidates', '#set-trend-list'],
+  bargains: ['#bargain-reviewed', '#bargain-candidates', '#bargain-slabs', '#set-trend-list'],
 };
 
 function isTextField(el) {
