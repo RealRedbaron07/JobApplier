@@ -197,3 +197,4 @@ input[type=checkbox]{accent-color:var(--green)}
 .slab-panel h3{display:flex;align-items:center;gap:8px}
 .slab-notes{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
 .slab-notes span{background:#f3e8ff;color:#6b21a8;border-radius:6px;font-size:11px;font-weight:600;padding:2px 7px}
+.bargain-card .good-pill{background:#fff;color:var(--good);border:1px solid var(--good)}.bargain-card .auction-pill{background:#b45309}.bargain-card .deal-detail{color:var(--ink,inherit)}.deal-flags .over-budget{color:#b91c1c}

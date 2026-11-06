@@ -14,7 +14,8 @@ from cardsnipe.bargains import PRICE_VERSION, bank_of_canada_usd_cad, eligible, 
 from cardsnipe.ebay import EbayWeb
 from cardsnipe.facebook import FacebookMarketplace
 from cardsnipe.matcher import detect_condition_issue
-from cardsnipe.slabs import raw_title, slab_eligible
+from cardsnipe.deals import assess, is_bargain
+from cardsnipe.slabs import raw_title, slab_eligible, slab_grade
 from cardsnipe.watchlist import Target
 
 MAX_SEARCHES = 10
@@ -37,6 +38,23 @@ def price_listing(browser, title):
     if slab_eligible(title):
         return tcgplayer_market(browser, raw_title(title)), f"TCGplayer raw NM (crack check, {PRICE_VERSION})"
     return tcgplayer_market(browser, title), f"TCGplayer {PRICE_VERSION}"
+
+
+def verdict(item, value):
+    """Deal verdict for a listing or saved row priced at `value` (CAD raw NM).
+
+    Titles the current rules no longer price (other graders, Japanese, multi-slab) get no verdict,
+    even if an older run saved a price for them.
+    """
+    if not priceable(item.title):
+        value = None
+    return assess(title=item.title, source=item.source, listing_type=item.listing_type, price=item.price,
+                  shipping=item.shipping, total_price=item.total_price, value=value,
+                  slab=slab_grade(item.title) if slab_eligible(item.title) else None)
+
+
+def counts_as_bargain(item, value):
+    return value is not None and is_bargain(verdict(item, value))
 
 
 def pick_candidates(items, title_of):
@@ -228,7 +246,7 @@ class DiscoveryScanner:
                                 if self.store.set_discovery_price(found[listing.key]["row_id"], value,
                                                                   f"{label} · BoC FX {fx:g}" if value else ""):
                                     priced += int(value is not None)
-                                    bargains += int(value is not None and value > listing.total_price)
+                                    bargains += int(counts_as_bargain(listing, value))
                             except Exception as exc:
                                 errors.append(f"price check for {listing.title!r}: {str(exc).splitlines()[0]}")
                 except Exception as exc:
@@ -279,7 +297,7 @@ def price_saved_singles(settings, store, stop=None, progress=None):
                 if store.set_discovery_price(row.id, value, f"{label} · BoC FX {fx:g}" if value else ""):
                     checked += 1
                     priced += int(value is not None)
-                    bargains += int(value is not None and value > row.total_price)
+                    bargains += int(counts_as_bargain(row, value))
             except Exception as exc:
                 errors.append(f"{row.title!r}: {str(exc).splitlines()[0]}")
                 if len(errors) >= 5:

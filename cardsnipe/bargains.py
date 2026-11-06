@@ -7,6 +7,22 @@ from cardsnipe.matcher import detect_condition_issue, detect_grade
 
 NUMBER = re.compile(r"(?<!\d)(\d{1,3}/\d{1,3})(?!\d)")
 EXCLUDE = re.compile(r"\b(?:sealed|booster|etb|box|pack|lot|bundle|jumbo|oversized|proxy|fake|metal|reprint|custom|graded|slab|psa|cgc|bgs|tag|japanese|korean|chinese|german|french|spanish|italian|world championship)\b", re.I)
+# Slabs from graders the crack check does not cover, and grade wording without a known company.
+OTHER_SLAB = re.compile(r"\b(?:ags|pca|gma|hga|mnt|ace)\s*-?\s*(?:gem[- ]?mt|gem\s+mint|mint\+?|graded|grade)?\s*-?\s*"
+                        r"(?:10|9\.5|9|8\.5|8|7)\b|\bgem[- ]?mt\b|\bmint\s*\+", re.I)
+# Japanese set codes and rarities (SV2a, s8b, SM12a, AR / SAR / CHR); English uses IR / SIR.
+JAPANESE = re.compile(r"\b(?:japan(?:ese)?|jpn|jp|sv\d{1,2}[a-z]|s\d{1,2}[a-z]|sm\d{1,2}[a-z+]|s-p|sv-p|sar|chr|csr)\b", re.I)
+# One listing selling several slabs or grades ("PSA 7 & 8 & 9", "Psa7. &8. &9", "PSA 7-9").
+MULTI_GRADE = re.compile(r"\b(?:psa|bgs|cgc|tag|sgc)\s*-?\s*\d{1,2}(?:\.5)?\s*[.,]?\s*(?:&|and|or|/|-|,)\s*(?:psa|bgs|cgc)?\s*"
+                         r"\d{1,2}(?:\.5)?\b(?!\s*/)", re.I)
+
+
+def not_a_plain_listing(title):
+    """Other graders, Japanese cards, and multi-slab listings: never priced as one English card."""
+    title = title or ""
+    return bool(OTHER_SLAB.search(title) or JAPANESE.search(title) or MULTI_GRADE.search(title))
+
+
 VARIANT = re.compile(r"\b(?:reverse holo|cosmos holo|non.?holo|first edition|1st edition|1st ed|shadowless|staff|prize pack|promo|"
                      r"pre-?release|stamp(?:ed)?|e-?reader|error|misprint)\b", re.I)
 # Reprint sets that reuse an older card's exact number (Celebrations Classic Collection).
@@ -25,7 +41,7 @@ def stale_reference(value_source):
 
 def eligible(title):
     return (len(NUMBER.findall(title or "")) == 1 and not EXCLUDE.search(title) and not VARIANT.search(title)
-            and not detect_grade(title) and not detect_condition_issue(title))
+            and not detect_grade(title) and not detect_condition_issue(title) and not not_a_plain_listing(title))
 
 
 def _number_key(number):

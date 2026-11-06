@@ -408,7 +408,8 @@ test('Bargain review shows only positive comparisons and seller links', async ()
     parentElement: {querySelector() { return {dataset: {reference: 'facebook:6:CAD'}, value: '60'}; }}}});
   assert.equal(page.element('#bargain-badge').textContent, '1 bargain');
   assert.match(page.element('#bargain-reviewed').innerHTML, /Pikachu card/);
-  assert.match(page.element('#bargain-reviewed').innerHTML, /50% off/);
+  assert.match(page.element('#bargain-reviewed').innerHTML, /50% below your price/);
+  assert.match(page.element('#bargain-reviewed').innerHTML, /Strong \+CAD 30\.00/);
   assert.match(page.element('#bargain-reviewed').innerHTML, /Open listing/);
   assert.doesNotMatch(page.element('#bargain-reviewed').innerHTML, /free-pickup|shipping-included/);
   assert.doesNotMatch(page.element('#bargain-candidates').innerHTML, /Pikachu card/);
@@ -424,6 +425,7 @@ test('browser market reference automatically places a saved listing in bargain r
   await page.context.loadDiscoveryResults();
   vm.runInContext("discoveryResultData.listings.find(row => row.listing_id === '6').market_value = 60", page.context);
   vm.runInContext("discoveryResultData.listings.find(row => row.listing_id === '6').value_source = 'TCGplayer browser · BoC FX 1.4'", page.context);
+  vm.runInContext("discoveryResultData.listings.find(row => row.listing_id === '6').deal = {tier: 'strong', all_in: 30, profit: 30, pct_of_value: 50, max_buy: 48, flags: [], auction: false}", page.context);
   page.element('#bargain-source').value = 'facebook';
   page.context.renderBargainReview();
   assert.match(page.element('#bargain-reviewed').innerHTML, /Pikachu card/);

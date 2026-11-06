@@ -80,15 +80,20 @@ def _listing_dict(row: SeenListing) -> dict:
 
 
 def _slab_fields(row: SeenListing) -> dict:
-    """Crack-and-regrade verdict for mid-grade slabs priced against raw NM."""
-    from cardsnipe.slabs import crack_lane, slab_grade, slab_notes
+    """Deal verdict (all-in cost, profit, tier) plus the crack-and-regrade lane for mid-grade slabs."""
+    from cardsnipe.deals import is_bargain
+    from cardsnipe.discovery import verdict
+    from cardsnipe.slabs import slab_eligible, slab_grade, slab_notes
 
+    value = None if stale_reference(row.value_source) else row.market_value
+    deal = verdict(row, value)
+    deal["bargain"] = is_bargain(deal)
     grade = slab_grade(row.title or "")
     if not grade:
-        return {"slab": None, "crack": None, "slab_notes": []}
-    value = None if stale_reference(row.value_source) else row.market_value
-    return {"slab": f"{grade[0]} {grade[1]:g}", "crack": crack_lane(row.title, row.total_price, value),
-            "slab_notes": slab_notes(row.title)}
+        return {"slab": None, "crack": None, "slab_notes": [], "deal": deal}
+    return {"slab": f"{grade[0]} {grade[1]:g}",
+            "crack": deal["lane"] if slab_eligible(row.title) and deal["lane"] in {"crack", "regrade"} else None,
+            "slab_notes": slab_notes(row.title), "deal": deal}
 
 
 def _bid_dict(row: ScheduledBid) -> dict:

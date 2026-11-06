@@ -335,7 +335,7 @@ def test_saved_price_check_advances_past_unmatched_cards_and_keeps_removed_out(b
     checked = []
     def product(browser, title):
         checked.append(title)
-        return {"price": 10} if title.endswith("0") else None
+        return {"price": 20} if title.endswith("0") else None
     monkeypatch.setattr(discovery, "tcgplayer_market", product)
     safe_settings = replace(settings, ebay_app_id="", ebay_cert_id="", live=False, fb_auto_message=False,
                             notify_macos=False, webhook_url="")

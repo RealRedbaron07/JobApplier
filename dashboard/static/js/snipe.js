@@ -352,8 +352,41 @@ function candidateDiscount(row) {
   if (row.source === 'facebook' && row.price != null && row.price <= 1) return null;
   const manual = Number(candidateReferences[candidateKey(row)]);
   const reference = Number.isFinite(manual) && manual > 0 ? manual : Number(row.market_value);
-  return Number.isFinite(reference) && reference > 0 && Number.isFinite(row.total_price)
-    ? (reference - row.total_price) / reference * 100 : null;
+  const cost = row.deal?.all_in ?? row.total_price;
+  return Number.isFinite(reference) && reference > 0 && Number.isFinite(cost)
+    ? (reference - cost) / reference * 100 : null;
+}
+const hasManualReference = row => Number(candidateReferences[candidateKey(row)]) > 0;
+// A deal: the server verdict (strong / good after tax, min profit) or your own price at least 20% above all-in.
+function dealTier(row) {
+  if (hasManualReference(row)) {
+    const discount = candidateDiscount(row);
+    return discount >= 30 ? 'strong' : discount >= 20 ? 'good' : null;
+  }
+  return row.deal?.tier || null;
+}
+const isDeal = row => !!dealTier(row) && !row.slab;
+const dealProfit = row => hasManualReference(row)
+  ? Number(candidateReferences[candidateKey(row)]) - (row.deal?.all_in ?? row.total_price) : (row.deal?.profit ?? 0);
+const dealRank = (a, b) => (!!a.deal?.auction - !!b.deal?.auction)
+  || ((dealTier(a) === 'strong' ? 0 : 1) - (dealTier(b) === 'strong' ? 0 : 1)) || dealProfit(b) - dealProfit(a);
+function dealPill(row) {
+  const d = row.deal || {};
+  const bid = `<span class="bargain-percent auction-pill">${row.crack === 'crack' ? 'Crack · ' : ''}Bid up to ${esc(money(row.currency, d.max_buy))}${row.shipping ? ' + ship' : ''}</span>`;
+  if (row.crack === 'crack') return d.auction ? bid : `<span class="bargain-percent crack-pill">Crack +${esc(money(row.currency, d.profit))}</span>`;
+  if (row.crack === 'regrade') return '<span class="bargain-percent regrade-pill">Regrade watch</span>';
+  const tier = dealTier(row);
+  if (!tier) return '';
+  if (d.auction && !hasManualReference(row)) return bid;
+  return `<span class="bargain-percent ${tier === 'strong' ? '' : 'good-pill'}">${tier === 'strong' ? 'Strong' : 'Good'} +${esc(money(row.currency, dealProfit(row)))}</span>`;
+}
+function dealDetail(row) {
+  const d = row.deal || {};
+  if (d.all_in == null || d.pct_of_value == null || hasManualReference(row)) return '';
+  const basis = row.slab ? 'cracked-out value' : 'TCGplayer';
+  const offer = !d.auction && !row.slab && d.max_buy > 0 ? ` · offer up to ${money(row.currency, d.max_buy)}` : '';
+  const flags = (d.flags || []).map(flag => `<span class="${/too cheap/.test(flag) ? 'over-budget' : ''}">${esc(flag)}</span>`).join('');
+  return `<span class="sub deal-detail">All-in ${esc(money(row.currency, d.all_in))} = ${Math.round(d.pct_of_value)}% of ${basis}${esc(offer)}</span>${flags ? `<span class="slab-notes deal-flags">${flags}</span>` : ''}`;
 }
 function candidateComparisonText(row, discount = candidateDiscount(row)) {
   const source = Number(candidateReferences[candidateKey(row)]) > 0 ? 'your price' : 'TCGplayer';
@@ -429,7 +462,8 @@ function renderDiscoveryResults() {
     && (!set || row.title.toLowerCase().includes(set))
     && (!type || row.title.toLowerCase().includes(type))
     && (!query || `${row.title} ${row.condition} ${row.promotion} ${row.discovery_routes.join(' ')}`.toLowerCase().includes(query)))
-    .sort((a, b) => Math.max(candidateDiscount(b) || 0, 0) - Math.max(candidateDiscount(a) || 0, 0));
+    .sort((a, b) => (!!dealTier(b) - !!dealTier(a)) || (dealTier(a) && dealTier(b) ? dealRank(a, b)
+      : Math.max(candidateDiscount(b) || 0, 0) - Math.max(candidateDiscount(a) || 0, 0)));
   const scan = discoveryResultData.scan;
   $('#broad-condition-breakdown').textContent = conditionBreakdown(discoveryResultData.listings.filter(row => productKindVisible(row) && (!source || row.source === source)));
   for (const [id, site, label] of [['#broad-all-leads', '', 'All'], ['#broad-ebay-leads', 'ebay', 'eBay'], ['#broad-facebook-leads', 'facebook', 'Marketplace']]) {
@@ -457,19 +491,19 @@ function bargainCard(row, {savedView = false} = {}) {
   const earlier = !savedView && row.discovery_at && discoveryResultData.scan && row.discovery_at !== discoveryResultData.scan.started;
   const setNotes = discount > 0 ? matchingSetTrends(row.title).map(trend => `<span class="set-trend-note">Set trend: ${esc(trend.set_name)} · ${esc(trend.metric)} ${trend.change_pct > 0 ? '+' : ''}${trend.change_pct.toFixed(1)}% (${esc(trend.source)}). Set movement does not price this card.</span>`).join('') : '';
   const number = (String(row.title || '').match(/\b\d{1,3}\/\d{1,3}\b/) || [row.title])[0];
-  return `<article class="bargain-card ${discount > 0 ? 'positive candidate-bargain' : ''}${row.saved_at ? ' saved' : ''}">
+  const good = row.crack === 'crack' || isDeal(row);
+  return `<article class="bargain-card ${good ? 'positive candidate-bargain' : ''}${row.saved_at ? ' saved' : ''}">
     <header>
       <div class="card-title">${savedView ? '' : `<input type="checkbox" data-select-listing="${row.id}" aria-label="Select ${esc(row.title)}">`}<div><h4><a href="${esc(row.url)}" target="_blank" rel="noopener">${esc(row.title)}</a></h4>
       <span class="sub"><span class="source-tag ${row.source === 'facebook' ? 'fb' : 'eb'}">${esc(row.source === 'facebook' ? 'Marketplace' : 'eBay')}</span> ${['graded', 'sealed'].includes(productKind(row)) ? '' : `${PRODUCT_LABELS[productKind(row)]} · `}${esc(conditionText(row))}${row.listing_type === 'auction' ? ' · Auction' : ''}${row.location ? ` · ${esc(row.location)}` : ''}${row.last_seen ? ` · ${esc(ago(row.last_seen))}` : ''}</span>
       ${earlier ? '<span class="sub over-budget">Earlier scan · may be sold</span>' : ''}${savedView && row.dismissed ? '<span class="sub">Removed from results, kept here</span>' : ''}</div></div>
-      ${row.crack === 'crack' ? `<span class="bargain-percent crack-pill">Crack +${esc(money(row.currency, row.market_value - row.total_price))}</span>`
-        : row.crack === 'regrade' ? '<span class="bargain-percent regrade-pill">Regrade watch</span>'
-        : discount > 0 ? `<span class="bargain-percent">${discount.toFixed(0)}% off</span>` : ''}
+      ${dealPill(row)}
     </header>
     <div class="card-body">
       <div class="card-price"><strong>${row.price == null ? 'Price varies' : esc(listingPrice(row))}</strong>
         ${row.slab && row.market_value ? `<span class="${row.crack === 'crack' ? 'compare-good' : 'sub'}">${esc(row.slab)} slab · raw NM worth ${esc(money(row.currency, row.market_value))}</span>`
-          : `<span class="${discount > 0 ? 'compare-good' : 'sub'}">${esc(candidateComparisonText(row, discount))}${row.market_value ? ` · TCGplayer ${esc(money(row.currency, row.market_value))}` : ''}</span>`}
+          : `<span class="${good ? 'compare-good' : 'sub'}">${esc(candidateComparisonText(row, discount))}${row.market_value ? ` · TCGplayer ${esc(money(row.currency, row.market_value))}` : ''}</span>`}
+        ${dealDetail(row)}
         ${(row.slab_notes || []).length ? `<span class="slab-notes">${row.slab_notes.map(note => `<span>${esc(note)}</span>`).join('')}</span>` : ''}${setNotes}</div>
       ${candidateReferenceInput(row)}
       <div class="card-actions">${savedButton(row)}<a class="button secondary small" href="${esc(row.url)}" target="_blank" rel="noopener">Open listing ↗</a>${row.market_value ? `<a class="button secondary small" href="https://www.tcgplayer.com/search/pokemon/product?productLineName=pokemon&q=${encodeURIComponent(number)}" target="_blank" rel="noopener">TCGplayer ↗</a>` : ''}${savedView ? '' : `<button class="button secondary small remove-button" type="button" data-dismiss="${row.id}">Remove</button>`}</div>
@@ -521,15 +555,20 @@ function renderBargainReview() {
   const rows = discoveryResultData.listings.filter(row => productKindVisible(row) && (!source || row.source === source)
     && (!condition || conditionClaim(row) === condition));
   const slabs = rows.filter(row => row.crack)
-    .sort((a, b) => (b.crack === 'crack') - (a.crack === 'crack') || candidateDiscount(b) - candidateDiscount(a));
-  const compared = rows.filter(row => !row.slab && candidateDiscount(row) > 0)
-    .sort((a, b) => candidateDiscount(b) - candidateDiscount(a));
-  const unchecked = rows.filter(row => !row.crack && !(!row.slab && candidateDiscount(row) > 0))
+    .sort((a, b) => (b.crack === 'crack') - (a.crack === 'crack') || (b.deal?.profit ?? 0) - (a.deal?.profit ?? 0));
+  const compared = rows.filter(isDeal).sort(dealRank);
+  const auctions = compared.filter(row => row.deal?.auction && !hasManualReference(row)).length;
+  const thin = rows.filter(row => !row.slab && !isDeal(row) && candidateDiscount(row) > 0).length;
+  const unchecked = rows.filter(row => !row.crack && !isDeal(row))
     .sort((a, b) => Number(b.discovery_at === discoveryResultData.scan?.started) - Number(a.discovery_at === discoveryResultData.scan?.started));
   const allCompared = discoveryResultData.listings.filter(row => productKindVisible(row)
-    && (row.crack === 'crack' || (!row.slab && candidateDiscount(row) > 0))).length;
+    && (row.crack === 'crack' || (isDeal(row) && !(row.deal?.auction && !hasManualReference(row))))).length;
   $('#bargain-badge').textContent = `${allCompared} bargain${allCompared === 1 ? '' : 's'}`;
-  $('#bargain-review-counts').innerHTML = `<span><strong>${compared.length}</strong> bargain${compared.length === 1 ? '' : 's'}</span>`+`<span><strong>${unchecked.length}</strong> not priced or not cheaper</span>`;
+  const buyNow = compared.length - auctions;
+  $('#bargain-review-counts').innerHTML = `<span><strong>${buyNow}</strong> bargain${buyNow === 1 ? '' : 's'} (all-in ≤ 80% of value)</span>`
+    + `<span><strong>${auctions}</strong> auction${auctions === 1 ? '' : 's'} to bid on</span>`
+    + `<span><strong>${thin}</strong> below market but thin margin</span>`
+    + `<span><strong>${unchecked.length}</strong> not priced or not a deal</span>`;
   $('#bargain-reviewed').innerHTML = compared.length ? compared.map(bargainCard).join('')
     : '<div class="empty">No bargains yet. Click Price-check above or run a new scan.</div>';
   $('#bargain-slabs').innerHTML = slabs.length ? slabs.map(row => bargainCard(row)).join('')
