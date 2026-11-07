@@ -64,6 +64,7 @@ def test_other_graders_japanese_and_multi_slab_titles_are_not_price_checked():
     # A card number right after the grade is not a second grade.
     assert slab_eligible("PSA 9 - 4/102 Charizard Base Set")
     assert eligible("Prime Catcher ACE SPEC 157/162 Temporal Forces")
+    assert not slab_eligible("PSA 9 Makuhita 2005 Ex- Emerald Reverse Foil#54/106 Pokemon")
 
 
 def test_seller_condition_claims_and_damage_words():
@@ -73,6 +74,7 @@ def test_seller_condition_claims_and_damage_words():
     assert condition_claim("Charizard 4/102", "Ungraded - Near mint or better") == "NM"
     assert condition_claim("Charizard 4/102 never played, pack fresh") == "NM"
     assert condition_claim("Charizard 4/102 120 HP Holo") is None
+    assert condition_claim("Umbreon Call of Legends 22/95 HP") == "HP"
     assert condition_claim("Charizard 4/102 not mint, creased") is None
     assert condition_claim("Charizard 4/102 damaged") == "DMG"
     assert red_flags("Lugia 139/195 no whitening, slight crease") == ["crease"]

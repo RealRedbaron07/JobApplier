@@ -24,7 +24,8 @@ LABELS = {"NM": "Near Mint", "LP": "Lightly played", "MP": "Moderately played", 
 # Unknown condition is valued as Lightly Played until photos show otherwise.
 FALLBACK_SHARE = {"NM": 1.0, "LP": 0.85, "MP": 0.7, "HP": 0.5, "DMG": 0.35, None: 0.85}
 
-_HIT_POINTS = re.compile(r"\b\d{2,3}\s*hp\b", re.I)
+# "120 HP" is hit points; "22/95 HP" is a card number followed by a Heavily Played claim.
+_HIT_POINTS = re.compile(r"(?<![/\d])\b\d{2,3}\s*hp\b", re.I)
 _NEGATED = re.compile(r"\b(?:not|no|non)[ -]?(?:near[ -]?mint|mint|nm)\b", re.I)
 _NO_DAMAGE = re.compile(r"\b(?:no|zero|without|free of)\s+(?:\w+\s+){0,2}?(?:damage|whitening|scratch(?:es)?|wear|"
                         r"crease[s]?|dents?|flaws?|marks?)\b", re.I)

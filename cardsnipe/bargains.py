@@ -24,7 +24,7 @@ def not_a_plain_listing(title):
     return bool(OTHER_SLAB.search(title) or JAPANESE.search(title) or MULTI_GRADE.search(title))
 
 
-VARIANT = re.compile(r"\b(?:reverse holo\w*|rev\.? holo\w*|cosmos holo|non.?holo|first edition|1st edition|1st ed|shadowless|staff|prize pack|promo|"
+VARIANT = re.compile(r"\b(?:reverse (?:holo\w*|foil)|rev\.? holo\w*|cosmos holo|non.?holo|first edition|1st edition|1st ed|shadowless|staff|prize pack|promo|"
                      r"pre-?release|stamp(?:ed)?|e-?reader|error|misprint)\b", re.I)
 # Reprint sets that reuse an older card's exact number (Celebrations Classic Collection).
 REPRINT_SET = re.compile(r"classic collection|celebrations", re.I)
