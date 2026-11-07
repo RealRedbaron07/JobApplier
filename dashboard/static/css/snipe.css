@@ -226,3 +226,4 @@ input[type=checkbox]{accent-color:var(--green)}
 .auto-scan-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.auto-scan-actions #broad-status{margin:0;font-size:13px}
 .sr-label{font-size:0}.sr-label select{font-size:13px}
 .candidates-panel .panel-head{align-items:flex-start;gap:12px;flex-wrap:wrap}.candidates-panel .panel-head h3 .level{margin-left:8px;vertical-align:middle}
+.bargain-card .price-sources{display:block;font-size:12px;margin-top:2px}.bargain-card .price-sources a{white-space:nowrap}

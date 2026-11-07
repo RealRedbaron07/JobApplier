@@ -58,6 +58,13 @@ class SeenListing(Base):
     # TCGplayer market price for the seller's stated played condition (LP/MP/HP/DMG), listing currency.
     condition_value = Column(Float)
     sold_3m = Column(Integer)             # TCGplayer 3-month sold count, a liquidity check
+    # PriceCharting cross-check, listing currency: ungraded price, median of recent ungraded sales
+    # (eBay + TCGplayer, last 90 days) and the price for a slab's own grade.
+    pc_value = Column(Float)
+    sales_value = Column(Float)
+    sales_count = Column(Integer)
+    graded_value = Column(Float)
+    pc_url = Column(String(255))
     irregular = Column(Boolean, default=False)
     irregular_reason = Column(String(80))
     dismissed = Column(Boolean, default=False)  # user removed it; stays seen so a rescan cannot bring it back
@@ -253,7 +260,8 @@ class Store:
             return row
 
     def set_discovery_price(self, row_id: int, value: float | None, source: str = "",
-                            condition_value: float | None = None, sold_3m: int | None = None) -> bool:
+                            condition_value: float | None = None, sold_3m: int | None = None,
+                            cross_check: dict | None = None) -> bool:
         with self.session() as session:
             row = session.get(SeenListing, row_id)
             if row is None or row.dismissed or row.discovery_at is None:
@@ -264,6 +272,12 @@ class Store:
             row.value_bucket = "raw" if value else None
             row.condition_value = condition_value if value else None
             row.sold_3m = sold_3m if value else None
+            check = (cross_check or {}) if value else {}
+            row.pc_value = check.get("pc_value")
+            row.sales_value = check.get("sales_value")
+            row.sales_count = check.get("sales_count")
+            row.graded_value = check.get("graded_value")
+            row.pc_url = check.get("pc_url")
             row.savings_pct = (value - row.total_price) / value * 100 if value and row.total_price is not None else None
             row.matched_target = None
             session.commit()

@@ -372,8 +372,9 @@ const dealRank = (a, b) => (!!a.deal?.auction - !!b.deal?.auction)
   || ((dealTier(a) === 'strong' ? 0 : 1) - (dealTier(b) === 'strong' ? 0 : 1)) || dealProfit(b) - dealProfit(a);
 function dealPill(row) {
   const d = row.deal || {};
-  const bid = `<span class="bargain-percent auction-pill">${row.crack === 'crack' ? 'Crack · ' : ''}Bid up to ${esc(money(row.currency, d.max_buy))}${row.shipping ? ' + ship' : ''}</span>`;
+  const bid = `<span class="bargain-percent auction-pill">${row.crack === 'crack' ? 'Crack · ' : row.crack === 'slab' ? 'Slab · ' : ''}Bid up to ${esc(money(row.currency, d.max_buy))}${row.shipping ? ' + ship' : ''}</span>`;
   if (row.crack === 'crack') return d.auction ? bid : `<span class="bargain-percent crack-pill">Crack +${esc(money(row.currency, d.profit))}</span>`;
+  if (row.crack === 'slab') return d.auction ? bid : `<span class="bargain-percent ${d.tier === 'strong' ? '' : 'good-pill'}">Under ${esc(row.slab)} price +${esc(money(row.currency, d.profit))}</span>`;
   if (row.crack === 'regrade') return '<span class="bargain-percent regrade-pill">Regrade watch</span>';
   const tier = dealTier(row);
   if (!tier && d.lane === 'condition') return `<span class="bargain-percent condition-pill">Condition play +${esc(money(row.currency, d.nm_upside))}</span>`;
@@ -382,12 +383,27 @@ function dealPill(row) {
   return `<span class="bargain-percent ${tier === 'strong' ? '' : 'good-pill'}">${tier === 'strong' ? 'Strong' : 'Good'} +${esc(money(row.currency, dealProfit(row)))}</span>`;
 }
 const BASIS_LABEL = {NM: 'TCGplayer', LP: 'TCGplayer LP', MP: 'TCGplayer MP', HP: 'TCGplayer HP', DMG: 'TCGplayer damaged',
-  'LP est.': 'est. LP value', 'MP est.': 'est. MP value', 'HP est.': 'est. HP value', 'DMG est.': 'est. damaged value', slab: 'cracked-out value'};
+  'LP est.': 'est. LP value', 'MP est.': 'est. MP value', 'HP est.': 'est. HP value', 'DMG est.': 'est. damaged value', slab: 'cracked-out value',
+  sales: 'recent sales median', graded: 'PriceCharting grade price'};
+// Every price the verdict was checked against, so a wrong comparison is easy to spot.
+function priceSources(row) {
+  const parts = [];
+  if (row.market_value) parts.push(`TCGplayer NM ${money(row.currency, row.market_value)}`);
+  if (row.condition_value && row.deal?.condition && row.deal.condition !== 'NM') parts.push(`TCGplayer ${row.deal.condition} ${money(row.currency, row.condition_value)}`);
+  if (row.sales_value) parts.push(`sold median ${money(row.currency, row.sales_value)} (${row.sales_count} sales, 90 d)`);
+  else if (row.sales_count != null && row.pc_url) parts.push(`only ${row.sales_count} recent sales`);
+  if (row.pc_value) parts.push(`PriceCharting ungraded ${money(row.currency, row.pc_value)}`);
+  if (row.graded_value && row.slab) parts.push(`PriceCharting ${row.slab.replace(/^\S+ /, 'grade ')} ${money(row.currency, row.graded_value)}`);
+  if (!parts.length) return '';
+  const link = row.pc_url ? ` <a href="${esc(row.pc_url)}" target="_blank" rel="noopener">PriceCharting ↗</a>` : '';
+  const note = row.market_value && !row.sales_checked ? ' · not yet cross-checked with sales' : row.market_value && !row.pc_url ? ' · no PriceCharting match' : '';
+  return `<span class="sub price-sources">${esc(parts.join(' · ') + note)}${link}</span>`;
+}
 // Chips worth reading: warnings and condition evidence. HST is already in the all-in line.
 function dealChips(row) {
   const d = row.deal || {};
-  const chips = (d.flags || []).filter(flag => !/HST|current bid|valued at/.test(flag))
-    .map(flag => `<span class="${/too cheap|seller mentions/.test(flag) ? 'warn' : ''}">${esc(flag)}</span>`);
+  const chips = (d.flags || []).filter(flag => !/HST|current bid|valued at|PriceCharting grade/.test(flag))
+    .map(flag => `<span class="${/too cheap|seller mentions|under TCGplayer/.test(flag) ? 'warn' : ''}">${esc(flag)}</span>`);
   (d.clean_hints || []).forEach(hint => chips.push(`<span class="good">${esc(hint)}</span>`));
   (row.slab_notes || []).filter(note => !(d.clean_hints || []).includes(note)).forEach(note => chips.push(`<span>${esc(note)}</span>`));
   return chips.length ? `<span class="chips">${chips.join('')}</span>` : '';
@@ -401,7 +417,6 @@ function dealDetail(row) {
   const basis = BASIS_LABEL[d.basis] || 'TCGplayer';
   const tax = row.source === 'ebay' ? ' incl. HST' : '';
   const parts = [`All-in ${money(row.currency, d.all_in)}${tax} = ${Math.round(d.pct_of_value)}% of ${basis} ${money(row.currency, d.resale_value ?? row.market_value)}`];
-  if (d.basis === 'slab') parts.push(`raw NM ${money(row.currency, row.market_value)}`);
   if (d.nm_upside > 0 && d.condition !== 'NM' && !row.slab) parts.push(`if Near Mint +${money(row.currency, d.nm_upside)}`);
   if (!d.auction && !row.slab && d.tier && d.max_buy > 0) parts.push(`offer up to ${money(row.currency, d.max_buy)}`);
   if (row.sold_3m != null) parts.push(`${row.sold_3m} sold in 3 mo`);
@@ -520,7 +535,7 @@ function bargainCard(row, {savedView = false, selectable = !savedView} = {}) {
       ${dealPill(row)}
     </header>
     <div class="card-body">
-      <div class="card-price"><strong>${row.price == null ? 'Price varies' : esc(listingPrice(row))}</strong>${dealDetail(row)}${dealChips(row)}${setNotes ? `<span class="chips">${setNotes}</span>` : ''}</div>
+      <div class="card-price"><strong>${row.price == null ? 'Price varies' : esc(listingPrice(row))}</strong>${dealDetail(row)}${priceSources(row)}${dealChips(row)}${setNotes ? `<span class="chips">${setNotes}</span>` : ''}</div>
       <div class="card-actions">${savedButton(row)}<a class="button secondary small" href="${esc(row.url)}" target="_blank" rel="noopener">Open ↗</a>${row.market_value ? `<a class="button secondary small" href="https://www.tcgplayer.com/search/pokemon/product?productLineName=pokemon&q=${encodeURIComponent(number)}" target="_blank" rel="noopener">TCGplayer ↗</a>` : ''}${savedView ? '' : `<button class="button secondary small remove-button" type="button" data-dismiss="${row.id}">Remove</button>`}${candidateReferenceInput(row)}</div>
     </div>
   </article>`;
@@ -564,9 +579,9 @@ $('#set-trend-form').addEventListener('submit', async event => {
 });
 let bargainLimit = 20;
 const BARGAIN_TABS = [
-  ['deals', 'Deals', '#bargain-reviewed', 'All-in (price + shipping + 13% HST on eBay) at or under 80% of the TCGplayer price for the card\'s stated condition, with at least $5 profit. Strong = 70% or less. No stated condition is valued as Lightly Played.'],
+  ['deals', 'Deals', '#bargain-reviewed', 'All-in (price + shipping + 13% HST on eBay) at or under 80% of the card\'s value, with at least $5 profit. Strong = 70% or less. Value = the TCGplayer price for the stated condition (none stated = Lightly Played), capped at the median of recent eBay + TCGplayer sales from PriceCharting.'],
   ['condition', 'Condition plays', '#bargain-conditions', 'Listed as played or with no condition, but the title says clean (no whitening, pack fresh…) and mentions no damage. Not a deal at the stated condition; a deal if the photos show Near Mint.'],
-  ['slabs', 'Crack & regrade', '#bargain-slabs', 'Mid-grade slabs vs. the raw card once cracked: 9+ at full NM, 8.5 at 95%, 8 at 90%, 7 at 80% (+10 points for "no whitening" / "clean"). Regrade watch: BGS 8.5+, CGC / TAG / SGC 9+ within 10% of raw.'],
+  ['slabs', 'Slabs', '#bargain-slabs', 'Under grade price: a PSA slab at or under 80% of PriceCharting\'s price for that grade. Crack: the raw card is worth more than the slab (9+ at full NM, 8.5 at 95%, 8 at 90%, 7 at 80%, +10 points for "no whitening"). Regrade watch: BGS 8.5+, CGC / TAG / SGC 9+ within 10% of raw.'],
   ['auctions', 'Auctions', '#bargain-auctions', 'Current bids rise, so each auction shows the highest bid (before shipping) that still meets the deal rule.'],
   ['unchecked', 'Not priced', '#bargain-candidates', 'No TCGplayer match, or priced but not a deal. Use "My price" on a card to compare it yourself.'],
 ];
@@ -579,9 +594,9 @@ function renderBargainReview() {
   const rows = discoveryResultData.listings.filter(row => productKindVisible(row) && (!source || row.source === source));
   const isAuction = row => row.deal?.auction && !hasManualReference(row);
   const slabs = rows.filter(row => row.crack && !isAuction(row))
-    .sort((a, b) => (b.crack === 'crack') - (a.crack === 'crack') || (b.deal?.profit ?? 0) - (a.deal?.profit ?? 0));
+    .sort((a, b) => (b.crack !== 'regrade') - (a.crack !== 'regrade') || (b.deal?.profit ?? 0) - (a.deal?.profit ?? 0));
   const deals = rows.filter(row => isDeal(row) && !isAuction(row)).sort(dealRank);
-  const auctions = rows.filter(row => isAuction(row) && (isDeal(row) || row.crack === 'crack'))
+  const auctions = rows.filter(row => isAuction(row) && (isDeal(row) || row.crack === 'crack' || row.crack === 'slab'))
     .sort((a, b) => (b.deal?.profit ?? 0) - (a.deal?.profit ?? 0));
   const plays = rows.filter(row => !isDeal(row) && !row.slab && row.deal?.lane === 'condition')
     .sort((a, b) => (b.deal?.nm_upside ?? 0) - (a.deal?.nm_upside ?? 0));
@@ -590,14 +605,14 @@ function renderBargainReview() {
     .sort((a, b) => Number(b.discovery_at === discoveryResultData.scan?.started) - Number(a.discovery_at === discoveryResultData.scan?.started));
   const lists = {deals, condition: plays, slabs, auctions, unchecked};
   const allDeals = discoveryResultData.listings.filter(row => productKindVisible(row) && !isAuction(row)
-    && (row.crack === 'crack' || isDeal(row))).length;
+    && (row.crack === 'crack' || row.crack === 'slab' || isDeal(row))).length;
   $('#bargain-badge').textContent = `${allDeals} bargain${allDeals === 1 ? '' : 's'}`;
   $('#bargain-review-counts').innerHTML = BARGAIN_TABS.map(([key, label]) =>
     `<button type="button" role="tab" class="bargain-tab" data-bargain-tab="${key}" aria-selected="${key === bargainTab}">${label} <strong>${lists[key].length}</strong></button>`).join('');
   const help = BARGAIN_TABS.find(([key]) => key === bargainTab);
   $('#bargain-tab-help').textContent = help[3];
   const empty = {deals: 'No bargains yet. Price-check more saved cards or run a new scan.', condition: 'No condition plays yet.',
-    slabs: 'No slabs worth cracking yet.', auctions: 'No auctions under the bid limit.', unchecked: 'Nothing here.'};
+    slabs: 'No slab deals yet.', auctions: 'No auctions under the bid limit.', unchecked: 'Nothing here.'};
   for (const [key, , selector] of BARGAIN_TABS) {
     const list = key === 'unchecked' ? unchecked.slice(0, bargainLimit) : lists[key];
     $(selector).innerHTML = list.length ? list.map(row => bargainCard(row, {selectable: false})).join('') : `<div class="empty">${empty[key]}</div>`;

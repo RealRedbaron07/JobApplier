@@ -10,11 +10,13 @@ from datetime import datetime, timezone
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from cardsnipe.browser import Browser, SourceUnavailable
-from cardsnipe.bargains import PRICE_VERSION, bank_of_canada_usd_cad, eligible, stale_reference, tcgplayer_market
+from cardsnipe.bargains import (CROSS_CHECK, NUMBER, PRICE_VERSION, bank_of_canada_usd_cad, eligible, needs_recheck,
+                                tcgplayer_market)
 from cardsnipe.ebay import EbayWeb
 from cardsnipe.facebook import FacebookMarketplace
 from cardsnipe.condition import condition_claim
 from cardsnipe.deals import assess, is_bargain
+from cardsnipe.pricecharting import pricecharting_lookup
 from cardsnipe.slabs import raw_title, slab_eligible, slab_grade
 from cardsnipe.watchlist import Target
 
@@ -25,7 +27,7 @@ PAGE_INTERVAL_SECONDS = 2
 MAX_RUN_SECONDS = 240
 PRICE_CHECKS_PER_RUN = 40
 SLAB_CHECKS_PER_RUN = 20
-PRICE_CHECK_SECONDS = 480
+PRICE_CHECK_SECONDS = 720  # each card now reads TCGplayer and PriceCharting
 
 
 def priceable(title):
@@ -34,49 +36,73 @@ def priceable(title):
 
 
 def price_listing(browser, title, condition=""):
-    """TCGplayer raw NM market price for this card. Slabs are looked up by their raw card.
+    """TCGplayer raw NM market price for this card, cross-checked on PriceCharting.
 
-    Raw singles listed as played also get that condition's market price.
+    Slabs are looked up by their raw card, plus PriceCharting's price for the slab's grade.
+    Raw singles listed as played also get that condition's TCGplayer market price.
+    PriceCharting adds the ungraded price and the median of recent sales; if it has no exact
+    match the TCGplayer price is still used, and the label says the sales check found nothing.
     """
-    if slab_eligible(title):
-        return tcgplayer_market(browser, raw_title(title)), f"TCGplayer raw NM (crack check, {PRICE_VERSION})"
-    return tcgplayer_market(browser, title, condition_claim(title, condition)), f"TCGplayer {PRICE_VERSION}"
+    slab = slab_grade(title) if slab_eligible(title) else None
+    if slab:
+        product = tcgplayer_market(browser, raw_title(title))
+        label = f"TCGplayer raw NM (crack check, {PRICE_VERSION})"
+    else:
+        product = tcgplayer_market(browser, title, condition_claim(title, condition))
+        label = f"TCGplayer {PRICE_VERSION}"
+    if product and product.get("price"):
+        number = NUMBER.search(title or "")
+        try:
+            product["pricecharting"] = pricecharting_lookup(browser, product, number.group(1) if number else "",
+                                                            grade=slab[1] if slab else None)
+        except Exception:
+            product["pricecharting"] = None
+        label += f" + PriceCharting, {CROSS_CHECK}" if product["pricecharting"] else f", {CROSS_CHECK}: no PriceCharting match"
+    return product, label
+
+
+def cross_check_cad(product, fx):
+    """PriceCharting values converted to CAD for storage."""
+    pc = (product or {}).get("pricecharting") or {}
+    cad = lambda usd: round(usd * fx, 2) if usd else None
+    return {"pc_value": cad(pc.get("ungraded")), "sales_value": cad(pc.get("sales_median")),
+            "sales_count": pc.get("sales_count"), "graded_value": cad(pc.get("graded")), "pc_url": pc.get("url")}
 
 
 def save_price(store, row_id, product, label, fx):
-    """Store the CAD prices from one TCGplayer check. Returns the NM value, or None if unmatched."""
+    """Store the CAD prices from one check. Returns the NM value, or None if unmatched."""
     value = round(product["price"] * fx, 2) if product else None
     played = product.get("condition_price") if product else None
     if not store.set_discovery_price(row_id, value, f"{label} · BoC FX {fx:g}" if value else "",
                                      condition_value=round(played * fx, 2) if played else None,
-                                     sold_3m=product.get("sold_3m") if product else None):
+                                     sold_3m=product.get("sold_3m") if product else None,
+                                     cross_check=cross_check_cad(product, fx)):
         return False, None
     return True, value
 
 
+def _assess(item, value, condition_value, check):
+    return assess(title=item.title, source=item.source, listing_type=item.listing_type, price=item.price,
+                  shipping=item.shipping, total_price=item.total_price, value=value if priceable(item.title) else None,
+                  slab=slab_grade(item.title) if slab_eligible(item.title) else None,
+                  condition=getattr(item, "condition", "") or "", checked_condition_value=condition_value,
+                  sales_value=check.get("sales_value"), graded_value=check.get("graded_value"))
+
+
 def verdict(item, value):
-    """Deal verdict for a listing or saved row priced at `value` (CAD raw NM).
+    """Deal verdict for a saved row priced at `value` (CAD raw NM).
 
     Titles the current rules no longer price (other graders, Japanese, multi-slab) get no verdict,
     even if an older run saved a price for them.
     """
-    if not priceable(item.title):
-        value = None
-    return assess(title=item.title, source=item.source, listing_type=item.listing_type, price=item.price,
-                  shipping=item.shipping, total_price=item.total_price, value=value,
-                  slab=slab_grade(item.title) if slab_eligible(item.title) else None,
-                  condition=getattr(item, "condition", "") or "",
-                  checked_condition_value=getattr(item, "condition_value", None))
+    check = {"sales_value": getattr(item, "sales_value", None), "graded_value": getattr(item, "graded_value", None)}
+    return _assess(item, value, getattr(item, "condition_value", None), check)
 
 
-def counts_as_bargain(item, value, condition_value=None):
+def counts_as_bargain(item, value, product=None, fx=1.0):
     if value is None:
         return False
-    deal = assess(title=item.title, source=item.source, listing_type=item.listing_type, price=item.price,
-                  shipping=item.shipping, total_price=item.total_price, value=value if priceable(item.title) else None,
-                  slab=slab_grade(item.title) if slab_eligible(item.title) else None,
-                  condition=item.condition or "", checked_condition_value=condition_value)
-    return is_bargain(deal)
+    return is_bargain(_assess(item, value, _played_cad(product, fx), cross_check_cad(product, fx)))
 
 
 def _played_cad(product, fx):
@@ -240,7 +266,7 @@ class DiscoveryScanner:
                 row = self.store.record_listing(listing, None, discovery_at=started,
                                                 discovery_routes=entry["routes"], promotion=promotion_text(listing))
                 entry["row_id"] = row.id
-                entry["price_checked_at"] = None if stale_reference(row.value_source) else row.price_checked_at
+                entry["price_checked_at"] = None if needs_recheck(row.value_source) else row.price_checked_at
                 saved += int(not row.dismissed)
                 if not row.dismissed:
                     active.add(listing.key)
@@ -271,7 +297,7 @@ class DiscoveryScanner:
                                 saved, value = save_price(self.store, found[listing.key]["row_id"], product, label, fx)
                                 if saved:
                                     priced += int(value is not None)
-                                    bargains += int(counts_as_bargain(listing, value, _played_cad(product, fx)))
+                                    bargains += int(counts_as_bargain(listing, value, product, fx))
                             except Exception as exc:
                                 errors.append(f"price check for {listing.title!r}: {str(exc).splitlines()[0]}")
                 except Exception as exc:
@@ -292,10 +318,12 @@ class DiscoveryScanner:
 def price_saved_singles(settings, store, stop=None, progress=None):
     """Check the next batch of saved exact singles through public browser pages."""
     rows, _ = store.discovery_results()
-    candidates = [row for row in rows if (row.price_checked_at is None or stale_reference(row.value_source))
+    candidates = [row for row in rows if (row.price_checked_at is None or needs_recheck(row.value_source))
                   and row.currency == "CAD"
                   and row.total_price is not None and row.price > 1 and priceable(row.title)]
-    candidates.sort(key=lambda row: row.source != "facebook")
+    # Never-checked first, then priced finds that still lack the sales cross-check (deals first).
+    candidates.sort(key=lambda row: (row.price_checked_at is not None, -(row.savings_pct or -1000),
+                                     row.source != "facebook"))
     candidates = pick_candidates(candidates, lambda row: row.title)
     if not candidates:
         return {"message": "No unchecked exact singles remain in saved finds.", "checked": 0, "priced": 0,
@@ -321,7 +349,7 @@ def price_saved_singles(settings, store, stop=None, progress=None):
                 if saved:
                     checked += 1
                     priced += int(value is not None)
-                    bargains += int(counts_as_bargain(row, value, _played_cad(product, fx)))
+                    bargains += int(counts_as_bargain(row, value, product, fx))
             except Exception as exc:
                 errors.append(f"{row.title!r}: {str(exc).splitlines()[0]}")
                 if len(errors) >= 5:

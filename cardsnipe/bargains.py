@@ -24,7 +24,7 @@ def not_a_plain_listing(title):
     return bool(OTHER_SLAB.search(title) or JAPANESE.search(title) or MULTI_GRADE.search(title))
 
 
-VARIANT = re.compile(r"\b(?:reverse holo|cosmos holo|non.?holo|first edition|1st edition|1st ed|shadowless|staff|prize pack|promo|"
+VARIANT = re.compile(r"\b(?:reverse holo\w*|rev\.? holo\w*|cosmos holo|non.?holo|first edition|1st edition|1st ed|shadowless|staff|prize pack|promo|"
                      r"pre-?release|stamp(?:ed)?|e-?reader|error|misprint)\b", re.I)
 # Reprint sets that reuse an older card's exact number (Celebrations Classic Collection).
 REPRINT_SET = re.compile(r"classic collection|celebrations", re.I)
@@ -33,11 +33,18 @@ OTHER_PRINTINGS = re.compile(r"1st edition|reverse|cosmos|staff|stamp", re.I)
 
 
 PRICE_VERSION = "plain print"
+# Prices saved without this tag predate the PriceCharting / recent-sales cross-check.
+CROSS_CHECK = "sales checked"
 
 
 def stale_reference(value_source):
     """True for TCGplayer prices saved before print-specific pricing (they may be 1st Edition prices)."""
     return bool(value_source) and value_source.startswith("TCGplayer") and PRICE_VERSION not in value_source
+
+
+def needs_recheck(value_source):
+    """True for saved prices that should be checked again: stale, or never cross-checked against sales."""
+    return stale_reference(value_source) or (bool(value_source) and CROSS_CHECK not in value_source)
 
 
 def eligible(title):
@@ -181,6 +188,9 @@ def tcgplayer_market(browser, title, claim=None):
     # "Price Points" only appears on product pages, so the previous search page is never parsed.
     if not browser.wait_until(lambda: "Price Points" in browser.page_text() and "Market Price" in browser.page_text(), 12):
         raise RuntimeError("TCGplayer product page was unreadable; this card was not checked")
+    # The comparison block ("Unlimited Holofoil: $..") loads after the rest of the page; the default
+    # selected print can be 1st Edition, so wait for a plain print's price before giving up.
+    browser.wait_until(lambda: plain_printing(printing_prices(browser.page_text()))[1], 8)
     text = browser.page_text()
     printing, price = plain_printing(printing_prices(text))
     if not price:

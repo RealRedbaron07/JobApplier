@@ -35,6 +35,10 @@ CRACK_PCT = 90.0
 # Upside grades priced up to this far above raw are a regrade watch (PSA 10 resubmission).
 REGRADE_WATCH_PCT = 10.0
 REGRADE_UPSIDE = {"BGS": 8.5, "CGC": 9.0, "TAG": 9.0, "SGC": 9.0}
+# PriceCharting's "Grade N" prices are mostly PSA sales, so only PSA slabs are judged against them directly.
+GRADED_PRICE_COMPANIES = {"PSA"}
+# Recent sales this far under TCGplayer get a warning: the TCGplayer price is not what the card sells for.
+SALES_GAP_PCT = 25.0
 
 _SKIP_HINTS = {"mint", "gem", "crack", "regrade", "re-grade", "resub"}
 
@@ -64,7 +68,8 @@ def crack_multiplier(grade: float, title: str = "") -> float:
 
 def assess(*, title: str, source: str, listing_type: str, price: float | None, shipping: float | None,
            total_price: float | None, value: float | None, slab: tuple[str, float] | None = None,
-           condition: str | None = "", checked_condition_value: float | None = None) -> dict:
+           condition: str | None = "", checked_condition_value: float | None = None,
+           sales_value: float | None = None, graded_value: float | None = None) -> dict:
     """Verdict for one priced listing.
 
     value is the raw Near Mint price. Singles are judged against the seller's claimed
@@ -74,6 +79,12 @@ def assess(*, title: str, source: str, listing_type: str, price: float | None, s
     actually Near Mint, with clean hints in the title and no damage words.
     profit is the resale value (claimed-condition value, or cracked-out value for slabs) minus all-in.
     nm_upside is Near Mint value minus all-in, shown when the claim is below Near Mint.
+
+    sales_value is the median of recent ungraded sales (PriceCharting: eBay + TCGplayer, 90 days).
+    A raw card is never valued above it, so a TCGplayer price the card does not actually sell
+    for cannot create a fake bargain (basis "sales").
+    graded_value is PriceCharting's price for a slab's own grade. A PSA slab at or under 80% of it
+    is a slab deal (lane "slab"), and cracking only makes sense when the raw card is worth more.
     """
     claim = condition_claim(title, condition or "")
     empty = {"tier": None, "lane": None, "all_in": all_in(total_price, source), "profit": None,
@@ -87,22 +98,37 @@ def assess(*, title: str, source: str, listing_type: str, price: float | None, s
     flags = []
     if slab:
         company, grade = slab
-        resale = round(value * crack_multiplier(grade, title), 2)
-        lane = None
-        if cost <= resale * CRACK_PCT / 100 and resale - cost >= MIN_PROFIT:
-            lane = "crack"
-        elif (REGRADE_UPSIDE.get(company) is not None and grade >= REGRADE_UPSIDE[company]
-              and cost <= value * (1 + REGRADE_WATCH_PCT / 100)):
-            lane = "regrade"
-        pct = cost / resale * 100
-        tier = ("strong" if pct <= STRONG_PCT else "good") if lane == "crack" else None
-        if resale < value:
-            flags.append(f"cracked {company} {grade:g} valued at {resale / value:.0%} of raw NM")
-        limit = max_buy(resale, source, shipping, CRACK_PCT)
-        basis = "slab"
         damage, clean, nm_upside = [], [], None
+        cracked = round(value * crack_multiplier(grade, title), 2)
+        graded = graded_value if graded_value and company in GRADED_PRICE_COMPANIES else None
+        graded_pct = cost / graded * 100 if graded else None
+        if graded and graded_pct <= GOOD_PCT and graded - cost >= MIN_PROFIT:
+            # Under the price this grade sells for: a deal as a slab, no cracking needed.
+            lane, resale, basis, pct = "slab", graded, "graded", graded_pct
+            tier = "strong" if pct <= STRONG_PCT else "good"
+            limit = max_buy(resale, source, shipping)
+        else:
+            resale, basis, lane = cracked, "slab", None
+            # Cracking only pays when the raw card is worth more than the slab sells for.
+            if (cost <= resale * CRACK_PCT / 100 and resale - cost >= MIN_PROFIT
+                    and not (graded and graded >= resale)):
+                lane = "crack"
+            elif (REGRADE_UPSIDE.get(company) is not None and grade >= REGRADE_UPSIDE[company]
+                  and cost <= value * (1 + REGRADE_WATCH_PCT / 100)):
+                lane = "regrade"
+            pct = cost / resale * 100
+            tier = ("strong" if pct <= STRONG_PCT else "good") if lane == "crack" else None
+            if resale < value:
+                flags.append(f"cracked {company} {grade:g} valued at {resale / value:.0%} of raw NM")
+            limit = max_buy(resale, source, shipping, CRACK_PCT)
+        if graded_value and company not in GRADED_PRICE_COMPANIES:
+            flags.append(f"PriceCharting grade {grade:g} price (mostly PSA): {graded_value:,.2f}")
     else:
         resale, basis = condition_value(value, claim, checked_condition_value)
+        if sales_value and sales_value < resale:
+            if sales_value < resale * (1 - SALES_GAP_PCT / 100):
+                flags.append(f"recent sales median is {1 - sales_value / resale:.0%} under TCGplayer")
+            resale, basis = sales_value, "sales"
         damage, clean = red_flags(title, condition or ""), clean_hints(title, condition or "")
         pct = cost / resale * 100
         tier = None

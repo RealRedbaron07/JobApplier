@@ -17,7 +17,7 @@ from cardsnipe.discovery import (COOLDOWN_SECONDS, DISCOVERY_MODES, MAX_SEARCHES
                                  is_discovery_candidate, price_saved_singles, search_plan)
 from cardsnipe.runner import revalue_store, scanner_session
 from cardsnipe.settings import SnipeSettings
-from cardsnipe.bargains import stale_reference
+from cardsnipe.bargains import needs_recheck, stale_reference
 from cardsnipe.store import ScanRun, ScheduledBid, SeenListing, Store
 from cardsnipe.watchlist import Target, load_watchlist, optional_budget, remove_target, save_watchlist, target_from_dict
 
@@ -74,6 +74,9 @@ def _listing_dict(row: SeenListing) -> dict:
         "market_value": None if stale_reference(row.value_source) else row.market_value,
         "value_source": "" if stale_reference(row.value_source) else row.value_source, "value_bucket": row.value_bucket,
         "condition_value": row.condition_value, "sold_3m": row.sold_3m,
+        "pc_value": row.pc_value, "sales_value": row.sales_value, "sales_count": row.sales_count,
+        "graded_value": row.graded_value, "pc_url": row.pc_url,
+        "sales_checked": bool(row.value_source) and not needs_recheck(row.value_source),
         "irregular": bool(row.irregular), "irregular_reason": row.irregular_reason,
         "saved_at": _iso(row.saved_at), "dismissed": bool(row.dismissed),
         **_slab_fields(row),
@@ -93,7 +96,7 @@ def _slab_fields(row: SeenListing) -> dict:
     if not grade:
         return {"slab": None, "crack": None, "slab_notes": [], "deal": deal}
     return {"slab": f"{grade[0]} {grade[1]:g}",
-            "crack": deal["lane"] if slab_eligible(row.title) and deal["lane"] in {"crack", "regrade"} else None,
+            "crack": deal["lane"] if slab_eligible(row.title) and deal["lane"] in {"crack", "regrade", "slab"} else None,
             "slab_notes": slab_notes(row.title), "deal": deal}
 
 
