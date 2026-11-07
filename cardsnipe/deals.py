@@ -143,7 +143,7 @@ def assess(*, title: str, source: str, listing_type: str, price: float | None, s
         if damage:
             flags.append("seller mentions " + ", ".join(damage))
         limit = max_buy(resale, source, shipping)
-    if pct < TOO_GOOD_PCT:
+    if pct < TOO_GOOD_PCT and not auction:  # an early auction bid is always low
         flags.append("too cheap to trust: confirm print, language, condition and that it is real")
     if auction:
         flags.append("current bid, final price will rise")
