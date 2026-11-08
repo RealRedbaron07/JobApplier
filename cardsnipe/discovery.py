@@ -27,6 +27,7 @@ PAGE_INTERVAL_SECONDS = 2
 MAX_RUN_SECONDS = 240
 PRICE_CHECKS_PER_RUN = 40
 SLAB_CHECKS_PER_RUN = 20
+EBAY_MIN_PRICE = 15.0  # CAD, fixed-price listings only
 PRICE_CHECK_SECONDS = 720  # each card now reads TCGplayer and PriceCharting
 
 
@@ -110,8 +111,29 @@ def _played_cad(product, fx):
     return round(played * fx, 2) if played else None
 
 
-def pick_candidates(items, title_of):
-    """Up to PRICE_CHECKS_PER_RUN raw singles plus SLAB_CHECKS_PER_RUN slabs, in order."""
+# Rarity words that make a card worth a price check; plain commons rarely clear $5 profit.
+VALUABLE = re.compile(r"\b(?:holo|foil|ex|gx|v|vmax|vstar|break|prime|lv\.?\s?x|legend|star|delta|"
+                      r"full art|alt(?:ernate)? art|secret|gold|rainbow|shiny|radiant|trainer gallery|"
+                      r"illustration rare|special illustration|sir|ir|ultra rare|hyper rare|amazing rare|"
+                      r"wotc|vintage|neo|base set|jungle|fossil|team rocket|gym)\b", re.I)
+LOW_RARITY = re.compile(r"\b(?:common|uncommon|energy)\b", re.I)
+
+
+def check_priority(title, price=None):
+    """Lower sorts first: rare-looking cards before plain ones, pricier listings first within each."""
+    title = title or ""
+    tier = 2 if LOW_RARITY.search(title) and not VALUABLE.search(title) else 0 if VALUABLE.search(title) else 1
+    return tier, -(price or 0)
+
+
+def pick_candidates(items, title_of, price_of=None):
+    """Up to PRICE_CHECKS_PER_RUN raw singles plus SLAB_CHECKS_PER_RUN slabs, most promising first.
+
+    Plain commons and uncommons are checked last: a $0.20 card listed at $15 shipped used to use up
+    the whole budget before any holo or slab was priced.
+    """
+    if price_of is not None:
+        items = sorted(items, key=lambda item: check_priority(title_of(item), price_of(item)))
     raw = [item for item in items if eligible(title_of(item))][:PRICE_CHECKS_PER_RUN]
     slabs = [item for item in items if slab_eligible(title_of(item))][:SLAB_CHECKS_PER_RUN]
     picked = []
@@ -119,6 +141,8 @@ def pick_candidates(items, title_of):
         picked.extend(pair)
     longer = slabs if len(slabs) > len(raw) else raw
     return picked + longer[min(len(slabs), len(raw)):]
+
+
 DISCOVERY_MODES = (
     ("all", "All listings", "Every buying format, newest first"),
     ("sale", "Sales & coupons", "Seller promotions and marked reductions"),
@@ -140,19 +164,28 @@ def browser_search_links(target, settings, *, mode="bin"):
             params["LH_BO"] = "1"
         elif mode != "all":
             raise ValueError("Unknown browser search mode")
+    if mode != "auction" and target.max_price is None:
+        # Fixed-price singles under this are bulk; auctions keep low current bids, which is where the finds are.
+        params["_udlo"] = f"{EBAY_MIN_PRICE:.2f}"
     return {"ebay": urlunsplit(ebay._replace(query=urlencode(params))),
             "facebook": FacebookMarketplace(settings, None).search_url(target, all_dates=True)}
 
 
 def search_plan(source="all"):
+    """Searches aimed at listings that can be priced and can be under value.
+
+    Sealed product is never priced, and "pokemon cards" newest-first is mostly bulk commons
+    (and often an eBay server error), so the plan targets slabs, holos and chase cards instead.
+    Auctions ending soonest with low bids produced the real finds.
+    """
     if not isinstance(source, str) or source not in {"all", "ebay", "facebook"}:
         raise ValueError("Choose all, ebay, or facebook")
     searches = [("facebook", "all", query) for query in
-                ("pokemon single card", "pokemon graded card", "pokemon sealed")]
-    searches += [("ebay", mode, "pokemon cards") for mode in ("sale", "all", "auction", "offers")]
-    # Mid-grade slabs for crack-and-regrade checks.
-    searches += [("ebay", "all", "pokemon psa 7 8 9"), ("ebay", "all", "pokemon bgs cgc tag graded")]
-    searches += [("ebay", "all", "pokemon sealed")]
+                ("pokemon single card", "pokemon graded card", "pokemon holo card")]
+    searches += [("ebay", "auction", "psa 9 pokemon"), ("ebay", "auction", "psa 8 pokemon"),
+                 ("ebay", "auction", "pokemon holo rare"), ("ebay", "all", "pokemon psa 7 8 9"),
+                 ("ebay", "all", "pokemon illustration rare"), ("ebay", "offers", "pokemon holo"),
+                 ("ebay", "sale", "pokemon card holo")]
     return [item for item in searches if source == "all" or item[0] == source][:MAX_SEARCHES]
 
 
@@ -276,7 +309,7 @@ class DiscoveryScanner:
                           and entry["listing"].currency == "CAD"
                           and priceable(entry["listing"].title)
                           and entry["listing"].total_price is not None and entry["listing"].price > 1],
-                                         lambda listing: listing.title)
+                                         lambda listing: listing.title, lambda listing: listing.total_price)
             # Pricing gets its own time budget so a slow search phase does not starve it.
             deadline = time.monotonic() + PRICE_CHECK_SECONDS
             if candidates and not self.stop.is_set():
@@ -322,7 +355,7 @@ def price_saved_singles(settings, store, stop=None, progress=None):
                   and row.currency == "CAD"
                   and row.total_price is not None and row.price > 1 and priceable(row.title)]
     # Never-checked first, then priced finds that still lack the sales cross-check (deals first).
-    candidates.sort(key=lambda row: (row.price_checked_at is not None, -(row.savings_pct or -1000),
+    candidates.sort(key=lambda row: (row.price_checked_at is not None, check_priority(row.title, row.total_price),
                                      row.source != "facebook"))
     candidates = pick_candidates(candidates, lambda row: row.title)
     if not candidates:

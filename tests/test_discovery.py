@@ -426,3 +426,15 @@ def test_cooldown_survives_app_state_reset_and_invalid_sources_cannot_expand_it(
     assert client.post("/api/snipe/discovery/scan", json={"source": "all"}).status_code == 429
     for source in ("tcgplayer", "https://elsewhere.invalid", [], True):
         assert client.post("/api/snipe/discovery/scan", json={"source": source}).status_code == 400
+
+
+def test_search_plan_targets_priceable_cards_not_sealed_or_bulk():
+    plan = discovery.search_plan()
+    assert not any("sealed" in query for _, _, query in plan)
+    assert ("ebay", "auction", "psa 9 pokemon") in plan
+
+
+def test_rare_cards_are_price_checked_before_bulk_commons():
+    titles = ["Baltoy 144/264 Common Fusion Strike NM", "Charizard GX 9/68 Holo Hidden Fates", "Togekiss 085/197 Rare"]
+    prices = {titles[0]: 15, titles[1]: 17, titles[2]: 19}
+    assert discovery.pick_candidates(titles, str, prices.get) == [titles[1], titles[2], titles[0]]
