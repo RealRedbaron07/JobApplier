@@ -104,3 +104,9 @@ def test_condition_play_needs_clean_hints_and_no_damage_words():
     assert not is_bargain(play)
     assert deal(100, 75, title="Umbreon 215/203 LP", condition="", played=70)["lane"] is None
     assert deal(100, 75, title=title + " small crease", condition="", played=70)["lane"] is None
+
+
+def test_listings_far_under_value_are_verify_not_bargains():
+    lugia = deal(952.63, 65.17, title="Lugia ex 105/115 Unseen Forces Holo")
+    assert lugia["lane"] == "verify" and lugia["tier"] is None and not is_bargain(lugia)
+    assert deal(100, 30)["tier"] == "strong"

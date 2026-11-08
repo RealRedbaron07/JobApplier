@@ -24,6 +24,9 @@ GOOD_PCT = 80.0       # all-in at or under this % of value
 MIN_PROFIT = float(os.getenv("SNIPE_MIN_PROFIT", "5") or 5)  # CAD, value minus all-in
 # All-in under this % of value usually means a wrong print, fake, damage, or placeholder price.
 TOO_GOOD_PCT = 40.0
+# Under this % of value it is almost never a real deal (fake, proxy, wrong card, or a lot priced per card):
+# shown for checking ("verify") but not counted as a bargain.
+VERIFY_PCT = 20.0
 
 # A cracked slab sells as a raw card in about the grade's condition. A PSA 7 has
 # visible wear, so it does not fetch a Near Mint raw price.
@@ -74,7 +77,8 @@ def assess(*, title: str, source: str, listing_type: str, price: float | None, s
 
     value is the raw Near Mint price. Singles are judged against the seller's claimed
     condition (unknown = Lightly Played until photos show otherwise).
-    tier: "strong" | "good" | None. lane: "single" | "condition" | "crack" | "regrade" | None.
+    tier: "strong" | "good" | None. lane: "single" | "condition" | "crack" | "regrade" | "slab" | "verify" | None.
+    "verify" is a buy-now listing under 20% of value: usually fake or the wrong card, never counted as a bargain.
     "condition" is a condition play: not a deal at the claimed condition, but a deal if it is
     actually Near Mint, with clean hints in the title and no damage words.
     profit is the resale value (claimed-condition value, or cracked-out value for slabs) minus all-in.
@@ -143,6 +147,8 @@ def assess(*, title: str, source: str, listing_type: str, price: float | None, s
         if damage:
             flags.append("seller mentions " + ", ".join(damage))
         limit = max_buy(resale, source, shipping)
+    if pct < VERIFY_PCT and tier and not auction:
+        tier, lane = None, "verify"
     if pct < TOO_GOOD_PCT and not auction:  # an early auction bid is always low
         flags.append("too cheap to trust: confirm print, language, condition and that it is real")
     if auction:

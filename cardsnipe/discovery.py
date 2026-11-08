@@ -327,8 +327,8 @@ class DiscoveryScanner:
                                 break
                             try:
                                 product, label = price_listing(browser, listing.title, listing.condition)
-                                saved, value = save_price(self.store, found[listing.key]["row_id"], product, label, fx)
-                                if saved:
+                                stored, value = save_price(self.store, found[listing.key]["row_id"], product, label, fx)
+                                if stored:
                                     priced += int(value is not None)
                                     bargains += int(counts_as_bargain(listing, value, product, fx))
                             except Exception as exc:

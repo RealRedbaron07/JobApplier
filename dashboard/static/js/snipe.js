@@ -377,6 +377,7 @@ function dealPill(row) {
   if (row.crack === 'slab') return d.auction ? bid : `<span class="bargain-percent ${d.tier === 'strong' ? '' : 'good-pill'}">Under ${esc(row.slab)} price +${esc(money(row.currency, d.profit))}</span>`;
   if (row.crack === 'regrade') return '<span class="bargain-percent regrade-pill">Regrade watch</span>';
   const tier = dealTier(row);
+  if (!tier && d.lane === 'verify') return `<span class="bargain-percent auction-pill">Verify · ${Math.round(d.pct_of_value)}% of value</span>`;
   if (!tier && d.lane === 'condition') return `<span class="bargain-percent condition-pill">Condition play +${esc(money(row.currency, d.nm_upside))}</span>`;
   if (!tier) return '';
   if (d.auction && !hasManualReference(row)) return bid;
@@ -579,7 +580,7 @@ $('#set-trend-form').addEventListener('submit', async event => {
 });
 let bargainLimit = 20;
 const BARGAIN_TABS = [
-  ['deals', 'Deals', '#bargain-reviewed', 'All-in (price + shipping + 13% HST on eBay) at or under 80% of the card\'s value, with at least $5 profit. Strong = 70% or less. Value = the TCGplayer price for the stated condition (none stated = Lightly Played), capped at the median of recent eBay + TCGplayer sales from PriceCharting.'],
+  ['deals', 'Deals', '#bargain-reviewed', 'All-in (price + shipping + 13% HST on eBay) at or under 80% of the card\'s value, with at least $5 profit. Strong = 70% or less. Value = the TCGplayer price for the stated condition (none stated = Lightly Played), capped at the median of recent eBay + TCGplayer sales from PriceCharting. Under 20% of value shows as Verify: usually fake or the wrong card.'],
   ['condition', 'Condition plays', '#bargain-conditions', 'Listed as played or with no condition, but the title says clean (no whitening, pack fresh…) and mentions no damage. Not a deal at the stated condition; a deal if the photos show Near Mint.'],
   ['slabs', 'Slabs', '#bargain-slabs', 'Under grade price: a PSA slab at or under 80% of PriceCharting\'s price for that grade. Crack: the raw card is worth more than the slab (9+ at full NM, 8.5 at 95%, 8 at 90%, 7 at 80%, +10 points for "no whitening"). Regrade watch: BGS 8.5+, CGC / TAG / SGC 9+ within 10% of raw.'],
   ['auctions', 'Auctions', '#bargain-auctions', 'Current bids rise, so each auction shows the highest bid (before shipping) that still meets the deal rule.'],
@@ -595,7 +596,7 @@ function renderBargainReview() {
   const isAuction = row => row.deal?.auction && !hasManualReference(row);
   const slabs = rows.filter(row => row.crack && !isAuction(row))
     .sort((a, b) => (b.crack !== 'regrade') - (a.crack !== 'regrade') || (b.deal?.profit ?? 0) - (a.deal?.profit ?? 0));
-  const deals = rows.filter(row => isDeal(row) && !isAuction(row)).sort(dealRank);
+  const deals = rows.filter(row => (isDeal(row) || row.deal?.lane === 'verify') && !isAuction(row)).sort(dealRank);
   const auctions = rows.filter(row => isAuction(row) && (isDeal(row) || row.crack === 'crack' || row.crack === 'slab'))
     .sort((a, b) => (b.deal?.profit ?? 0) - (a.deal?.profit ?? 0));
   const plays = rows.filter(row => !isDeal(row) && !row.slab && row.deal?.lane === 'condition')
