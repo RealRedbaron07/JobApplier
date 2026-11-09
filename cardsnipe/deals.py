@@ -13,6 +13,7 @@ instead of a verdict on today's bid.
 from __future__ import annotations
 
 import os
+from datetime import datetime, timezone
 
 from cardsnipe.condition import LABELS, clean_hints, condition_claim, condition_value, red_flags
 from cardsnipe.matcher import detect_clean_hints
@@ -40,6 +41,9 @@ REGRADE_WATCH_PCT = 10.0
 REGRADE_UPSIDE = {"BGS": 8.5, "CGC": 9.0, "TAG": 9.0, "SGC": 9.0}
 # PriceCharting's "Grade N" prices are mostly PSA sales, so only PSA slabs are judged against them directly.
 GRADED_PRICE_COMPANIES = {"PSA"}
+# An auction only counts as a bargain in its final hour: earlier bids are far from the final price,
+# and an auction found hours ahead has usually ended by the time it is opened again.
+AUCTION_WINDOW_MINUTES = 60
 # Recent sales this far under TCGplayer get a warning: the TCGplayer price is not what the card sells for.
 SALES_GAP_PCT = 25.0
 
@@ -72,7 +76,8 @@ def crack_multiplier(grade: float, title: str = "") -> float:
 def assess(*, title: str, source: str, listing_type: str, price: float | None, shipping: float | None,
            total_price: float | None, value: float | None, slab: tuple[str, float] | None = None,
            condition: str | None = "", checked_condition_value: float | None = None,
-           sales_value: float | None = None, graded_value: float | None = None) -> dict:
+           sales_value: float | None = None, graded_value: float | None = None,
+           end_time: datetime | None = None, now: datetime | None = None) -> dict:
     """Verdict for one priced listing.
 
     value is the raw Near Mint price. Singles are judged against the seller's claimed
@@ -91,14 +96,19 @@ def assess(*, title: str, source: str, listing_type: str, price: float | None, s
     is a slab deal (lane "slab"), and cracking only makes sense when the raw card is worth more.
     """
     claim = condition_claim(title, condition or "")
+    auction = listing_type == "auction"
+    left = minutes_left(end_time, now)
+    timing = {"minutes_left": left if auction else None, "ended": bool(auction and left is not None and left <= 0),
+              "ends_soon": bool(auction and left is not None and 0 < left <= AUCTION_WINDOW_MINUTES)}
     empty = {"tier": None, "lane": None, "all_in": all_in(total_price, source), "profit": None,
              "pct_of_value": None, "resale_value": None, "max_buy": None, "flags": [], "auction": False,
              "condition": claim, "condition_label": LABELS[claim], "basis": None, "nm_upside": None,
-             "red_flags": [], "clean_hints": []}
+             "red_flags": [], "clean_hints": [], **timing}
+    if timing["ended"]:
+        return {**empty, "auction": True}
     if not value or value <= 0 or total_price is None or (price is not None and price <= 1):
         return empty
     cost = empty["all_in"]
-    auction = listing_type == "auction"
     flags = []
     if slab:
         company, grade = slab
@@ -161,9 +171,19 @@ def assess(*, title: str, source: str, listing_type: str, price: float | None, s
             "red_flags": damage, "clean_hints": clean}
 
 
+def minutes_left(end_time: datetime | None, now: datetime | None = None) -> float | None:
+    if end_time is None:
+        return None
+    if end_time.tzinfo is None:
+        end_time = end_time.replace(tzinfo=timezone.utc)
+    return round((end_time - (now or datetime.now(timezone.utc))).total_seconds() / 60, 1)
+
+
 def is_bargain(verdict: dict) -> bool:
-    """Counts toward the headline bargain total: a buy-now deal or a crack slab, not an open auction."""
-    return bool(verdict.get("tier") or verdict.get("lane") == "crack") and not verdict.get("auction")
+    """Counts toward the headline bargain total: a buy-now deal or crack slab, or an auction in its final hour."""
+    if not (verdict.get("tier") or verdict.get("lane") == "crack"):
+        return False
+    return not verdict.get("auction") or bool(verdict.get("ends_soon"))
 
 
 def rank_key(verdict: dict):

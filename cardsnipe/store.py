@@ -23,6 +23,20 @@ def _aware(value: datetime | None) -> datetime | None:
     return value
 
 
+# Finds not seen by a scan for this long are dropped from results: buy-now cards that old have usually sold.
+RESULTS_MAX_AGE = timedelta(hours=24)
+
+
+def _current(row, now: datetime | None = None) -> bool:
+    """Still worth showing: seen recently, and not an auction that has already ended."""
+    now = now or utcnow()
+    seen = _aware(row.last_seen or row.discovery_at)
+    if seen is not None and now - seen > RESULTS_MAX_AGE:
+        return False
+    end = _aware(row.end_time)
+    return not (row.listing_type == "auction" and end is not None and end <= now)
+
+
 class SeenListing(Base):
     __tablename__ = "seen_listings"
     __table_args__ = (UniqueConstraint("source", "listing_id", name="uq_source_listing"),)
@@ -528,7 +542,7 @@ class Store:
             rows = (session.query(SeenListing)
                     .filter(SeenListing.discovery_at.isnot(None), SeenListing.dismissed.isnot(True))
                     .order_by(SeenListing.discovery_at.desc(), SeenListing.id.desc()).all()) if latest else []
-            return rows, latest
+            return [row for row in rows if _current(row)], latest
 
     def set_saved(self, row_id: int, saved: bool):
         """Save or unsave a listing. Saved listings survive Remove and Clear all."""

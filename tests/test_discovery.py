@@ -438,3 +438,37 @@ def test_rare_cards_are_price_checked_before_bulk_commons():
     titles = ["Baltoy 144/264 Common Fusion Strike NM", "Charizard GX 9/68 Holo Hidden Fates", "Togekiss 085/197 Rare"]
     prices = {titles[0]: 15, titles[1]: 17, titles[2]: 19}
     assert discovery.pick_candidates(titles, str, prices.get) == [titles[1], titles[2], titles[0]]
+
+
+def test_price_checks_take_auctions_about_to_end_first_and_skip_later_ones():
+    from datetime import datetime, timedelta, timezone
+    from types import SimpleNamespace
+    from cardsnipe.discovery import order_checks
+    now = datetime(2026, 11, 9, 18, 0, tzinfo=timezone.utc)
+
+    def item(title, kind="bin", minutes=None, price=50):
+        return SimpleNamespace(title=title, listing_type=kind, total_price=price,
+                               end_time=None if minutes is None else now + timedelta(minutes=minutes))
+
+    later = item("Charizard 4/102 Base Set Holo PSA 9", "auction", 300)
+    soon = item("Blastoise 2/102 Base Set Holo PSA 8", "auction", 50)
+    sooner = item("Venusaur 15/102 Base Set Holo", "auction", 10)
+    gone = item("Mewtwo 10/102 Base Set Holo", "auction", -1)
+    unknown = item("Ninetales 12/102 Base Set Holo", "auction")
+    bin_card = item("Gyarados 6/102 Base Set Holo")
+    picked = order_checks([later, bin_card, soon, gone, unknown, sooner], lambda i: i.title,
+                          lambda i: i.total_price, now=now)
+    assert picked == [sooner, soon, bin_card]
+
+
+def test_results_drop_ended_auctions_and_stale_finds():
+    from datetime import datetime, timedelta, timezone
+    from types import SimpleNamespace
+    from cardsnipe.store import _current
+    now = datetime(2026, 11, 9, 18, 0, tzinfo=timezone.utc)
+    row = lambda **kw: SimpleNamespace(**{"listing_type": "bin", "end_time": None, "discovery_at": None,
+                                         "last_seen": now - timedelta(hours=1), **kw})
+    assert _current(row(), now)
+    assert not _current(row(last_seen=now - timedelta(hours=30)), now)
+    assert not _current(row(listing_type="auction", end_time=(now - timedelta(minutes=1)).replace(tzinfo=None)), now)
+    assert _current(row(listing_type="auction", end_time=now + timedelta(minutes=20)), now)

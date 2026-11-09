@@ -15,7 +15,7 @@ from cardsnipe.bargains import (CROSS_CHECK, NUMBER, PRICE_VERSION, bank_of_cana
 from cardsnipe.ebay import EbayWeb
 from cardsnipe.facebook import FacebookMarketplace
 from cardsnipe.condition import condition_claim
-from cardsnipe.deals import assess, is_bargain
+from cardsnipe.deals import AUCTION_WINDOW_MINUTES, assess, is_bargain, minutes_left
 from cardsnipe.pricecharting import pricecharting_lookup
 from cardsnipe.slabs import raw_title, slab_eligible, slab_grade
 from cardsnipe.watchlist import Target
@@ -88,7 +88,8 @@ def _assess(item, value, condition_value, check):
                   shipping=item.shipping, total_price=item.total_price, value=value if priceable(item.title) else None,
                   slab=slab_grade(item.title) if slab_eligible(item.title) else None,
                   condition=getattr(item, "condition", "") or "", checked_condition_value=condition_value,
-                  sales_value=check.get("sales_value"), graded_value=check.get("graded_value"))
+                  sales_value=check.get("sales_value"), graded_value=check.get("graded_value"),
+                  end_time=getattr(item, "end_time", None))
 
 
 def verdict(item, value):
@@ -142,6 +143,32 @@ def pick_candidates(items, title_of, price_of=None):
         picked.extend(pair)
     longer = slabs if len(slabs) > len(raw) else raw
     return picked + longer[min(len(slabs), len(raw)):]
+
+
+# Auctions are priced only when they end within this many minutes: a little past the bargain window so
+# a card priced now is still on the list as it enters its final hour.
+AUCTION_PRICE_MINUTES = AUCTION_WINDOW_MINUTES + 30
+
+
+def auction_order(items, title_of, now=None):
+    """(auctions worth pricing soonest-ending first, buy-now items). Auctions that ended, have no end
+    time, or end after AUCTION_PRICE_MINUTES are dropped: they cannot become a bargain in time."""
+    auctions, others = [], []
+    for item in items:
+        if getattr(item, "listing_type", "") != "auction":
+            others.append(item)
+            continue
+        left = minutes_left(getattr(item, "end_time", None), now)
+        if left is not None and 0 < left <= AUCTION_PRICE_MINUTES and (
+                eligible(title_of(item)) or slab_eligible(title_of(item))):
+            auctions.append((left, item))
+    return [item for _, item in sorted(auctions, key=lambda pair: pair[0])], others
+
+
+def order_checks(items, title_of, price_of=None, now=None):
+    """Price auctions about to end first (they expire), then the best buy-now candidates."""
+    auctions, others = auction_order(items, title_of, now)
+    return auctions + pick_candidates(others, title_of, price_of)
 
 
 DISCOVERY_MODES = (
@@ -305,7 +332,7 @@ class DiscoveryScanner:
                 if not row.dismissed:
                     active.add(listing.key)
             # Price a bounded set from this pass; saved finds can be checked separately.
-            candidates = pick_candidates([entry["listing"] for entry in found.values()
+            candidates = order_checks([entry["listing"] for entry in found.values()
                           if entry["listing"].key in active and not entry["price_checked_at"]
                           and entry["listing"].currency == "CAD"
                           and priceable(entry["listing"].title)
@@ -358,7 +385,7 @@ def price_saved_singles(settings, store, stop=None, progress=None):
     # Never-checked first, then priced finds that still lack the sales cross-check (deals first).
     candidates.sort(key=lambda row: (row.price_checked_at is not None, check_priority(row.title, row.total_price),
                                      row.source != "facebook"))
-    candidates = pick_candidates(candidates, lambda row: row.title)
+    candidates = order_checks(candidates, lambda row: row.title)
     if not candidates:
         return {"message": "No unchecked exact singles remain in saved finds.", "checked": 0, "priced": 0,
                 "bargains": 0, "errors": []}

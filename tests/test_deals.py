@@ -110,3 +110,23 @@ def test_listings_far_under_value_are_verify_not_bargains():
     lugia = deal(952.63, 65.17, title="Lugia ex 105/115 Unseen Forces Holo")
     assert lugia["lane"] == "verify" and lugia["tier"] is None and not is_bargain(lugia)
     assert deal(100, 30)["tier"] == "strong"
+
+
+def test_auctions_only_count_as_bargains_in_their_final_hour():
+    from datetime import datetime, timedelta, timezone
+    now = datetime(2026, 11, 9, 18, 0, tzinfo=timezone.utc)
+
+    def auction(minutes):
+        return assess(title="Deoxys 4/110 Holon Phantoms", source="facebook", listing_type="auction", price=50,
+                      shipping=0, total_price=50, value=100, condition="Near Mint",
+                      end_time=now + timedelta(minutes=minutes), now=now)
+
+    soon = auction(40)
+    assert soon["ends_soon"] and soon["minutes_left"] == 40 and is_bargain(soon)
+    assert not is_bargain(auction(61)) and not auction(61)["ends_soon"]
+    ended = auction(-5)
+    assert ended["ended"] and ended["tier"] is None and not is_bargain(ended)
+    # Naive end times from SQLite are UTC.
+    naive = assess(title="Deoxys 4/110", source="facebook", listing_type="auction", price=50, shipping=0,
+                   total_price=50, value=100, condition="Near Mint", end_time=datetime(2026, 11, 9, 18, 30), now=now)
+    assert naive["minutes_left"] == 30 and is_bargain(naive)
