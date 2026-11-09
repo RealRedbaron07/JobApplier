@@ -65,7 +65,7 @@ def _listing_dict(row: SeenListing) -> dict:
         "url": row.url, "listing_type": row.listing_type, "end_time": _iso(row.end_time), "location": row.location,
         "discovery_at": _iso(row.discovery_at),
         "first_seen": _iso(row.first_seen), "matched_target": row.matched_target, "savings_pct": row.savings_pct,
-        "last_seen": _iso(row.last_seen),
+        "last_seen": _iso(row.last_seen), "price_checked_at": _iso(row.price_checked_at),
         "condition": row.condition or "",
         "promotion": row.promotion or "", "discovery_routes": json.loads(row.discovery_routes or "[]"),
         "lane": row.lane, "grade": row.grade, "tag_score": row.tag_score, "notified": bool(row.notified),

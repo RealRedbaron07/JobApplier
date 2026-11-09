@@ -188,7 +188,8 @@ class EbayWeb:
         self.used_home_search = False
         query = dict(parse_qsl(urlsplit(url).query)).get("_nkw", "")
         for attempt in range(2):
-            if attempt and callable(getattr(self.browser, "find_first", None)):
+            # The home search bar loses the auction filter and sort, so auctions just reload their own URL.
+            if attempt and buying_option != "auction" and callable(getattr(self.browser, "find_first", None)):
                 self.browser.get(f"https://www.{self.settings.ebay_domain}/")
                 search_box = None
 

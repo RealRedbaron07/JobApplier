@@ -29,6 +29,7 @@ PRICE_CHECKS_PER_RUN = 40
 SLAB_CHECKS_PER_RUN = 20
 EBAY_MIN_PRICE = 15.0  # CAD, fixed-price listings only
 PRICE_CHECK_SECONDS = 720  # each card now reads TCGplayer and PriceCharting
+AUCTION_PRICE_SECONDS = 180  # the first pricing pass, so the other searches still get their turn
 
 
 def priceable(title):
@@ -208,12 +209,13 @@ def search_plan(source="all"):
     """
     if not isinstance(source, str) or source not in {"all", "ebay", "facebook"}:
         raise ValueError("Choose all, ebay, or facebook")
-    searches = [("facebook", "all", query) for query in
-                ("pokemon single card", "pokemon graded card", "pokemon holo card")]
-    searches += [("ebay", "auction", "psa 9 pokemon"), ("ebay", "auction", "psa 8 pokemon"),
-                 ("ebay", "auction", "pokemon holo rare"), ("ebay", "all", "pokemon psa 7 8 9"),
-                 ("ebay", "all", "pokemon illustration rare"), ("ebay", "offers", "pokemon holo"),
-                 ("ebay", "sale", "pokemon card holo")]
+    # Auctions run first and are priced straight away: most are first seen with minutes left.
+    searches = [("ebay", "auction", "psa 9 pokemon"), ("ebay", "auction", "psa 8 pokemon"),
+                ("ebay", "auction", "pokemon holo rare")]
+    searches += [("facebook", "all", query) for query in
+                 ("pokemon single card", "pokemon graded card", "pokemon holo card")]
+    searches += [("ebay", "all", "pokemon psa 7 8 9"), ("ebay", "all", "pokemon illustration rare"),
+                 ("ebay", "offers", "pokemon holo"), ("ebay", "sale", "pokemon card holo")]
     return [item for item in searches if source == "all" or item[0] == source][:MAX_SEARCHES]
 
 
@@ -281,8 +283,63 @@ class DiscoveryScanner:
         found, unavailable, errors, failures, active = {}, set(), [], {}, set()
         scanned = pages = new = saved = priced = bargains = 0
         stopped = False
+        fx = None
+
+        def flush(limit=PRICE_CHECK_SECONDS):
+            """Save everything found so far, then price what has not been priced yet."""
+            nonlocal new, saved, priced, bargains, fx
+            fresh = [entry for entry in found.values() if "row_id" not in entry]
+            for entry in fresh:
+                listing = entry["listing"]
+                new += int(not self.store.is_seen(listing))
+                row = self.store.record_listing(listing, None, discovery_at=started,
+                                                discovery_routes=entry["routes"], promotion=promotion_text(listing))
+                entry["row_id"] = row.id
+                entry["price_checked_at"] = None if needs_recheck(row.value_source) else row.price_checked_at
+                saved += int(not row.dismissed)
+                if not row.dismissed:
+                    active.add(listing.key)
+                entry["saved_routes"] = len(entry["routes"])
+            for entry in found.values():  # seen again by a later search after its first save
+                if entry not in fresh and len(entry["routes"]) != entry["saved_routes"]:
+                    self.store.record_listing(entry["listing"], None, discovery_at=started,
+                                              discovery_routes=entry["routes"],
+                                              promotion=promotion_text(entry["listing"]))
+                    entry["saved_routes"] = len(entry["routes"])
+            candidates = order_checks([entry["listing"] for entry in fresh
+                                       if entry["listing"].key in active and not entry["price_checked_at"]
+                                       and entry["listing"].currency == "CAD"
+                                       and priceable(entry["listing"].title)
+                                       and entry["listing"].total_price is not None and entry["listing"].price > 1],
+                                      lambda listing: listing.title, lambda listing: listing.total_price)
+            if not candidates or self.stop.is_set():
+                return
+            until = time.monotonic() + limit
+            try:
+                fx = fx or bank_of_canada_usd_cad(browser)
+                if fx is None:
+                    errors.append("price check: Bank of Canada USD/CAD rate was not readable; no comparisons made")
+                    return
+                for listing in candidates:
+                    if self.stop.is_set() or time.monotonic() >= until:
+                        break
+                    self.progress(message=f"Checking exact card prices: {priced} priced so far…",
+                                  priced=priced, bargains=bargains)
+                    if self.stop.wait(PAGE_INTERVAL_SECONDS):
+                        break
+                    try:
+                        product, label = price_listing(browser, listing.title, listing.condition)
+                        stored, value = save_price(self.store, found[listing.key]["row_id"], product, label, fx)
+                        if stored:
+                            priced += int(value is not None)
+                            bargains += int(counts_as_bargain(listing, value, product, fx))
+                    except Exception as exc:
+                        errors.append(f"price check for {listing.title!r}: {str(exc).splitlines()[0]}")
+            except Exception as exc:
+                errors.append(f"price check: {str(exc).splitlines()[0]}")
+
         try:
-            for name, mode, query in plan:
+            for index, (name, mode, query) in enumerate(plan):
                 if name in unavailable:
                     continue
                 if self.stop.is_set() or time.monotonic() >= deadline:
@@ -321,48 +378,12 @@ class DiscoveryScanner:
                     if isinstance(exc, SourceUnavailable) or failures[name] >= 2:
                         unavailable.add(name)
                 self.progress(pages_done=pages, scanned=scanned, candidates=len(found), errors=list(errors))
-            for entry in found.values():
-                listing = entry["listing"]
-                new += int(not self.store.is_seen(listing))
-                row = self.store.record_listing(listing, None, discovery_at=started,
-                                                discovery_routes=entry["routes"], promotion=promotion_text(listing))
-                entry["row_id"] = row.id
-                entry["price_checked_at"] = None if needs_recheck(row.value_source) else row.price_checked_at
-                saved += int(not row.dismissed)
-                if not row.dismissed:
-                    active.add(listing.key)
-            # Price a bounded set from this pass; saved finds can be checked separately.
-            candidates = order_checks([entry["listing"] for entry in found.values()
-                          if entry["listing"].key in active and not entry["price_checked_at"]
-                          and entry["listing"].currency == "CAD"
-                          and priceable(entry["listing"].title)
-                          and entry["listing"].total_price is not None and entry["listing"].price > 1],
-                                         lambda listing: listing.title, lambda listing: listing.total_price)
-            # Pricing gets its own time budget so a slow search phase does not starve it.
-            deadline = time.monotonic() + PRICE_CHECK_SECONDS
-            if candidates and not self.stop.is_set():
-                try:
-                    fx = bank_of_canada_usd_cad(browser)
-                    if fx is None:
-                        errors.append("price check: Bank of Canada USD/CAD rate was not readable; no comparisons made")
-                    else:
-                        for listing in candidates:
-                            if self.stop.is_set() or time.monotonic() >= deadline:
-                                break
-                            self.progress(message=f"Checking exact card prices: {priced} priced so far…",
-                                          priced=priced, bargains=bargains)
-                            if self.stop.wait(PAGE_INTERVAL_SECONDS):
-                                break
-                            try:
-                                product, label = price_listing(browser, listing.title, listing.condition)
-                                stored, value = save_price(self.store, found[listing.key]["row_id"], product, label, fx)
-                                if stored:
-                                    priced += int(value is not None)
-                                    bargains += int(counts_as_bargain(listing, value, product, fx))
-                            except Exception as exc:
-                                errors.append(f"price check for {listing.title!r}: {str(exc).splitlines()[0]}")
-                except Exception as exc:
-                    errors.append(f"price check: {str(exc).splitlines()[0]}")
+                if mode == "auction" and (index + 1 == len(plan) or plan[index + 1][1] != "auction"):
+                    # Price auctions now; waiting for the other searches costs minutes they do not have.
+                    began = time.monotonic()
+                    flush(AUCTION_PRICE_SECONDS)
+                    deadline += time.monotonic() - began
+            flush()
         finally:
             browser.quit()
             self.store.record_scan(started=started, finished=datetime.now(timezone.utc),

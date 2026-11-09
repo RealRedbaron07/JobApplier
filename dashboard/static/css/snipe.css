@@ -228,3 +228,11 @@ input[type=checkbox]{accent-color:var(--green)}
 .candidates-panel .panel-head{align-items:flex-start;gap:12px;flex-wrap:wrap}.candidates-panel .panel-head h3 .level{margin-left:8px;vertical-align:middle}
 .bargain-card .price-sources{display:block;font-size:12px;margin-top:2px}.bargain-card .price-sources a{white-space:nowrap}
 .ends-in{font-weight:600}.ends-in.soon{color:#c0392b}.bargain-card.ended{opacity:.45}.bargain-card.ended .ends-in{color:var(--muted)}
+.deal-head{display:flex;align-items:center;gap:12px}
+.score-badge{display:inline-flex;flex-direction:column;align-items:center;justify-content:center;min-width:54px;padding:5px 8px;border-radius:10px;line-height:1;color:#fff}
+.score-badge b{font-size:22px;font-weight:800}.score-badge small{font-size:10px;font-weight:700;margin-top:3px;letter-spacing:.04em;text-transform:uppercase}
+.score-badge.hot{background:#c62828}.score-badge.good{background:#b45f06}.score-badge.fair{background:#5f6b7a}
+.bargain-card.score-hot{border:2px solid #c62828;background:#fff4f2;box-shadow:0 2px 12px rgba(198,40,40,.18)}
+.bargain-card.score-good{border:2px solid #e0a03c;background:#fff9ef}
+.bargain-card.score-fair{border-left:4px solid #5f6b7a}
+.scan-warning{margin:8px 0;padding:9px 12px;border:1px solid #c62828;border-radius:8px;background:#fff4f2;color:#8e1c1c;font-size:12.5px;font-weight:600}

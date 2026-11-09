@@ -48,10 +48,11 @@ def test_marketplace_placeholder_prices_and_location_only_titles_are_excluded():
     assert discovery.is_discovery_candidate(listing("facebook", title="Charizard ex 125/094", price=40))
 
 
-def test_marketplace_searches_run_first_without_specific_card_targets():
+def test_auction_searches_run_first_without_specific_card_targets():
     plan = discovery.search_plan()
     assert len(plan) == discovery.MAX_SEARCHES == 10
-    assert [name for name, _, _ in plan[:3]] == ["facebook"] * 3
+    assert [(name, mode) for name, mode, _ in plan[:3]] == [("ebay", "auction")] * 3
+    assert [name for name, _, _ in plan[3:6]] == ["facebook"] * 3
     assert all("pokemon" in query for _, _, query in plan)
 
 
@@ -467,8 +468,31 @@ def test_results_drop_ended_auctions_and_stale_finds():
     from cardsnipe.store import _current
     now = datetime(2026, 11, 9, 18, 0, tzinfo=timezone.utc)
     row = lambda **kw: SimpleNamespace(**{"listing_type": "bin", "end_time": None, "discovery_at": None,
-                                         "last_seen": now - timedelta(hours=1), **kw})
+                                         "market_value": None, "last_seen": now - timedelta(hours=1), **kw})
     assert _current(row(), now)
-    assert not _current(row(last_seen=now - timedelta(hours=30)), now)
+    # Unpriced finds leave after 6 hours, priced ones after 24.
+    assert not _current(row(last_seen=now - timedelta(hours=7)), now)
+    assert _current(row(last_seen=now - timedelta(hours=7), market_value=40), now)
+    assert not _current(row(last_seen=now - timedelta(hours=30), market_value=40), now)
     assert not _current(row(listing_type="auction", end_time=(now - timedelta(minutes=1)).replace(tzinfo=None)), now)
     assert _current(row(listing_type="auction", end_time=now + timedelta(minutes=20)), now)
+
+
+def test_a_new_bid_keeps_the_auctions_price_and_a_missing_countdown_keeps_its_end_time(tmp_path):
+    from datetime import datetime, timedelta, timezone
+    from cardsnipe.matcher import Listing
+    from cardsnipe.store import Store
+    store = Store(f"sqlite:///{tmp_path / 't.db'}")
+    now = datetime.now(timezone.utc)
+    end = now + timedelta(minutes=40)
+
+    def seen(bid, end_time):
+        return store.record_listing(Listing(source="ebay", listing_id="1", title="Snorlax 158/214 PSA 8", price=bid,
+                                            currency="CAD", url="u", listing_type="auction", shipping=0, end_time=end_time),
+                                    None, discovery_at=now, discovery_routes=[], promotion="")
+
+    row = seen(50.0, end)
+    assert store.set_discovery_price(row.id, 200.0, "TCGplayer plain print + PriceCharting, sales checked")
+    row = seen(80.0, None)
+    assert row.market_value == 200.0 and row.price_checked_at is not None and row.savings_pct == 60.0
+    assert row.end_time is not None

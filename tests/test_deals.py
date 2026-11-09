@@ -130,3 +130,14 @@ def test_auctions_only_count_as_bargains_in_their_final_hour():
     naive = assess(title="Deoxys 4/110", source="facebook", listing_type="auction", price=50, shipping=0,
                    total_price=50, value=100, condition="Near Mint", end_time=datetime(2026, 11, 9, 18, 30), now=now)
     assert naive["minutes_left"] == 30 and is_bargain(naive)
+
+
+def test_deal_score_rewards_discount_profit_and_checked_values():
+    from cardsnipe.deals import deal_score
+    assert deal(100, 50)["score"] > deal(100, 78)["score"]          # deeper discount
+    assert deal(1000, 500)["score"] > deal(100, 50)["score"]        # same %, more dollars
+    assert deal(100, 90)["score"] is None                           # not a bargain, no score
+    assert deal_score(50, 50, checked=True) > deal_score(50, 50, basis="LP est.")
+    # A current bid is not the final price, so an auction's discount is capped.
+    assert deal_score(45, 200, auction=True, checked=True) < deal_score(45, 200, checked=True)
+    assert deal_score(60, 50, basis="NM", damaged=True) == deal_score(60, 50, basis="NM") - 20

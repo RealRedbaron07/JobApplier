@@ -376,8 +376,28 @@ function dealTier(row) {
 const isDeal = row => !!dealTier(row) && !row.slab;
 const dealProfit = row => hasManualReference(row)
   ? Number(candidateReferences[candidateKey(row)]) - (row.deal?.all_in ?? row.total_price) : (row.deal?.profit ?? 0);
-const dealRank = (a, b) => (!!a.deal?.auction - !!b.deal?.auction)
-  || ((dealTier(a) === 'strong' ? 0 : 1) - (dealTier(b) === 'strong' ? 0 : 1)) || dealProfit(b) - dealProfit(a);
+const dealRank = (a, b) => (b.deal?.score ?? -1) - (a.deal?.score ?? -1) || dealProfit(b) - dealProfit(a);
+const scoreBand = score => score >= 70 ? 'hot' : score >= 50 ? 'good' : 'fair';
+const SCORE_LABEL = {hot: 'Hot', good: 'Good', fair: 'Fair'};
+// A score is shown only on a live bargain: not on auctions outside their final hour.
+const liveScore = row => (hasManualReference(row) || (row.deal?.auction && !endingSoon(row))) ? null : (row.deal?.score ?? null);
+function scoreBadge(row) {
+  const score = liveScore(row);
+  if (score == null) return '';
+  const band = scoreBand(score);
+  return `<span class="score-badge ${band}" title="Deal score out of 100: discount, profit and how well the value is checked"><b>${score}</b><small>${SCORE_LABEL[band]}</small></span>`;
+}
+// When the app saw and priced an auction, measured against its end, so late finds are visible.
+function leftAt(row, iso) {
+  if (!row.end_time || !iso) return '';
+  const minutes = Math.round((new Date(row.end_time).getTime() - new Date(iso).getTime()) / 60000);
+  return minutes <= 0 ? 'after it ended' : minutes >= 120 ? `with ${Math.round(minutes / 60)}h left` : `with ${minutes}m left`;
+}
+function auctionTiming(row) {
+  if (row.listing_type !== 'auction' || !row.end_time) return '';
+  const found = leftAt(row, row.first_seen), priced = leftAt(row, row.price_checked_at);
+  return [found && `found ${found}`, priced && `priced ${priced}`].filter(Boolean).join(', ');
+}
 function dealPill(row) {
   const d = row.deal || {};
   const bid = `<span class="bargain-percent auction-pill">${row.crack === 'crack' ? 'Crack · ' : row.crack === 'slab' ? 'Slab · ' : ''}Bid up to ${esc(money(row.currency, d.max_buy))}${row.shipping ? ' + ship' : ''}</span>`;
@@ -537,11 +557,13 @@ function bargainCard(row, {savedView = false, selectable = !savedView} = {}) {
   const number = (String(row.title || '').match(/\b\d{1,3}\/\d{1,3}\b/) || [row.title])[0];
   const condition = row.slab || (row.deal?.all_in != null && row.market_value ? row.deal.condition_label : conditionText(row));
   const meta = [condition, row.listing_type === 'auction' && !row.end_time ? 'Auction' : '', row.location, row.last_seen ? ago(row.last_seen) : ''].filter(Boolean).join(' · ');
-  return `<article class="bargain-card ${good ? 'positive candidate-bargain' : ''}${row.saved_at ? ' saved' : ''}">
+  const score = liveScore(row);
+  const timing = auctionTiming(row);
+  return `<article class="bargain-card ${good ? 'positive candidate-bargain' : ''}${row.saved_at ? ' saved' : ''}${score != null ? ` score-${scoreBand(score)}` : ''}">
     <header>
       <div class="card-title">${selectable ? `<input type="checkbox" data-select-listing="${row.id}" aria-label="Select ${esc(row.title)}">` : ''}<div><h4><a href="${esc(row.url)}" target="_blank" rel="noopener">${esc(row.title)}</a></h4>
-      <span class="sub"><span class="source-tag ${row.source === 'facebook' ? 'fb' : 'eb'}">${esc(row.source === 'facebook' ? 'Marketplace' : 'eBay')}</span> ${endsIn(row)}${endsIn(row) && meta ? ' · ' : ''}${esc(meta)}${earlier ? ' · <span class="over-budget">Earlier scan, may be sold</span>' : ''}${savedView && row.dismissed ? ' · removed from results' : ''}</span></div></div>
-      ${dealPill(row)}
+      <span class="sub"><span class="source-tag ${row.source === 'facebook' ? 'fb' : 'eb'}">${esc(row.source === 'facebook' ? 'Marketplace' : 'eBay')}</span> ${endsIn(row)}${endsIn(row) && meta ? ' · ' : ''}${esc(meta)}${timing ? ` · ${esc(timing)}` : ''}${earlier ? ' · <span class="over-budget">Earlier scan, may be sold</span>' : ''}${savedView && row.dismissed ? ' · removed from results' : ''}</span></div></div>
+      <div class="deal-head">${scoreBadge(row)}${dealPill(row)}</div>
     </header>
     <div class="card-body">
       <div class="card-price"><strong>${row.price == null ? 'Price varies' : esc(listingPrice(row))}</strong>${dealDetail(row)}${priceSources(row)}${dealChips(row)}${setNotes ? `<span class="chips">${setNotes}</span>` : ''}</div>
@@ -588,7 +610,7 @@ $('#set-trend-form').addEventListener('submit', async event => {
 });
 let bargainLimit = 20;
 const BARGAIN_TABS = [
-  ['deals', 'Deals', '#bargain-reviewed', 'All-in (price + shipping + 13% HST on eBay) at or under 80% of the card\'s value, with at least $5 profit. Strong = 70% or less. Value = the TCGplayer price for the stated condition (none stated = Lightly Played), capped at the median of recent eBay + TCGplayer sales from PriceCharting.'],
+  ['deals', 'Best deals', '#bargain-reviewed', 'Every current bargain, best score first (auctions only in their final hour). Score out of 100: discount, profit and how well the value is checked; 70+ is Hot. All-in (price + shipping + 13% HST on eBay) at or under 80% of the card\'s value, with at least $5 profit. Strong = 70% or less. Value = the TCGplayer price for the stated condition (none stated = Lightly Played), capped at the median of recent eBay + TCGplayer sales from PriceCharting.'],
   ['condition', 'Condition plays', '#bargain-conditions', 'Listed as played or with no condition, but the title says clean (no whitening, pack fresh…) and mentions no damage. Not a deal at the stated condition; a deal if the photos show Near Mint.'],
   ['slabs', 'Slabs', '#bargain-slabs', 'Under grade price: a PSA slab at or under 80% of PriceCharting\'s price for that grade. Crack: the raw card is worth more than the slab (9+ at full NM, 8.5 at 95%, 8 at 90%, 7 at 80%, +10 points for "no whitening"). Regrade watch: BGS 8.5+, CGC / TAG / SGC 9+ within 10% of raw.'],
   ['auctions', 'Ending ≤1h', '#bargain-auctions', 'Only auctions in their final hour, soonest first. Current bids rise, so each shows the highest bid (before shipping) that still meets the deal rule.'],
@@ -604,20 +626,21 @@ function renderBargainReview() {
   const isAuction = row => row.deal?.auction && !hasManualReference(row);
   const slabs = rows.filter(row => row.crack && !isAuction(row))
     .sort((a, b) => (b.crack !== 'regrade') - (a.crack !== 'regrade') || (b.deal?.profit ?? 0) - (a.deal?.profit ?? 0));
-  // Verify (far under value, usually fake) is not a bargain; it stays under "Not a deal".
-  const deals = rows.filter(row => isDeal(row) && !isAuction(row)).sort(dealRank);
+  // Everything that counts as a bargain right now, best score first. Verify (usually fake) stays under "Not a deal".
+  const deals = rows.filter(row => (isDeal(row) || row.crack === 'crack' || row.crack === 'slab') && (!isAuction(row) || endingSoon(row))).sort(dealRank);
   const qualifying = rows.filter(row => isAuction(row) && (isDeal(row) || row.crack === 'crack' || row.crack === 'slab'));
   const auctions = qualifying.filter(endingSoon).sort((a, b) => msLeft(a) - msLeft(b));
   const later = qualifying.length - auctions.length;
   const plays = rows.filter(row => !isDeal(row) && !row.slab && row.deal?.lane === 'condition')
     .sort((a, b) => (b.deal?.nm_upside ?? 0) - (a.deal?.nm_upside ?? 0));
-  const shown = new Set([...slabs, ...deals, ...auctions, ...plays]);
+  const shown = new Set([...slabs, ...deals, ...qualifying, ...plays]);
   const unchecked = rows.filter(row => !shown.has(row))
     .sort((a, b) => Number(b.discovery_at === discoveryResultData.scan?.started) - Number(a.discovery_at === discoveryResultData.scan?.started));
   const lists = {deals, condition: plays, slabs, auctions, unchecked};
-  const allDeals = discoveryResultData.listings.filter(row => productKindVisible(row) && !isAuction(row)
-    && (row.crack === 'crack' || row.crack === 'slab' || isDeal(row))).length + auctions.length;
-  $('#bargain-badge').textContent = `${allDeals} bargain${allDeals === 1 ? '' : 's'}`;
+  $('#bargain-badge').textContent = `${deals.length} bargain${deals.length === 1 ? '' : 's'}`;
+  const refused = (discoveryResultData.scan?.errors || []).filter(error => /eBay server error/.test(error)).length;
+  $('#bargain-scan-warning').hidden = !refused;
+  $('#bargain-scan-warning').textContent = refused ? `Last scan is incomplete: eBay refused ${refused} search${refused === 1 ? '' : 'es'} from the scanner, so eBay auctions may be missing. Repeating scans right away usually makes this worse.` : '';
   $('#bargain-review-counts').innerHTML = BARGAIN_TABS.map(([key, label]) =>
     `<button type="button" role="tab" class="bargain-tab" data-bargain-tab="${key}" aria-selected="${key === bargainTab}">${label} <strong>${lists[key].length}</strong></button>`).join('');
   const help = BARGAIN_TABS.find(([key]) => key === bargainTab);

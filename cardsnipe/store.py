@@ -23,15 +23,17 @@ def _aware(value: datetime | None) -> datetime | None:
     return value
 
 
-# Finds not seen by a scan for this long are dropped from results: buy-now cards that old have usually sold.
+# Finds not seen by a scan for this long leave the results. Priced cards stay longer than unpriced ones,
+# which are only noise once a few newer scans have passed.
 RESULTS_MAX_AGE = timedelta(hours=24)
+UNPRICED_MAX_AGE = timedelta(hours=6)
 
 
 def _current(row, now: datetime | None = None) -> bool:
     """Still worth showing: seen recently, and not an auction that has already ended."""
     now = now or utcnow()
     seen = _aware(row.last_seen or row.discovery_at)
-    if seen is not None and now - seen > RESULTS_MAX_AGE:
+    if seen is not None and now - seen > (RESULTS_MAX_AGE if row.market_value else UNPRICED_MAX_AGE):
         return False
     end = _aware(row.end_time)
     return not (row.listing_type == "auction" and end is not None and end <= now)
@@ -242,9 +244,11 @@ class Store:
             if row is None:
                 row = SeenListing(source=listing.source, listing_id=listing.listing_id)
                 session.add(row)
-            same_listing = (row.title == listing.title and row.price == listing.price
-                            and row.shipping == listing.shipping and row.total_price == listing.total_price
-                            and row.currency == listing.currency)
+            # A new bid is still the same card, so an auction keeps its price check when only the bid moved.
+            same_listing = (row.title == listing.title and row.currency == listing.currency
+                            and (listing.listing_type == "auction"
+                                 or (row.price == listing.price and row.shipping == listing.shipping
+                                     and row.total_price == listing.total_price)))
             fresh_price = (discovery_at is not None and match is None and same_listing and row.price_checked_at
                            and (utcnow() - _aware(row.price_checked_at)).total_seconds() < 6 * 3600)
             row.title = listing.title
@@ -254,7 +258,7 @@ class Store:
             row.currency = listing.currency
             row.url = listing.url
             row.listing_type = listing.listing_type
-            row.end_time = listing.end_time
+            row.end_time = listing.end_time or row.end_time  # some result layouts omit the countdown
             row.location = listing.location
             row.condition = listing.condition
             row.last_seen = utcnow()
@@ -264,6 +268,8 @@ class Store:
                 row.discovery_at = discovery_at
                 row.discovery_routes = json.dumps(discovery_routes or [])
                 row.promotion = promotion
+            if fresh_price and row.market_value and row.total_price is not None:
+                row.savings_pct = (row.market_value - row.total_price) / row.market_value * 100
             if not fresh_price or row.dismissed:
                 self._apply_match(row, None if row.dismissed else match)
                 if discovery_at is not None and match is None:

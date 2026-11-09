@@ -103,7 +103,7 @@ def assess(*, title: str, source: str, listing_type: str, price: float | None, s
     empty = {"tier": None, "lane": None, "all_in": all_in(total_price, source), "profit": None,
              "pct_of_value": None, "resale_value": None, "max_buy": None, "flags": [], "auction": False,
              "condition": claim, "condition_label": LABELS[claim], "basis": None, "nm_upside": None,
-             "red_flags": [], "clean_hints": [], **timing}
+             "red_flags": [], "clean_hints": [], "score": None, **timing}
     if timing["ended"]:
         return {**empty, "auction": True}
     if not value or value <= 0 or total_price is None or (price is not None and price <= 1):
@@ -168,7 +168,22 @@ def assess(*, title: str, source: str, listing_type: str, price: float | None, s
     return {**empty, "tier": tier, "lane": lane, "all_in": cost, "profit": round(resale - cost, 2),
             "pct_of_value": round(pct, 1), "resale_value": resale, "max_buy": limit,
             "flags": flags, "auction": auction, "basis": basis, "nm_upside": nm_upside,
-            "red_flags": damage, "clean_hints": clean}
+            "red_flags": damage, "clean_hints": clean,
+            "score": deal_score(pct, resale - cost, auction=auction, checked=bool(sales_value or basis == "graded"),
+                                basis=basis, damaged=bool(damage)) if tier else None}
+
+
+def deal_score(pct: float, profit: float, *, auction: bool = False, checked: bool = False,
+               basis: str | None = None, damaged: bool = False) -> int:
+    """0-100, higher is better: how far under value (60), dollars of profit (25), how solid the value is (15).
+
+    A current bid is not the final price, so an auction's discount earns at most 45.
+    """
+    discount = min(45.0 if auction else 60.0, max(0.0, (100 - pct) * 1.2))
+    money = min(25.0, max(0.0, profit / 4))
+    trust = 15 if checked else 8 if basis == "NM" else 3
+    penalty = (20 if damaged else 0) + (15 if pct < TOO_GOOD_PCT and not auction else 0)
+    return int(round(max(0.0, min(100.0, discount + money + trust - penalty))))
 
 
 def minutes_left(end_time: datetime | None, now: datetime | None = None) -> float | None:
