@@ -496,3 +496,33 @@ def test_a_new_bid_keeps_the_auctions_price_and_a_missing_countdown_keeps_its_en
     row = seen(80.0, None)
     assert row.market_value == 200.0 and row.price_checked_at is not None and row.savings_pct == 60.0
     assert row.end_time is not None
+
+
+def _captured(**over):
+    return {"id": "287710142453", "href": "https://www.ebay.ca/itm/287710142453", "title": "Pokemon Snorlax 158/214 PSA 8",
+            "text": "Pokemon Snorlax 158/214 PSA 8\nC $93.12\n3 bids\nFree shipping", "price": "C $93.12",
+            "timeLeft": "23m", "img": "", **over}
+
+
+def test_a_page_the_user_sends_is_saved_with_its_countdown(tmp_path):
+    from datetime import datetime, timezone
+    from cardsnipe.store import Store
+    settings = SnipeSettings.from_env()
+    store = Store(f"sqlite:///{tmp_path / 'c.db'}")
+    store.record_scan(started=datetime.now(timezone.utc), finished=datetime.now(timezone.utc), sources=["ebay"], live=False,
+                      scanned=0, new_listings=0, deals=0, regrade_deals=0, bids_scheduled=0, errors=[], kind="broad",
+                      budget=None, currency="CAD")
+    rows = [_captured(), _captured(id="abc"), _captured(id="287710142454", href="https://evil.example/itm/287710142454"), "junk"]
+    ids, saved = discovery.save_captured_page(settings, store, rows, "psa 8 pokemon", auction=True)
+    assert saved == 1 and len(ids) == 1
+    row = store.discovery_results()[0][0]
+    assert row.listing_type == "auction" and row.end_time is not None and row.total_price == 93.12
+    assert "your eBay page: psa 8 pokemon" in row.discovery_routes
+
+
+def test_capture_bookmarklet_is_a_local_only_javascript_link():
+    from urllib.parse import unquote
+    link = discovery.capture_bookmarklet("http://127.0.0.1:5050/")
+    assert link.startswith("javascript:") and " " not in link and "\n" not in link
+    code = unquote(link)
+    assert "http://127.0.0.1:5050/snipe/capture" in code and "LH_Auction" in code

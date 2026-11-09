@@ -7,7 +7,7 @@ import threading
 import time
 from dataclasses import replace
 from datetime import datetime, timezone
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
 from cardsnipe.browser import Browser, SourceUnavailable
 from cardsnipe.bargains import (CROSS_CHECK, NUMBER, PRICE_VERSION, bank_of_canada_usd_cad, eligible, needs_recheck,
@@ -397,9 +397,61 @@ class DiscoveryScanner:
                 "page_limit": len(plan), "priced": priced, "bargains": bargains, "errors": errors, "stopped": stopped}
 
 
-def price_saved_singles(settings, store, stop=None, progress=None):
-    """Check the next batch of saved exact singles through public browser pages."""
+CAPTURE_MAX_ROWS = 240
+CAPTURE_PREFIX = "your eBay page"
+
+
+def capture_bookmarklet(origin):
+    """Bookmark code that sends the eBay results page the user is looking at to the dashboard.
+
+    The listings travel in the URL fragment of a new local tab: a fragment is never sent over the network.
+    """
+    js = ("(()=>{const rows=(function(){" + EbayWeb.EXTRACT_JS + "})().map(r=>({...r,text:r.text.slice(0,1500),img:''}));"
+          "if(!rows.length){alert('No eBay listings on this page.');return;}"
+          "const p=new URLSearchParams(location.search);"
+          "window.open(" + repr(origin.rstrip("/") + "/snipe/capture") + "+'#'+encodeURIComponent(JSON.stringify("
+          "{rows,q:p.get('_nkw')||'',auction:p.get('LH_Auction')==='1'})),'cardsnipe_capture');})()")
+    return "javascript:" + quote(" ".join(js.split()), safe="()=>{};,.'[]:*!+/?")
+
+
+def _capture_row_ok(row, domain):
+    return (isinstance(row, dict) and isinstance(row.get("text"), str) and len(row["text"]) <= 4000
+            and isinstance(row.get("id"), str) and re.fullmatch(r"\d{9,15}", row["id"]) is not None
+            and isinstance(row.get("href"), str) and row["href"].startswith(f"https://www.{domain}/itm/")
+            and all(isinstance(row.get(key, ""), str) for key in ("title", "price", "timeLeft", "img")))
+
+
+def save_captured_page(settings, store, rows, query="", auction=False):
+    """Save listings from an eBay results page the user opened in their own browser.
+
+    Returns (saved row ids to price, number saved). Nothing here loads an eBay page.
+    """
+    ebay = EbayWeb(settings, None)
+    mode = "auction" if auction else "all"
+    now = datetime.now(timezone.utc)
+    route = f"{CAPTURE_PREFIX}: {str(query or 'search')[:80]}"
+    ids = []
+    for row in (rows or [])[:CAPTURE_MAX_ROWS]:
+        if not _capture_row_ok(row, settings.ebay_domain):
+            continue
+        listing = ebay._parse_card(row, mode)
+        if listing is None or listing.currency != settings.ebay_currency or not is_discovery_candidate(listing):
+            continue
+        saved = store.record_listing(listing, None, discovery_at=now, discovery_routes=[route],
+                                     promotion=promotion_text(listing))
+        if not saved.dismissed:
+            ids.append(saved.id)
+    return ids, len(ids)
+
+
+def price_saved_singles(settings, store, stop=None, progress=None, only=None):
+    """Check the next batch of saved exact singles through public browser pages.
+
+    only: limit the check to these row ids (a page the user just sent).
+    """
     rows, _ = store.discovery_results()
+    if only is not None:
+        rows = [row for row in rows if row.id in only]
     candidates = [row for row in rows if (row.price_checked_at is None or needs_recheck(row.value_source))
                   and row.currency == "CAD"
                   and row.total_price is not None and row.price > 1 and priceable(row.title)]

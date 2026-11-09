@@ -12,7 +12,7 @@ from flask import Blueprint, jsonify, render_template, request
 from config import Config
 
 from cardsnipe.pricing import VALUATION_VERSION, PriceService, usd_rate
-from cardsnipe.discovery import (COOLDOWN_SECONDS, DISCOVERY_MODES, MAX_SEARCHES, RESULTS_PER_SEARCH,
+from cardsnipe.discovery import (capture_bookmarklet, save_captured_page, COOLDOWN_SECONDS, DISCOVERY_MODES, MAX_SEARCHES, RESULTS_PER_SEARCH,
                                  DiscoveryScanner, browser_search_links as _browser_search_links,
                                  is_discovery_candidate, price_saved_singles, search_plan)
 from cardsnipe.runner import revalue_store, scanner_session
@@ -399,7 +399,7 @@ def snipe_discovery_scan():
 @snipe_bp.post("/api/snipe/discovery/stop")
 def snipe_discovery_stop():
     with _scan_lock:
-        if not _scan_state["running"] or _scan_state.get("operation") not in {"broad", "price-check"}:
+        if not _scan_state["running"] or _scan_state.get("operation") not in {"broad", "price-check", "capture"}:
             return jsonify({"error": "No browser scan is running."}), 409
         _discovery_stop.set()
         _scan_state.update(message="Stopping after the current page…")
@@ -426,6 +426,67 @@ def snipe_discovery_price_check():
                            message="Starting saved price check. Up to 40 public browser searches…")
         threading.Thread(target=_run_saved_price_check, args=(settings,), daemon=True).start()
         return jsonify(_scan_state), 202
+
+
+_capture_pending: set[int] = set()
+
+
+def _run_capture_pricing(settings):
+    """Price pages the user has sent, including any sent while an earlier page was still being priced."""
+    def progress(**state):
+        with _scan_lock:
+            _scan_state.update(state)
+
+    result = {}
+    try:
+        with scanner_session(settings):
+            while True:
+                with _scan_lock:
+                    ids = set(_capture_pending)
+                    _capture_pending.clear()
+                if not ids:
+                    break
+                result = price_saved_singles(settings, get_store(), stop=_discovery_stop, progress=progress, only=ids)
+    except Exception as exc:
+        result = {"message": "Pricing your eBay page failed. " + str(exc), "errors": [str(exc)]}
+    with _scan_lock:
+        _scan_state.update(result, running=False, finished=_iso(datetime.now(timezone.utc)))
+
+
+@snipe_bp.get("/snipe/capture")
+def snipe_capture_page():
+    return render_template("snipe_capture.html")
+
+
+@snipe_bp.post("/api/snipe/capture")
+def snipe_capture():
+    """Save the listings from an eBay results page the user opened, then price them."""
+    payload = _payload()
+    rows = payload.get("rows")
+    if not isinstance(rows, list):
+        raise ValueError("Send the listings from an eBay results page")
+    settings = replace(_settings(), ebay_app_id="", ebay_cert_id="", live=False, fb_auto_message=False,
+                       notify_macos=False, open_in_browser=False, webhook_url="")
+    ids, saved = save_captured_page(settings, get_store(), rows, payload.get("q", ""), payload.get("auction") is True)
+    with _scan_lock:
+        _capture_pending.update(ids)
+        if _scan_state["running"]:
+            if _scan_state.get("operation") == "capture":
+                return jsonify({"saved": saved, "message": f"Saved {saved} listings. They will be priced next."})
+            return jsonify({"saved": saved, "message": f"Saved {saved} listings. A scan is running, so use Price-check on the Bargains page when it finishes."})
+        if not ids:
+            return jsonify({"saved": 0, "message": "No usable listings on that page."})
+        try:
+            with scanner_session(settings):
+                pass
+        except ValueError as exc:
+            return jsonify({"saved": saved, "message": f"Saved {saved} listings, but pricing could not start: {exc}"})
+        _discovery_stop.clear()
+        _scan_state.update(running=True, operation="capture", errors=[], checked=0, priced=0, bargains=0,
+                           started=_iso(datetime.now(timezone.utc)), finished=None,
+                           message=f"Pricing {saved} listings from your eBay page…")
+        threading.Thread(target=_run_capture_pricing, args=(settings,), daemon=True).start()
+    return jsonify({"saved": saved, "message": f"Saved {saved} listings. Pricing the ones ending soonest now."}), 202
 
 
 @snipe_bp.get("/api/snipe/discovery/results")
@@ -465,6 +526,10 @@ def snipe_page():
                          for mode, label, note in DISCOVERY_MODES],
         collectr_url=settings.collectr_showcase_url,
         browser_scans_enabled=Config.BROWSER_SCANS_ENABLED,
+        capture_bookmarklet=capture_bookmarklet(request.host_url),
+        auction_searches=[{"label": query.replace(" pokemon", "").replace("pokemon ", "").upper() if "psa" in query else query.replace("pokemon ", "").capitalize(),
+                           "url": _browser_search_links(Target(name=query, keywords=[query], use_market=False), settings, mode="auction")["ebay"]}
+                          for name, mode, query in search_plan("ebay") if mode == "auction"],
     )
 
 

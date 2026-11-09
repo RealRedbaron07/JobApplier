@@ -551,7 +551,8 @@ function renderDiscoveryResults() {
 
 const savedButton = row => `<button class="button small save-button${row.saved_at ? ' is-saved' : ''}" type="button" data-save="${row.id}" aria-pressed="${row.saved_at ? 'true' : 'false'}">${row.saved_at ? '★ Saved' : '☆ Save'}</button>`;
 function bargainCard(row, {savedView = false, selectable = !savedView} = {}) {
-  const earlier = !savedView && row.discovery_at && discoveryResultData.scan && row.discovery_at !== discoveryResultData.scan.started;
+  const fromYourPage = (row.discovery_routes || []).some(route => route.startsWith('your eBay page'));
+  const earlier = !savedView && !fromYourPage && row.discovery_at && discoveryResultData.scan && row.discovery_at !== discoveryResultData.scan.started;
   const good = row.crack === 'crack' || isDeal(row) || row.deal?.lane === 'condition';
   const setNotes = good ? matchingSetTrends(row.title).map(trend => `<span>${esc(trend.set_name)} ${esc(trend.metric)} ${trend.change_pct > 0 ? '+' : ''}${trend.change_pct.toFixed(1)}% (${esc(trend.source)}, set-level only)</span>`).join('') : '';
   const number = (String(row.title || '').match(/\b\d{1,3}\/\d{1,3}\b/) || [row.title])[0];
@@ -640,7 +641,7 @@ function renderBargainReview() {
   $('#bargain-badge').textContent = `${deals.length} bargain${deals.length === 1 ? '' : 's'}`;
   const refused = (discoveryResultData.scan?.errors || []).filter(error => /eBay server error/.test(error)).length;
   $('#bargain-scan-warning').hidden = !refused;
-  $('#bargain-scan-warning').textContent = refused ? `Last scan is incomplete: eBay refused ${refused} search${refused === 1 ? '' : 'es'} from the scanner, so eBay auctions may be missing. Repeating scans right away usually makes this worse.` : '';
+  $('#bargain-scan-warning').textContent = refused ? `Last scan is incomplete: eBay refused ${refused} search${refused === 1 ? '' : 'es'} from the scanner, so eBay auctions may be missing. Use the eBay buttons below instead; repeating scans usually makes this worse.` : '';
   $('#bargain-review-counts').innerHTML = BARGAIN_TABS.map(([key, label]) =>
     `<button type="button" role="tab" class="bargain-tab" data-bargain-tab="${key}" aria-selected="${key === bargainTab}">${label} <strong>${lists[key].length}</strong></button>`).join('');
   const help = BARGAIN_TABS.find(([key]) => key === bargainTab);

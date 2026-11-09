@@ -114,6 +114,13 @@
             <div class="bargain-top-actions"><select id="bargain-source" aria-label="Site"><option value="" selected>All sites</option><option value="facebook">Marketplace</option><option value="ebay">eBay</option></select><button class="button small" type="button" id="bargain-auto-check">Price-check 40 more</button></div>
           </div>
           <p id="bargain-scan-warning" class="scan-warning" role="alert" hidden></p>
+          <div class="capture-bar">
+            <strong>eBay auctions</strong>
+            <span>Open:</span>{% for search in auction_searches %}<a class="button secondary small" href="{{ search.url }}" target="_blank" rel="noopener">{{ search.label }} ↗</a>{% endfor %}
+            <span>then click your bookmark:</span>
+            <a class="button small capture-bookmark" href="{{ capture_bookmarklet }}" draggable="true" title="Drag this to your bookmarks bar once" onclick="return false">Send to Card desk</a>
+            <small>Drag that button to your bookmarks bar once. On an eBay results page it sends what you see here to be priced.</small>
+          </div>
           <p id="bargain-tab-help" class="detail-meta"></p>
           <p id="bargain-auto-status" class="detail-meta" role="status"></p>
         </article>

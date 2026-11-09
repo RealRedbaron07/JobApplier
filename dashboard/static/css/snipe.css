@@ -236,3 +236,5 @@ input[type=checkbox]{accent-color:var(--green)}
 .bargain-card.score-good{border:2px solid #e0a03c;background:#fff9ef}
 .bargain-card.score-fair{border-left:4px solid #5f6b7a}
 .scan-warning{margin:8px 0;padding:9px 12px;border:1px solid #c62828;border-radius:8px;background:#fff4f2;color:#8e1c1c;font-size:12.5px;font-weight:600}
+.capture-bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:10px 0;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#fff;font-size:12.5px}
+.capture-bar small{flex-basis:100%;color:var(--muted);font-size:11.5px}.capture-bookmark{cursor:grab}
