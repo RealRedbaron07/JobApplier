@@ -55,7 +55,8 @@ def price_listing(browser, title, condition=""):
         number = NUMBER.search(title or "")
         try:
             product["pricecharting"] = pricecharting_lookup(browser, product, number.group(1) if number else "",
-                                                            grade=slab[1] if slab else None)
+                                                            grade=slab[1] if slab else None,
+                                                            company=slab[0] if slab else "")
         except Exception:
             product["pricecharting"] = None
         label += f" + PriceCharting, {CROSS_CHECK}" if product["pricecharting"] else f", {CROSS_CHECK}: no PriceCharting match"

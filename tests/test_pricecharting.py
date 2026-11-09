@@ -87,3 +87,17 @@ def test_no_crack_when_the_slab_sells_for_more_than_the_raw_card():
 def test_other_graders_only_show_the_grade_price_as_a_reference():
     deal = slab(60, 30, graded=100, title="Kabutops 9/62 Fossil CGC 9")
     assert deal["lane"] != "slab" and any("PriceCharting grade 9" in flag for flag in deal["flags"])
+
+
+def test_graded_value_uses_the_median_of_the_same_graders_sales():
+    from cardsnipe.pricecharting import graded_sales
+    rows = [["2026-11-06", "2009 POKEMON PLATINUM #7 DIALGA G-HOLO PSA 9", "$579.28"],
+            ["2026-10-26", "Dialga G 7/127 Platinum PSA 9", "$810.00"],
+            ["2026-10-21", "Dialga G Platinum 7/127 CGC 9 Mint", "$45.99"],
+            ["2026-10-12", "Dialga G 7/127 Platinum PSA 9", "$2,000.00"],
+            ["2026-10-04", "PSA 9 2009 Platinum Dialga G 7/127", "$140.00"],
+            ["2026-09-28", "Dialga G 7/127 Platinum PSA 9", "$610.00"],
+            ["2026-09-17", "Dialga G 7/127 Platinum PSA 9 Mint", "$381.15"],
+            ["2026-05-01", "Dialga G 7/127 Platinum PSA 9", "$99.00"]]
+    assert graded_sales(rows, "PSA", today=date(2026, 11, 9)) == (594.64, 6)
+    assert graded_sales(rows, "CGC", today=date(2026, 11, 9)) == (None, 1)

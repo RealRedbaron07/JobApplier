@@ -25,6 +25,10 @@ SALES_DAYS = 90
 MIN_SALES = 3
 # PriceCharting grade rows that a slab grade maps onto. Its "Grade N" prices mix graders but are mostly PSA.
 GRADE_LABELS = {7.0: "Grade 7", 8.0: "Grade 8", 9.0: "Grade 9", 9.5: "Grade 9.5"}
+# Sold-listing tab on the product page for each grade row.
+GRADE_SALES_CLASS = {"Grade 7": "completed-auctions-cib", "Grade 8": "completed-auctions-new",
+                     "Grade 9": "completed-auctions-graded", "Grade 9.5": "completed-auctions-box-only"}
+_GRADERS = ("psa", "bgs", "cgc", "sgc", "tag", "ace", "ags", "beckett")
 # Bracketed PriceCharting variants that are never the plain copy ("[Reverse Holo]", "[1st Edition]", artist decks).
 _PLAIN_BRACKETS = {"", "holo"}
 # TCGplayer says "EX Emerald", PriceCharting "Pokemon Emerald".
@@ -113,6 +117,33 @@ def recent_sales(rows, today: date | None = None, days: int = SALES_DAYS):
     return round(statistics.median(prices), 2), len(prices)
 
 
+def graded_sales(rows, company: str, today: date | None = None, days: int = SALES_DAYS):
+    """(median, count) of recent sales of one grade by one grading company ("PSA 9" sales only).
+
+    PriceCharting's guide price for a grade can be a single recent sale, and its grade tabs mix
+    PSA, CGC and BGS. A median of the company's own sales is steadier.
+    """
+    today = today or date.today()
+    cutoff = today - timedelta(days=days)
+    company = (company or "").lower()
+    prices = []
+    for sold, title, price in rows or []:
+        try:
+            when = datetime.strptime((sold or "").strip(), "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        words = set(_words(title))
+        value = parse_money(price)
+        if when < cutoff or not value or company not in words or any(g in words for g in _GRADERS if g != company):
+            continue
+        if re.search(r"\b(?:lot|bundle|japanese|reverse|1st)\b", title or "", re.I):
+            continue
+        prices.append(value)
+    if len(prices) < MIN_SALES:
+        return None, len(prices)
+    return round(statistics.median(prices), 2), len(prices)
+
+
 _SEARCH_JS = """return [...document.querySelectorAll('#games_table tbody tr')].map(tr => ({
   title: tr.querySelector('td.title a')?.innerText.trim() || '',
   set: tr.querySelector('td.console')?.innerText.trim() || '',
@@ -125,13 +156,20 @@ const box = [...document.querySelectorAll('div.completed-auctions-used')].find(d
 const sales = box ? [...box.querySelectorAll('tbody tr')].map(tr => [
   tr.querySelector('td.date')?.innerText.trim() || '', tr.querySelector('td.title')?.innerText.trim() || '',
   tr.querySelector('td.numeric')?.innerText.trim() || '']) : [];
-return {title: h1 ? h1.innerText.replace(set, '').trim() : '', set, guide, sales, url: location.href.split('?')[0]};"""
+const rowsOf = cls => { const b = [...document.querySelectorAll('div.' + cls)].find(d => d.querySelector('tbody tr'));
+  return b ? [...b.querySelectorAll('tbody tr')].map(tr => [tr.querySelector('td.date')?.innerText.trim() || '',
+    (tr.querySelector('td.title a') || tr.querySelector('td.title'))?.innerText.trim() || '',
+    tr.querySelector('td.numeric')?.innerText.trim() || '']) : []; };
+const gradeSales = {};
+for (const [label, cls] of Object.entries(arguments[0] || {})) gradeSales[label] = rowsOf(cls);
+return {title: h1 ? h1.innerText.replace(set, '').trim() : '', set, guide, sales, gradeSales, url: location.href.split('?')[0]};"""
 
 
-def pricecharting_lookup(browser, product, card_number, grade: float | None = None):
+def pricecharting_lookup(browser, product, card_number, grade: float | None = None, company: str = ""):
     """PriceCharting prices (USD) for a matched TCGplayer product, or None when no exact row matches.
 
-    Returns {"url", "ungraded", "graded" (price for `grade`, if given), "sales_median", "sales_count"}.
+    Returns {"url", "ungraded", "graded", "graded_sales", "sales_median", "sales_count"}. "graded" is the
+    lower of the guide price for `grade` and the median of recent `company` sales at that grade.
     """
     if not product or not product.get("name") or not card_number:
         return None
@@ -147,7 +185,7 @@ def pricecharting_lookup(browser, product, card_number, grade: float | None = No
         browser.get(row["url"])
         if not browser.wait_until(lambda: browser.js("return !!document.querySelector('#full-prices')"), 10):
             return None
-    page = browser.js(_PRODUCT_JS) or {}
+    page = browser.js(_PRODUCT_JS, GRADE_SALES_CLASS) or {}
     # A search that jumps straight to a product must still be the same card, set and print.
     if not pick_row([{"title": page.get("title", ""), "set": page.get("set", ""), "url": page.get("url")}],
                     product, card_number):
@@ -155,6 +193,9 @@ def pricecharting_lookup(browser, product, card_number, grade: float | None = No
     guide = parse_guide(page.get("guide"))
     median, count = recent_sales(page.get("sales"))
     label = GRADE_LABELS.get(grade) if grade is not None else None
-    return {"url": page.get("url"), "ungraded": guide.get("Ungraded"),
-            "graded": guide.get(label) if label else None, "grade_label": label,
-            "sales_median": median, "sales_count": count}
+    graded = guide.get(label) if label else None
+    grade_median, grade_count = graded_sales((page.get("gradeSales") or {}).get(label), company) if label else (None, 0)
+    if grade_median:
+        graded = min(graded, grade_median) if graded else grade_median
+    return {"url": page.get("url"), "ungraded": guide.get("Ungraded"), "graded": graded, "grade_label": label,
+            "graded_sales": grade_count, "sales_median": median, "sales_count": count}
