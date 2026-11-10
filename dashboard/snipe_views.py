@@ -373,12 +373,7 @@ def snipe_discovery_scan():
         if request.method == "POST":
             if not Config.BROWSER_SCANS_ENABLED:
                 return jsonify({"error": "Browser scans are disabled"}), 403
-            source = _payload().get("source", "facebook")
-            if source == "ebay":
-                return jsonify({"error": "eBay refuses the scanner's browser. Open an eBay search yourself and "
-                                         "use the Send to Card desk bookmark."}), 400
-            # eBay comes in through the bookmark, so a scan never loads its search pages.
-            source = "facebook" if source == "all" else source
+            source = _payload().get("source", "all")
             plan = search_plan(source)
             if _scan_state["running"]:
                 return jsonify({"error": "A scan or scanner sign-in is already running."}), 409

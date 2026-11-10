@@ -40,8 +40,8 @@
       <section class="view active" id="view-discover">
         <article class="panel auto-scan-panel">
           <div class="auto-scan-actions">
-            <label class="sr-label" hidden>Sites<select id="broad-source" aria-label="Sites to scan"><option value="facebook" selected>Marketplace</option></select></label>
-            <button class="button" id="broad-scan">Scan Marketplace</button>
+            <label class="sr-label">Sites<select id="broad-source" aria-label="Sites to scan"><option value="all" selected>Marketplace + eBay</option><option value="facebook">Marketplace</option><option value="ebay">eBay</option></select></label>
+            <button class="button" id="broad-scan">Scan now</button>
             <button class="button secondary" id="broad-stop" hidden>Stop</button>
             <p id="broad-status" role="status" aria-live="polite">Ready to scan.</p>
           </div>
@@ -75,7 +75,7 @@
           <p id="broad-condition-breakdown" class="detail-meta" role="status"></p>
           <p class="detail-meta">Price filters include reported shipping, before tax. Condition comes from the seller's text, not the photos. Deals compare all-in cost (with 13% HST on eBay) with the TCGplayer price for the stated condition. Always check the listing before buying.</p>
           </details>
-          <div id="broad-results-table" class="bargain-review-list"><div class="empty">Click Scan Marketplace to find listings.</div></div>
+          <div id="broad-results-table" class="bargain-review-list"><div class="empty">Click Scan now to find listings.</div></div>
           <button class="button secondary small" type="button" id="broad-more" hidden>Show more</button>
         </article>
         <details class="manual-browse"><summary>Open searches manually (optional)</summary>

@@ -50,7 +50,7 @@ def test_marketplace_placeholder_prices_and_location_only_titles_are_excluded():
 
 def test_auction_searches_run_first_without_specific_card_targets():
     plan = discovery.search_plan()
-    assert len(plan) == discovery.MAX_SEARCHES == 10
+    assert len(plan) == discovery.MAX_SEARCHES == 17
     assert [(name, mode) for name, mode, _ in plan[:3]] == [("ebay", "auction")] * 3
     assert [name for name, _, _ in plan[3:6]] == ["facebook"] * 3
     assert all("pokemon" in query for _, _, query in plan)
@@ -108,9 +108,9 @@ def test_broad_scan_is_bounded_and_imports_without_targets_prices_or_condition_f
     monkeypatch.setattr(discovery.FacebookMarketplace, "find", facebook_search)
     report = discovery.DiscoveryScanner(settings, store).scan()
     rows, scan = store.discovery_results()
-    assert len(searches) == report["pages_done"] == 10
-    assert len(rows) == report["candidates"] == report["scanned"] == 600
-    assert report["new_listings"] == 600 and report["errors"] == []
+    assert len(searches) == report["pages_done"] == 17
+    assert len(rows) == report["candidates"] == report["scanned"] == 17 * 60
+    assert report["new_listings"] == 17 * 60 and report["errors"] == []
     assert scan.kind == "broad" and scan.budget is None and scan.currency == "CAD"
     assert scan.deals == 0 and scan.bids_scheduled == 0 and not scan.live
     assert all(row.market_value is None and row.matched_target is None for row in rows)
@@ -168,7 +168,7 @@ def test_one_blocked_source_does_not_repeat_or_discard_other_source_results(brow
     monkeypatch.setattr(discovery.EbayWeb, "search_page", blocked)
     monkeypatch.setattr(discovery.FacebookMarketplace, "find", lambda *a, **kw: [listing("facebook")])
     report = discovery.DiscoveryScanner(settings, store).scan()
-    assert attempts == ["ebay"] and report["pages_done"] == 8
+    assert attempts == ["ebay"] and report["pages_done"] == 11
     assert len(report["errors"]) == 1 and report["candidates"] == 1
     assert store.discovery_results()[0][0].source == "facebook"
 
@@ -397,7 +397,7 @@ def test_one_click_broad_endpoint_runs_with_an_empty_watchlist_and_cannot_launch
             assert actual_store is store
 
         def scan(self, source):
-            assert source == "facebook"  # "all" no longer loads eBay's search pages from the scanner.
+            assert source == "all"
             started.set()
             assert release.wait(2)
             return {"message": "Finished: 1 candidate saved", "errors": [], "candidates": 1}
@@ -405,7 +405,7 @@ def test_one_click_broad_endpoint_runs_with_an_empty_watchlist_and_cannot_launch
     monkeypatch.setattr(views, "DiscoveryScanner", Scanner)
     try:
         response = client.post("/api/snipe/discovery/scan", json={"source": "all", "live": True, "max_searches": 9999})
-        assert response.status_code == 202 and response.get_json()["max_searches"] == 10
+        assert response.status_code == 202 and response.get_json()["max_searches"] == 17
         assert not response.get_json()["paid_apis_enabled"] and started.wait(2)
         assert client.post("/api/snipe/discovery/scan", json={}).status_code == 409
         assert client.post("/api/snipe/discovery/stop").status_code == 202
@@ -425,7 +425,7 @@ def test_cooldown_survives_app_state_reset_and_invalid_sources_cannot_expand_it(
     now = datetime.now(timezone.utc)
     store.record_scan(now, now, ["ebay"], False, 0, 0, 0, 0, 0, [], kind="broad")
     assert client.post("/api/snipe/discovery/scan", json={"source": "all"}).status_code == 429
-    for source in ("ebay", "tcgplayer", "https://elsewhere.invalid", [], True):
+    for source in ("tcgplayer", "https://elsewhere.invalid", [], True):
         assert client.post("/api/snipe/discovery/scan", json={"source": source}).status_code == 400
 
 

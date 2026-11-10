@@ -544,7 +544,7 @@ function renderDiscoveryResults() {
   $('#broad-more').hidden = rows.length <= broadLimit;
   $('#broad-more').textContent = `Show more (${Math.min(200, rows.length - broadLimit)})`;
   $('#broad-results-table').innerHTML = rows.length ? rows.slice(0, broadLimit).map(row => bargainCard(row)).join('')
-    : `<div class="empty">${priceError || (scan ? 'Nothing matches these filters.' : 'Click Scan Marketplace to find listings.')}</div>`;
+    : `<div class="empty">${priceError || (scan ? 'Nothing matches these filters.' : 'Click Scan now to find listings.')}</div>`;
   bindDismiss('#broad-results-table', loadDiscoveryResults);
   updateSelection('broad-results-table');
 }
@@ -683,7 +683,7 @@ async function loadBroadStatus() {
     const priceChecking = busy && data.operation === 'price-check';
     const signingIn = busy && data.operation === 'login';
     $('#broad-scan').disabled = busy || data.cooldown_seconds > 0 || !data.browser_scans_enabled;
-    $('#broad-scan').textContent = scanning ? 'Scanning…' : data.cooldown_seconds > 0 ? `Scan again in ${data.cooldown_seconds}s` : 'Scan Marketplace';
+    $('#broad-scan').textContent = scanning ? 'Scanning…' : data.cooldown_seconds > 0 ? `Scan again in ${data.cooldown_seconds}s` : 'Scan now';
     $('#broad-source').disabled = busy;
     $('#broad-stop').hidden = !scanning;
     $('#broad-stop').disabled = false;

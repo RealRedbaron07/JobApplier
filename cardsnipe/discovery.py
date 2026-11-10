@@ -20,11 +20,11 @@ from cardsnipe.pricecharting import pricecharting_lookup
 from cardsnipe.slabs import raw_title, slab_eligible, slab_grade
 from cardsnipe.watchlist import Target
 
-MAX_SEARCHES = 10
+MAX_SEARCHES = 17  # 3 eBay auction + 10 Marketplace + 4 eBay buy-now searches
 RESULTS_PER_SEARCH = 60
 COOLDOWN_SECONDS = 60
 PAGE_INTERVAL_SECONDS = 2
-MAX_RUN_SECONDS = 240
+MAX_RUN_SECONDS = 360
 PRICE_CHECKS_PER_RUN = 40
 SLAB_CHECKS_PER_RUN = 20
 EBAY_MIN_PRICE = 15.0  # CAD, fixed-price listings only
