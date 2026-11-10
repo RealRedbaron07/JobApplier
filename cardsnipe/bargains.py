@@ -106,6 +106,21 @@ def search_query(title):
     return number.group(1) if number else (title or "")
 
 
+# Seller words TCGplayer's search does not help with: left in, they push the real card off the results.
+SEARCH_NOISE = re.compile(r"\b(?:pok[eé]mon|tcg|cards?|holo\w*|foil|rare|wotc|wizards|of|the|coast|vintage|nintendo|"
+                          r"english|unlimited|nm|lp|mp|hp|dmg|mint|near|light(?:ly)?|moderately|heavily|played|"
+                          r"damaged|scratched|poor|excellent|condition|uk|(?:19|20)\d\d)\b\+?", re.I)
+
+
+def name_query(title):
+    """Card name and set from a seller title, for cards TCGplayer cannot find by number.
+
+    Older cards are named just "Sabrina's Gengar" there, so searching "14/132" returns other cards.
+    """
+    words = SEARCH_NOISE.sub(" ", NUMBER.sub(" ", title or ""))
+    return " ".join(re.sub(r"[^\w'&.-]+", " ", words).split())
+
+
 def bank_of_canada_usd_cad(browser):
     browser.get("https://www.bankofcanada.ca/rates/exchange/daily-exchange-rates/")
     text = browser.page_text()
@@ -158,29 +173,34 @@ def condition_market_price(text, condition_name, printing):
     return float(match.group(1).replace(",", "")) if match else None
 
 
-def tcgplayer_market(browser, title, claim=None):
-    """Plain-print Near Mint market price (USD) for the card in `title`.
-
-    When the seller states a played condition (claim "LP", "MP", "HP" or "DMG"), the same
-    product page is also read for that condition's market price ("condition_price").
-    """
-    browser.get("https://www.tcgplayer.com/search/pokemon/product?productLineName=pokemon&q="
-                + quote_plus(search_query(title)))
+def _search_products(browser, query):
+    """Product cards from one TCGplayer search page."""
+    browser.get("https://www.tcgplayer.com/search/pokemon/product?productLineName=pokemon&q=" + quote_plus(query))
     state = lambda: browser.js("""return document.querySelector('.product-card__product') ? 'results'
       : /\\b0 results\\b|no results/i.test(document.body ? document.body.innerText : '') ? 'empty' : ''""")
     if not browser.wait_until(state, 10):
         raise RuntimeError("TCGplayer search results were unreadable; this card was not checked")
     # The page briefly says "0 results" while loading; only trust it if no products appear soon after.
     if state() == "empty" and not browser.wait_until(lambda: state() == "results", 5):
-        return None
-    products = browser.js("""return [...document.querySelectorAll('.product-card__product')].map(card => ({
+        return []
+    return browser.js("""return [...document.querySelectorAll('.product-card__product')].map(card => ({
       set: card.querySelector('.product-card__set-name')?.innerText || '',
       number: (card.querySelector('.product-card__rarity')?.innerText || '').match(/#\\d+\\/\\d+/)?.[0] || '',
       name: card.querySelector('.product-card__title')?.innerText || '',
       price: Number((card.querySelector('.product-card__market-price--value')?.innerText || '').replace(/[^0-9.]/g, '')),
       url: card.closest('a')?.href || ''
     }))""") or []
-    product = pick_product(products, title)
+
+
+def tcgplayer_market(browser, title, claim=None):
+    """Plain-print Near Mint market price (USD) for the card in `title`.
+
+    When the seller states a played condition (claim "LP", "MP", "HP" or "DMG"), the same
+    product page is also read for that condition's market price ("condition_price").
+    """
+    product = pick_product(_search_products(browser, search_query(title)), title)
+    if not product and (fallback := name_query(title)):
+        product = pick_product(_search_products(browser, fallback), title)
     if not product or not product.get("url"):
         return product
     # The search card can show the 1st Edition or another print's price; read the plain print's price.

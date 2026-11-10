@@ -526,3 +526,15 @@ def test_capture_bookmarklet_is_a_local_only_javascript_link():
     assert link.startswith("javascript:") and " " not in link and "\n" not in link
     code = unquote(link)
     assert "http://127.0.0.1:5050/snipe/capture" in code and "LH_Auction" in code
+
+
+def test_old_cards_are_found_by_name_when_the_number_search_misses(monkeypatch):
+    from cardsnipe import bargains
+    title = "Dark Blastoise 3/82 Holo Rare Team Rocket Pokémon TCG 1999 WOTC"
+    assert bargains.name_query(title) == "Dark Blastoise Team Rocket"
+    card = {"name": "Dark Blastoise (3)", "set": "Team Rocket", "number": "#03/82", "price": 215.06, "url": ""}
+    searches = []
+    monkeypatch.setattr(bargains, "_search_products",
+                        lambda browser, query: searches.append(query) or ([card] if query != "3/82" else []))
+    assert bargains.tcgplayer_market(None, title) == card
+    assert searches == ["3/82", "Dark Blastoise Team Rocket"]
