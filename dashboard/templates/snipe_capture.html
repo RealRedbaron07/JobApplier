@@ -4,31 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sending to Card desk</title>
-<style>
-body{font:15px/1.6 system-ui,sans-serif;margin:0;display:grid;place-items:center;min-height:100vh;background:#f4f6fb;color:#1c2333}
-main{background:#fff;border:1px solid #dde3ee;border-radius:12px;padding:26px 30px;max-width:440px}
-h1{font-size:19px;margin:0 0 8px}a{color:#4338ca;font-weight:600}
-</style>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/snipe_capture.css') }}">
 </head>
 <body>
 <main><h1 id="head">Sending listings…</h1><p id="text"></p><p><a href="/snipe#bargains">Open Bargains</a></p></main>
-<script>
-(async () => {
-  const head = document.getElementById('head'), text = document.getElementById('text');
-  const raw = location.hash.slice(1);
-  history.replaceState(null, '', location.pathname);
-  try {
-    if (!raw) throw new Error('Nothing was sent. Use the bookmark on an eBay results page.');
-    const response = await fetch('/api/snipe/capture', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: decodeURIComponent(raw)});
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'The listings could not be saved.');
-    head.textContent = 'Sent to Card desk';
-    text.textContent = data.message;
-  } catch (error) {
-    head.textContent = 'Could not send';
-    text.textContent = error.message;
-  }
-})();
-</script>
+<script src="{{ url_for('static', filename='js/snipe_capture.js') }}"></script>
 </body>
 </html>

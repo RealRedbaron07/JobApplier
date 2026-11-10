@@ -118,7 +118,7 @@
             <strong>eBay auctions</strong>
             <span>Open:</span>{% for search in auction_searches %}<a class="button secondary small" href="{{ search.url }}" target="_blank" rel="noopener">{{ search.label }} ↗</a>{% endfor %}
             <span>then click your bookmark:</span>
-            <a class="button small capture-bookmark" href="{{ capture_bookmarklet }}" draggable="true" title="Drag this to your bookmarks bar once" onclick="return false">Send to Card desk</a>
+            <a class="button small capture-bookmark" href="{{ capture_bookmarklet }}" draggable="true" title="Drag this to your bookmarks bar once">Send to Card desk</a>
             <small>Drag that button to your bookmarks bar once. On an eBay results page it sends what you see here to be priced.</small>
           </div>
           <p id="bargain-tab-help" class="detail-meta"></p>
