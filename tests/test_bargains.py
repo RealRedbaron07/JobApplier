@@ -3,7 +3,8 @@ from cardsnipe.bargains import eligible, pick_product
 
 def test_only_clear_single_cards_get_browser_price_checks():
     assert eligible("Pokemon Lugia VSTAR 139/195 Silver Tempest")
-    for title in ("Lugia VSTAR Silver Tempest", "PSA 10 Lugia VSTAR 139/195 Silver Tempest",
+    assert eligible("Lugia VSTAR Silver Tempest")  # no number: only priced if name and set pick one card
+    for title in ("Any Pokémon card", "PSA 10 Lugia VSTAR 139/195 Silver Tempest",
                   "Lugia VSTAR 139/195 Japanese Silver Tempest", "Lugia VSTAR 139/195 reverse holo Silver Tempest",
                   "Lugia VSTAR 139/195 211/195 Silver Tempest", "Lugia VSTAR 139/195 jumbo Silver Tempest",
                   ):

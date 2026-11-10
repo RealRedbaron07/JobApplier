@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
 from cardsnipe.browser import Browser, SourceUnavailable
-from cardsnipe.bargains import (CROSS_CHECK, NUMBER, PRICE_VERSION, bank_of_canada_usd_cad, eligible, needs_recheck,
+from cardsnipe.bargains import (CROSS_CHECK, NUMBER, PRICE_VERSION, _number_key, bank_of_canada_usd_cad, eligible, needs_recheck,
                                 tcgplayer_market)
 from cardsnipe.ebay import EbayWeb
 from cardsnipe.facebook import FacebookMarketplace
@@ -53,9 +53,11 @@ def price_listing(browser, title, condition=""):
         product = tcgplayer_market(browser, title, condition_claim(title, condition))
         label = f"TCGplayer {PRICE_VERSION}"
     if product and product.get("price"):
+        if product.get("matched_by"):
+            label += f", matched by {product['matched_by']}"
         number = NUMBER.search(title or "")
         try:
-            product["pricecharting"] = pricecharting_lookup(browser, product, number.group(1) if number else "",
+            product["pricecharting"] = pricecharting_lookup(browser, product, number.group(1) if number else _number_key(product.get("number")),
                                                             grade=slab[1] if slab else None,
                                                             company=slab[0] if slab else "")
         except Exception:
@@ -213,7 +215,9 @@ def search_plan(source="all"):
     searches = [("ebay", "auction", "psa 9 pokemon"), ("ebay", "auction", "psa 8 pokemon"),
                 ("ebay", "auction", "pokemon holo rare")]
     searches += [("facebook", "all", query) for query in
-                 ("pokemon single card", "pokemon graded card", "pokemon holo card")]
+                 ("pokemon single card", "pokemon graded card", "pokemon holo card", "pokemon psa",
+                  "charizard pokemon card", "vintage pokemon card", "wotc pokemon", "base set pokemon",
+                  "pokemon ex holo", "pokemon illustration rare")]
     searches += [("ebay", "all", "pokemon psa 7 8 9"), ("ebay", "all", "pokemon illustration rare"),
                  ("ebay", "offers", "pokemon holo"), ("ebay", "sale", "pokemon card holo")]
     return [item for item in searches if source == "all" or item[0] == source][:MAX_SEARCHES]

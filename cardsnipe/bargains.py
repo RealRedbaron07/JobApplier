@@ -7,6 +7,7 @@ from cardsnipe.condition import TCGPLAYER_NAMES
 from cardsnipe.matcher import detect_grade
 
 NUMBER = re.compile(r"(?<!\d)(\d{1,3}/\d{1,3})(?!\d)")
+STATED_NUMBER = re.compile(r"#\s*(\d{1,3})\b")
 EXCLUDE = re.compile(r"\b(?:sealed|booster|etb|box|pack|lot|bundle|jumbo|oversized|proxy|fake|metal|reprint|custom|graded|slab|psa|cgc|bgs|tag|japanese|korean|chinese|german|french|spanish|italian|world championship)\b", re.I)
 # Slabs from graders the crack check does not cover, and grade wording without a known company.
 OTHER_SLAB = re.compile(r"\b(?:ags|pca|gma|hga|mnt|ace)\s*-?\s*(?:gem[- ]?mt|gem\s+mint|mint\+?|graded|grade)?\s*-?\s*"
@@ -47,8 +48,14 @@ def needs_recheck(value_source):
     return stale_reference(value_source) or (bool(value_source) and CROSS_CHECK not in value_source)
 
 
+def identifiable(title):
+    """One card number, or no number but enough words to name a card and its set."""
+    count = len(NUMBER.findall(title or ""))
+    return count == 1 or (count == 0 and len(name_query(title).split()) >= 2)
+
+
 def eligible(title):
-    return (len(NUMBER.findall(title or "")) == 1 and not EXCLUDE.search(title) and not VARIANT.search(title)
+    return (identifiable(title) and not EXCLUDE.search(title or "") and not VARIANT.search(title or "")
             and not detect_grade(title) and not not_a_plain_listing(title))
 
 
@@ -74,8 +81,10 @@ def pick_product(products, title):
     and name, the set words in the title must pick exactly one.
     """
     number = NUMBER.search(title or "")
-    if not number or not eligible(title):
+    if not eligible(title):
         return None
+    if not number:
+        return _pick_by_name(products, title)
     title_words = set(_words(title))
     matches = []
     reprint_seen = False
@@ -100,6 +109,32 @@ def pick_product(products, title):
     return matches[0] if len(matches) == 1 else None
 
 
+def _pick_by_name(products, title):
+    """One product whose full name and set are both in a title that has no card number.
+
+    Marketplace sellers usually write "Base Set Magneton Holo". A "#114" in the title must agree,
+    and a set with two cards of that name is left unpriced rather than guessed.
+    """
+    title_words = set(_words(title))
+    stated = STATED_NUMBER.search(title)
+    matches = []
+    for product in products:
+        name = _name_words(product.get("name"))
+        set_name = product.get("set", "")
+        set_words = _words(re.split(r":| - ", set_name)[-1])
+        if not name or not set_words or set(name) <= set(set_words):
+            continue  # a card named after its set ("Arceus" in Arceus) proves nothing
+        if any(word not in title_words for word in name + set_words):
+            continue
+        if VARIANT.search(set_name + " " + product.get("name", "")) or REPRINT_SET.search(set_name):
+            continue
+        if stated and _number_key(product.get("number")).split("/")[0] != stated.group(1).lstrip("0"):
+            continue
+        if product.get("price", 0) > 0:
+            matches.append(product)
+    return {**matches[0], "matched_by": "name and set"} if len(matches) == 1 else None
+
+
 def search_query(title):
     """TCGplayer finds the card by its number; the full seller title usually returns nothing."""
     number = NUMBER.search(title or "")
@@ -117,7 +152,7 @@ def name_query(title):
 
     Older cards are named just "Sabrina's Gengar" there, so searching "14/132" returns other cards.
     """
-    words = SEARCH_NOISE.sub(" ", NUMBER.sub(" ", title or ""))
+    words = SEARCH_NOISE.sub(" ", STATED_NUMBER.sub(" ", NUMBER.sub(" ", title or "")))
     return " ".join(re.sub(r"[^\w'&.-]+", " ", words).split())
 
 
@@ -198,9 +233,11 @@ def tcgplayer_market(browser, title, claim=None):
     When the seller states a played condition (claim "LP", "MP", "HP" or "DMG"), the same
     product page is also read for that condition's market price ("condition_price").
     """
-    product = pick_product(_search_products(browser, search_query(title)), title)
-    if not product and (fallback := name_query(title)):
-        product = pick_product(_search_products(browser, fallback), title)
+    product = None
+    for query in ([search_query(title)] if NUMBER.search(title or "") else []) + [name_query(title)]:
+        product = pick_product(_search_products(browser, query), title) if query else None
+        if product:
+            break
     if not product or not product.get("url"):
         return product
     # The search card can show the 1st Edition or another print's price; read the plain print's price.

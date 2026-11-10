@@ -8,7 +8,7 @@ def test_mid_grade_slabs_are_checked_and_tens_and_raw_promises_are_not():
     assert slab_eligible("TAG 9 (945) Pikachu 58/102 Base Set")
     assert slab_eligible("CGC 9.5 Gengar 094/165 151")
     for title in ("PSA 10 Mew 151/165", "Pikachu 58/102 Base Set PSA 10 ready", "PSA 6 Charizard 4/102",
-                  "PSA 9 Japanese Pikachu 001/100", "PSA 9 Charizard Base Set", "ACE 9 Pikachu 58/102"):
+                  "PSA 9 Japanese Pikachu 001/100", "PSA 9 Charizard", "ACE 9 Pikachu 58/102"):
         assert not slab_eligible(title), title
 
 

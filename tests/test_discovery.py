@@ -168,7 +168,7 @@ def test_one_blocked_source_does_not_repeat_or_discard_other_source_results(brow
     monkeypatch.setattr(discovery.EbayWeb, "search_page", blocked)
     monkeypatch.setattr(discovery.FacebookMarketplace, "find", lambda *a, **kw: [listing("facebook")])
     report = discovery.DiscoveryScanner(settings, store).scan()
-    assert attempts == ["ebay"] and report["pages_done"] == 4
+    assert attempts == ["ebay"] and report["pages_done"] == 8
     assert len(report["errors"]) == 1 and report["candidates"] == 1
     assert store.discovery_results()[0][0].source == "facebook"
 
@@ -538,3 +538,14 @@ def test_old_cards_are_found_by_name_when_the_number_search_misses(monkeypatch):
                         lambda browser, query: searches.append(query) or ([card] if query != "3/82" else []))
     assert bargains.tcgplayer_market(None, title) == card
     assert searches == ["3/82", "Dark Blastoise Team Rocket"]
+
+
+def test_titles_without_a_number_need_one_card_matching_name_and_set():
+    from cardsnipe import bargains
+    magneton = {"name": "Magneton", "set": "Base Set", "number": "#009/102", "price": 30.0, "url": ""}
+    gyarados = {"name": "Gyarados EX", "set": "XY - BREAKpoint", "number": "#114/122", "price": 40.0, "url": ""}
+    assert bargains.pick_product([magneton], "1999 Pokemon Base Set Magneton Holo")["matched_by"] == "name and set"
+    assert bargains.pick_product([gyarados], "2016 XY Breakpoint Gyarados EX #114")["number"] == "#114/122"
+    assert bargains.pick_product([gyarados], "XY Breakpoint Gyarados EX #99") is None
+    assert bargains.pick_product([magneton], "Magneton Holo card") is None  # no set named
+    assert bargains.pick_product([magneton, {**magneton, "number": "#26/102"}], "Base Set Magneton") is None

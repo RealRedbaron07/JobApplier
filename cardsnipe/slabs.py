@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 
-from cardsnipe.bargains import JAPANESE, MULTI_GRADE, NUMBER, OTHER_SLAB, VARIANT
+from cardsnipe.bargains import identifiable, JAPANESE, MULTI_GRADE, NUMBER, OTHER_SLAB, VARIANT
 from cardsnipe.deals import assess
 from cardsnipe.matcher import GRADE_RE, detect_clean_hints, detect_condition_issue, detect_grade, detect_tag_score
 
@@ -41,7 +41,7 @@ def slab_grade(title: str):
 
 def slab_eligible(title: str) -> bool:
     title = title or ""
-    return (slab_grade(title) is not None and len(NUMBER.findall(title)) == 1
+    return (slab_grade(title) is not None and identifiable(raw_title(title))
             and not LANGUAGE_OR_PRODUCT.search(title) and not JAPANESE.search(title)
             and not MULTI_GRADE.search(title) and not OTHER_SLAB.search(title)
             and not VARIANT.search(title) and not detect_condition_issue(title))
