@@ -397,7 +397,7 @@ def test_one_click_broad_endpoint_runs_with_an_empty_watchlist_and_cannot_launch
             assert actual_store is store
 
         def scan(self, source):
-            assert source == "all"
+            assert source == "facebook"  # "all" no longer loads eBay's search pages from the scanner.
             started.set()
             assert release.wait(2)
             return {"message": "Finished: 1 candidate saved", "errors": [], "candidates": 1}
@@ -425,7 +425,7 @@ def test_cooldown_survives_app_state_reset_and_invalid_sources_cannot_expand_it(
     now = datetime.now(timezone.utc)
     store.record_scan(now, now, ["ebay"], False, 0, 0, 0, 0, 0, [], kind="broad")
     assert client.post("/api/snipe/discovery/scan", json={"source": "all"}).status_code == 429
-    for source in ("tcgplayer", "https://elsewhere.invalid", [], True):
+    for source in ("ebay", "tcgplayer", "https://elsewhere.invalid", [], True):
         assert client.post("/api/snipe/discovery/scan", json={"source": source}).status_code == 400
 
 
