@@ -16,6 +16,9 @@ def no_external_services_in_tests(monkeypatch):
 
     monkeypatch.setattr("requests.sessions.Session.request", blocked)
     monkeypatch.setattr("selenium.webdriver.Chrome", blocked)
+    # Resume PDFs normally come from headless Chrome; tests render a stand-in.
+    monkeypatch.setattr("job_os.resume_builder.chrome_pdf", lambda html_path: b"%PDF-1.4 test resume")
+    monkeypatch.setattr("job_os.resume_builder.pdf_page_count", lambda data: 1)
 
 
 @pytest.fixture

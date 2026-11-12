@@ -94,6 +94,14 @@ def validate_draft(content: str, profile: Dict[str, Any] | None = None) -> Dict[
     return {"passed": not violations, "violations": violations, "requires_human_review": True}
 
 
+def _graduation_warning(profile: Dict[str, Any]) -> str:
+    configured = str(profile.get("graduation") or "not set")
+    on_resume = " ".join(item.get("dates", "") for item in (profile.get("resume") or {}).get("education", []))
+    if configured != "not set" and configured in on_resume:
+        return f"Graduation date on the resume matches the configured value ({configured})."
+    return f"The resume says {on_resume or 'no graduation date'}, but the currently configured value is {configured}. Verify before exporting a final resume."
+
+
 def create_tailoring_plan(job: Dict[str, Any], score: Dict[str, Any], profile: Dict[str, Any] | None = None, resume_profile: str | None = None) -> Dict[str, Any]:
     profile = profile or load_profile()
     selected_profile = resume_profile or score.get("resume_profile") or choose_resume_profile(job)
@@ -102,7 +110,8 @@ def create_tailoring_plan(job: Dict[str, Any], score: Dict[str, Any], profile: D
     matched = [known.get(skill.lower(), skill) for skill in score.get("matched_skills", []) if skill.lower() in known]
     skills_order = list(dict.fromkeys(matched + [skill for skill in priorities if skill.lower() in known]))
     project_name = score.get("project_to_emphasize") or choose_project(job)
-    project = next((item for item in profile.get("projects", []) if item["name"] == project_name), profile["projects"][-1])
+    projects = profile.get("projects") or [{"name": "Projects", "facts": []}]
+    project = next((item for item in projects if item["name"] == project_name), projects[0])
 
     experience_suggestions = []
     for experience in profile.get("experience", []):
@@ -122,7 +131,7 @@ def create_tailoring_plan(job: Dict[str, Any], score: Dict[str, Any], profile: D
         "project_to_emphasize": {"name": project["name"], "bullets": project.get("facts", [])},
         "experience_suggestions": experience_suggestions[:3],
         "one_page_check": {"estimated_lines": 46 + len(skills_order), "limit": 58, "passes_estimate": 46 + len(skills_order) <= 58},
-        "base_resume_warning": f"The inspected base PDF says Expected May 2028; the currently configured value is {profile.get('graduation', 'not set')}. Verify before exporting a final resume.",
+        "base_resume_warning": _graduation_warning(profile),
         "review_status": "draft",
     }
     latex = generate_latex_draft(job, plan, profile)

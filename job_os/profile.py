@@ -40,91 +40,137 @@ DEFAULT_PROFILE: Dict[str, Any] = {
     "availability": "Internship/co-op roles starting Summer/Fall 2026 or later",
     "skills": [
         "Java", "Python", "JavaScript", "TypeScript", "HTML", "CSS", "SQL", "MySQL",
-        "React", "React Native", "Expo", "Next.js", "Express.js", "Flask", "Streamlit",
-        "Pandas", "Tailwind CSS", "Git", "GitHub", "Pull Requests", "Vercel", "SonarCloud",
-        "GitGuardian", "Docker", "VS Code", "IntelliJ", "Linux", "macOS", "Windows", "Figma",
+        "React", "React Native", "Expo", "Next.js", "Express.js", "FastAPI", "Flask", "Streamlit",
+        "Pandas", "LightGBM", "PyTorch", "WebSockets", "Tailwind CSS", "Git", "GitHub", "Pull Requests",
+        "Vercel", "SonarCloud", "GitGuardian", "Docker", "VS Code", "IntelliJ", "Linux", "macOS", "Windows",
+        "Figma", "WordPress", "Elementor", "Pytest", "CI/CD", "CI/CD Checks",
         "Gemini API", "ElevenLabs API", "Binance API", "Yahoo Finance API", "Gmail API",
         "Raspberry Pi", "Arduino", "Frontend Development", "Software Testing", "Manual QA",
-        "Regression Testing", "Bug Reporting", "API Integration", "Debugging", "CI/CD Checks",
+        "Regression Testing", "Bug Reporting", "API Integration", "Debugging",
         "Code Review", "Hardware-Software Integration", "Accessibility", "Version Control",
-        "Data Processing", "Automation", "Risk Management",
+        "Data Processing", "Automation", "Risk Management", "Machine Learning",
     ],
-    "experience": [
-        {
-            "company": "Level UP / Riipen - NBA Cap Tracker",
-            "title": "Software Developer Intern / Web Developer",
-            "location": "Remote",
-            "dates": "May 2026 - July 2026",
-            "facts": [
-                "Worked on a Next.js and TypeScript web application.",
-                "Improved frontend navigation, the header, and Trade Machine behavior.",
-                "Used Git branches, pull requests, code review, Vercel, GitGuardian, and SonarCloud checks.",
-                "Refactored Navbar code and corrected season logic from 2025/26 through 2027/28.",
-                "Fixed apron validation using season-specific salary data.",
-                "Performed local QA and documented environment blockers.",
-            ],
-        },
-        {
-            "company": "Allymon via Riipen",
-            "title": "Jr. Software Developer",
-            "location": "Remote",
-            "dates": "May 2026 - June 2026",
-            "facts": [
-                "Set up and debugged a full-stack fintech platform using Next.js, Express.js, and MySQL.",
-                "Validated database, authentication, and admin workflows.",
-                "Tested users, loans, and investor qualification flows and documented expected versus actual results.",
-            ],
-        },
-        {
-            "company": "Macro Tec Systems Inc. via Riipen",
-            "title": "Software Developer Intern",
-            "location": "Remote",
-            "dates": "March 2026 - May 2026",
-            "facts": [
-                "Improved UI, navigation, user flows, and authentication-related screens in a React Native finance app.",
-                "Merged Git branches and resolved conflicts while preserving newer functionality.",
-            ],
-        },
-        {
-            "company": "CSHub, York University",
-            "title": "VP Events & Executive",
-            "dates": "August 2025 - April 2026",
-            "facts": [
-                "Supported technical and community events with executives, volunteers, and attendees.",
-                "Helped support a 24-hour event with 50+ participants.",
-            ],
-        },
-    ],
-    "projects": [
-        {
-            "name": "MalpariBot",
-            "facts": [
-                "Python algorithmic trading research platform with paper-only execution.",
-                "Includes setup-based signal filtering, risk gates, PnL-after-fees reporting, structured logs, dashboards, dataset export, and ML-readiness reports.",
-                "Has 500+ pytest tests.",
-            ],
-            "prohibited_claims": ["live trading", "profitable", "broker orders", "real-money deployment"],
-        },
-        {
-            "name": "S.E.N.S.E.",
-            "facts": [
-                "Best Accessibility Hack winner and team-built smart glasses prototype.",
-                "Used Python, Raspberry Pi, Arduino, Gemini API, and haptic feedback for voice-guided visually impaired micro-navigation.",
-            ],
-            "prohibited_claims": ["sole hardware owner", "production medical device"],
-        },
-        {
-            "name": "JobApplier",
-            "facts": ["Local-first job workflow automation, matching, tailoring, tracking, analytics, and human-review controls."],
-            "prohibited_claims": ["blind auto-apply", "automatic submission"],
-        },
-    ],
+    # Mirrors the current one-page resume (Mustafa_Alp_ARI_November.pdf). Tailoring only
+    # reorders and selects from these entries; it never writes new claims. **text** is
+    # bold on the rendered resume, as on the original.
+    "resume": {
+        "education": [{
+            "institution": "York University", "location": "Toronto, ON",
+            "degree": "BSc Honours in Computer Science, Minor in Economics", "dates": "Expected May 2029",
+        }],
+        "experience": [
+            {
+                "title": "Research Assistant", "company": "M4 & Aging Lab, York University",
+                "dates": "Oct 2026 – Present", "location": "Toronto, ON",
+                "bullets": [
+                    "Updated the lab’s WordPress site with research articles, DOI links, PDFs, images, and Zoom recordings; reorganized publication cards and checked live links and page layouts.",
+                ],
+            },
+            {
+                "title": "Digital Strategy & Web Development Intern", "company": "Venture for Canada",
+                "dates": "Jul 2026 – Aug 2026", "location": "Remote",
+                "bullets": [
+                    "Updated **5 WordPress/Elementor sites**, correcting navigation, contact details, and partner links; moved **23 demo pages and 6 placeholder portfolio items** out of public view.",
+                    "Standardized **800+ organization records** for **14 partners**, delivering a consistent dataset for stakeholder outreach.",
+                ],
+            },
+            {
+                "title": "Software Developer Intern / Web Developer", "company": "Riipen Level UP",
+                "dates": "May 2026 – Jul 2026", "location": "Remote",
+                "bullets": [
+                    "Rebuilt **Next.js/React navigation across 6 routes**, replacing the sidebar with **4 tabs and 2 secondary links** in a merged PR.",
+                    "Cleared **SonarCloud duplication failures** by removing repeated Navbar code and obsolete sidebar components in a merged PR.",
+                    "Fixed NBA Trade Machine validation around **$190M–$196M** using database-backed, season-specific thresholds through 2027/28; added null checks and verified changes in CI.",
+                ],
+            },
+            {
+                "title": "Software Development Project Contributor", "company": "Riipen Advance Ontario",
+                "dates": "Apr 2026 – Jun 2026", "location": "Remote",
+                "bullets": [
+                    "Replaced mock marketplace, portfolio, and wallet data with API responses in a **Next.js/Express/MySQL** fintech app.",
+                    "Tested borrower and admin workflows over **60 hours**; documented APIs, bugs, and smoke tests in a **348-line handoff**.",
+                ],
+            },
+            {
+                "title": "Software Developer Intern", "company": "Riipen Level UP",
+                "dates": "Mar 2026 – May 2026", "location": "Remote",
+                "bullets": [
+                    "Built a **React Native sign-up screen** and merged beta UI updates, preserving existing login and password-reset flows while resolving conflicts across shared components.",
+                ],
+            },
+        ],
+        "projects": [
+            {
+                "name": "MalpariBot", "tech": "Python, LightGBM, PyTorch, pandas, pytest", "dates": "Oct 2025 – Present",
+                "bullets": [
+                    "Built a walk-forward ML research pipeline for **9 crypto futures pairs**, engineering **about 120 features** with purged splits, a sealed holdout, and tests for future-data leakage.",
+                    "Developed paper-first execution, exchange reconciliation, scheduled retraining, and safe model swaps; maintained **about 900 automated tests** for trade safety and process control.",
+                ],
+            },
+            {
+                "name": "Lightning Response", "tech": "LightGBM, FastAPI, WebSockets", "dates": "Sep 2026",
+                "bullets": [
+                    "Co-built a real-time tyre-risk system using **127 F1 races, 138,683 laps, and 767K simulations**; reached **85% lock-up and 99% wheelspin early detection** on unseen drivers and won the **Ollon Motorsport Safety Track**.",
+                ],
+            },
+            {
+                "name": "S.E.N.S.E.", "tech": "Gemini API, ElevenLabs, WebSockets", "dates": "Feb 2026",
+                "bullets": [
+                    "Won **Best Accessibility Hack** with smart glasses combining Gemini visual guidance, ultrasonic obstacle detection, haptic alerts, and a live WebSocket caregiver dashboard.",
+                ],
+            },
+        ],
+        "leadership": [
+            {
+                "title": "Community Engagement Executive", "company": "CS Hub, York University | Previously VP Events (2025–2026)",
+                "dates": "Sep 2026 – Present", "location": "Toronto, ON",
+                "bullets": [
+                    "Co-managed a **24-hour MLH-partnered hackathon** for **50+ attendees** in a **2,100+ member** student community, coordinating volunteers and live operations to keep the event on schedule.",
+                ],
+            },
+        ],
+        "skill_groups": [
+            {"label": "Languages", "items": ["Python", "Java", "JavaScript", "TypeScript", "HTML", "CSS"]},
+            {"label": "Frameworks & Libraries", "items": ["React", "React Native", "Next.js", "Express.js", "FastAPI", "LightGBM", "PyTorch", "pandas"]},
+            {"label": "Tools & Platforms", "items": ["Git", "GitHub", "MySQL", "pytest", "CI/CD", "SonarCloud", "Vercel", "Figma", "WordPress"]},
+        ],
+    },
+    "experience": [],
+    "projects": [],
     "resume_profiles": [
         "general_software", "web_frontend", "qa_testing", "data_reporting_bi",
         "fintech", "applied_ai_automation", "food_service_survival_job",
     ],
     "automation_level": 3,
 }
+
+
+PROJECT_PROHIBITED_CLAIMS = {
+    "MalpariBot": ["live trading", "profitable", "broker orders", "real-money deployment"],
+    "S.E.N.S.E.": ["sole hardware owner", "production medical device"],
+}
+
+
+def _plain(text: str) -> str:
+    return text.replace("**", "")
+
+
+def _sync_facts_from_resume(profile: Dict[str, Any]) -> None:
+    """Keep the flat experience/project fact lists in step with the structured resume."""
+    resume = profile.get("resume") or {}
+    profile["experience"] = [
+        {"company": item["company"], "title": item["title"], "location": item.get("location", ""),
+         "dates": item.get("dates", ""), "facts": [_plain(b) for b in item.get("bullets", [])]}
+        for item in resume.get("experience", []) + resume.get("leadership", [])
+    ]
+    profile["projects"] = [
+        {"name": item["name"], "tech": item.get("tech", ""), "dates": item.get("dates", ""),
+         "facts": [_plain(b) for b in item.get("bullets", [])], "prohibited_claims": PROJECT_PROHIBITED_CLAIMS.get(item["name"], [])}
+        for item in resume.get("projects", [])
+    ]
+
+
+_sync_facts_from_resume(DEFAULT_PROFILE)
 
 
 def load_profile(path: str | None = None) -> Dict[str, Any]:
@@ -137,6 +183,8 @@ def load_profile(path: str | None = None) -> Dict[str, Any]:
                 override = json.load(handle)
             if isinstance(override, dict):
                 profile.update(override)
+                if "resume" in override and "experience" not in override:
+                    _sync_facts_from_resume(profile)
         except (OSError, json.JSONDecodeError):
             # A malformed private override must not replace the built-in source of truth.
             pass

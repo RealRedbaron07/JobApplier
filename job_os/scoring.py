@@ -123,11 +123,11 @@ def choose_resume_profile(job: Dict[str, Any]) -> str:
 
 def choose_project(job: Dict[str, Any]) -> str:
     text = _norm(f"{job.get('title', '')} {job.get('description', '')} {job.get('industry', '')}")
-    if any(x in text for x in ("accessibility", "hardware", "embedded", "gemini", "computer vision")):
+    if any(x in text for x in ("accessibility", "hardware", "embedded", "gemini", "computer vision", "llm", "generative")):
         return "S.E.N.S.E."
-    if any(x in text for x in ("finance", "fintech", "trading", "data", "risk", "python", "analytics")):
-        return "MalpariBot"
-    return "JobApplier"
+    if any(x in text for x in ("real time", "realtime", "websocket", "fastapi", "streaming", "simulation", "sports", "motorsport")):
+        return "Lightning Response"
+    return "MalpariBot"
 
 
 def _start_date_fit(value: Any) -> float:

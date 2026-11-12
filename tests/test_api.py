@@ -354,3 +354,40 @@ def test_json_restore_rechecks_draft_claims_and_review_status(dashboard_client):
         draft = session.query(TailoredDraft).one()
         assert draft.review_status == "draft"
         assert json.loads(draft.safety_report)["passed"] is False
+
+
+def test_fill_application_requires_reviewed_package_and_never_marks_applied(dashboard_client, monkeypatch):
+    client, session_factory, _ = dashboard_client
+    calls = []
+
+    def fake_fill(url, resume_pdf, profile, answers, refill_current_page=False):
+        calls.append({"url": url, "resume": resume_pdf, "answers": answers})
+        return {"ats": "generic", "page": url, "resume_uploaded": True, "resume_file": Path(resume_pdf).name,
+                "filled": ["Email → x"], "needs_you": [], "skipped_sensitive": [], "stopped_before_submit": True,
+                "next_step": "Submit yourself."}
+
+    import dashboard.app as dashboard_app
+    monkeypatch.setattr(dashboard_app.apply_assist, "fill_application", fake_fill)
+    job = _create(client)
+    assert client.post(f"/api/jobs/{job['id']}/fill", json={"confirm_reviewed": True}).status_code == 403
+    client.put("/api/profile", json={"automation_level": 4})
+    prepared = client.post(f"/api/jobs/{job['id']}/prepare", json={}).get_json()
+    assert prepared["tailoring"]["tailored_resume"]["pages"] == 1
+    assert client.get(f"/api/jobs/{job['id']}/resume.pdf").status_code == 200
+    assert client.post(f"/api/jobs/{job['id']}/fill", json={"confirm_reviewed": True}).status_code == 409
+    assert client.patch(
+        f"/api/drafts/{prepared['draft_id']}",
+        json={"content": {"tailoring": prepared["tailoring"], "answers": prepared["answers"]}, "review_status": "reviewed"},
+    ).status_code == 200
+    assert client.post(f"/api/jobs/{job['id']}/fill", json={}).status_code == 409
+    filled = client.post(f"/api/jobs/{job['id']}/fill", json={"confirm_reviewed": True})
+    assert filled.status_code == 200
+    body = filled.get_json()
+    assert body["stopped_before_submit"] is True
+    assert calls[0]["resume"].endswith("Mustafa_Alp_ARI_Resume.pdf")
+    # The unedited cover letter still has a placeholder, so it is held back and flagged.
+    assert "cover_letter" not in calls[0]["answers"]
+    assert any("Cover letter" in item for item in body["needs_you"])
+    with session_factory() as session:
+        assert session.get(Job, job["id"]).applied is False
+        assert session.query(ApplicationRecord).count() == 0

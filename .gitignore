@@ -93,3 +93,5 @@ data/drafts/
 output/
 exports/
 !.gitkeep
+
+chrome_profile_apply/
