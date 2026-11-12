@@ -9,6 +9,18 @@ from config import Config
 from database.models import Base
 
 
+@pytest.fixture(autouse=True)
+def no_external_services_in_tests(monkeypatch):
+    def blocked(*args, **kwargs):
+        pytest.fail("Tests must use fakes instead of external network or browser services")
+
+    monkeypatch.setattr("requests.sessions.Session.request", blocked)
+    monkeypatch.setattr("selenium.webdriver.Chrome", blocked)
+    # Resume PDFs normally come from headless Chrome; tests render a stand-in.
+    monkeypatch.setattr("job_os.resume_builder.chrome_pdf", lambda html_path: b"%PDF-1.4 test resume")
+    monkeypatch.setattr("job_os.resume_builder.pdf_page_count", lambda data: 1)
+
+
 @pytest.fixture
 def dashboard_client(tmp_path, monkeypatch):
     import dashboard.app as dashboard_app

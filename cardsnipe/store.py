@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String, Text, UniqueConstraint, create_engine
+from sqlalchemy import Boolean, Column, Date, DateTime, Float, Integer, String, Text, UniqueConstraint, create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -23,6 +23,22 @@ def _aware(value: datetime | None) -> datetime | None:
     return value
 
 
+# Finds not seen by a scan for this long leave the results. Priced cards stay longer than unpriced ones,
+# which are only noise once a few newer scans have passed.
+RESULTS_MAX_AGE = timedelta(hours=24)
+UNPRICED_MAX_AGE = timedelta(hours=6)
+
+
+def _current(row, now: datetime | None = None) -> bool:
+    """Still worth showing: seen recently, and not an auction that has already ended."""
+    now = now or utcnow()
+    seen = _aware(row.last_seen or row.discovery_at)
+    if seen is not None and now - seen > (RESULTS_MAX_AGE if row.market_value else UNPRICED_MAX_AGE):
+        return False
+    end = _aware(row.end_time)
+    return not (row.listing_type == "auction" and end is not None and end <= now)
+
+
 class SeenListing(Base):
     __tablename__ = "seen_listings"
     __table_args__ = (UniqueConstraint("source", "listing_id", name="uq_source_listing"),)
@@ -39,7 +55,14 @@ class SeenListing(Base):
     listing_type = Column(String(20))
     end_time = Column(DateTime)
     location = Column(String(255))
+    condition = Column(Text)
+    discovery_at = Column(DateTime)
+    price_checked_at = Column(DateTime)
+    saved_at = Column(DateTime)
+    discovery_routes = Column(Text)
+    promotion = Column(Text)
     first_seen = Column(DateTime, default=utcnow)
+    last_seen = Column(DateTime)
     matched_target = Column(String(255))
     savings_pct = Column(Float)
     lane = Column(String(20))
@@ -48,8 +71,19 @@ class SeenListing(Base):
     market_value = Column(Float)          # value for the listing's grade bucket, listing currency
     value_source = Column(String(30))     # tcgplayer / pricecharting / ebay_sold
     value_bucket = Column(String(8))
+    # TCGplayer market price for the seller's stated played condition (LP/MP/HP/DMG), listing currency.
+    condition_value = Column(Float)
+    sold_3m = Column(Integer)             # TCGplayer 3-month sold count, a liquidity check
+    # PriceCharting cross-check, listing currency: ungraded price, median of recent ungraded sales
+    # (eBay + TCGplayer, last 90 days) and the price for a slab's own grade.
+    pc_value = Column(Float)
+    sales_value = Column(Float)
+    sales_count = Column(Integer)
+    graded_value = Column(Float)
+    pc_url = Column(String(255))
     irregular = Column(Boolean, default=False)
     irregular_reason = Column(String(80))
+    dismissed = Column(Boolean, default=False)  # user removed it; stays seen so a rescan cannot bring it back
     notified = Column(Boolean, default=False)
     action = Column(String(40))
     action_detail = Column(Text)
@@ -97,11 +131,19 @@ class CollectionItem(Base):
     set_name = Column(Text)
     rarity = Column(Text)
     number = Column(String(40))
+    # Collectr's own figure — reference only (unreliable for raw cards).
     value_usd = Column(Float)
     change_usd = Column(Float)
     change_pct = Column(Float)
     quantity = Column(Integer, default=1)
     graded = Column(Boolean, default=False)
+    grade = Column(String(20))
+    condition = Column(String(80))
+    finish = Column(String(80))
+    # Our valuation (cheapest of TCGPlayer / PriceCharting / eBay sold for the card's grade bucket).
+    market_value_usd = Column(Float)
+    market_source = Column(String(30))
+    market_bucket = Column(String(8))
     synced_at = Column(DateTime, default=utcnow)
 
 
@@ -114,9 +156,26 @@ class CollectionSnapshot(Base):
     synced_at = Column(DateTime, default=utcnow)
     source_url = Column(Text)
     owner = Column(Text)
-    total_value_usd = Column(Float)
+    total_value_usd = Column(Float)          # Collectr's estimate (reference)
+    market_value_usd = Column(Float)         # our valuation, summed over items with a market value
+    unvalued_items = Column(Integer, default=0)
     total_cards = Column(Integer)
     total_graded = Column(Integer)
+
+
+class SetPriceObservation(Base):
+    """One user-imported set metric on one date, kept apart from listing prices."""
+
+    __tablename__ = "set_price_observations"
+    __table_args__ = (UniqueConstraint("source", "set_name", "metric", "unit", "observed_on"),)
+
+    id = Column(Integer, primary_key=True)
+    source = Column(String(100), nullable=False)
+    set_name = Column(String(100), nullable=False)
+    metric = Column(String(100), nullable=False)
+    unit = Column(String(12), nullable=False)
+    observed_on = Column(Date, nullable=False)
+    value = Column(Float, nullable=False)
 
 
 class ScanRun(Base):
@@ -125,6 +184,9 @@ class ScanRun(Base):
     __tablename__ = "scan_runs"
 
     id = Column(Integer, primary_key=True)
+    kind = Column(String(20), default="watchlist")
+    budget = Column(Float)
+    currency = Column(String(8))
     started = Column(DateTime, default=utcnow)
     finished = Column(DateTime)
     duration_seconds = Column(Float)
@@ -173,7 +235,8 @@ class Store:
                 source=listing.source, listing_id=listing.listing_id
             ).first() is not None
 
-    def record_listing(self, listing: Listing, match: Match | None) -> SeenListing:
+    def record_listing(self, listing: Listing, match: Match | None, *, discovery_at=None,
+                       discovery_routes=None, promotion="") -> SeenListing:
         with self.session() as session:
             row = session.query(SeenListing).filter_by(
                 source=listing.source, listing_id=listing.listing_id
@@ -181,6 +244,13 @@ class Store:
             if row is None:
                 row = SeenListing(source=listing.source, listing_id=listing.listing_id)
                 session.add(row)
+            # A new bid is still the same card, so an auction keeps its price check when only the bid moved.
+            same_listing = (row.title == listing.title and row.currency == listing.currency
+                            and (listing.listing_type == "auction"
+                                 or (row.price == listing.price and row.shipping == listing.shipping
+                                     and row.total_price == listing.total_price)))
+            fresh_price = (discovery_at is not None and match is None and same_listing and row.price_checked_at
+                           and (utcnow() - _aware(row.price_checked_at)).total_seconds() < 6 * 3600)
             row.title = listing.title
             row.price = listing.price
             row.shipping = listing.shipping
@@ -188,11 +258,50 @@ class Store:
             row.currency = listing.currency
             row.url = listing.url
             row.listing_type = listing.listing_type
-            row.end_time = listing.end_time
+            row.end_time = listing.end_time or row.end_time  # some result layouts omit the countdown
             row.location = listing.location
-            self._apply_match(row, match)
+            row.condition = listing.condition
+            row.last_seen = utcnow()
+            if discovery_at is not None:
+                import json
+
+                row.discovery_at = discovery_at
+                row.discovery_routes = json.dumps(discovery_routes or [])
+                row.promotion = promotion
+            if fresh_price and row.market_value and row.total_price is not None:
+                row.savings_pct = (row.market_value - row.total_price) / row.market_value * 100
+            if not fresh_price or row.dismissed:
+                self._apply_match(row, None if row.dismissed else match)
+                if discovery_at is not None and match is None:
+                    row.price_checked_at = None
+            if discovery_at is not None:
+                row.matched_target = None
             session.commit()
             return row
+
+    def set_discovery_price(self, row_id: int, value: float | None, source: str = "",
+                            condition_value: float | None = None, sold_3m: int | None = None,
+                            cross_check: dict | None = None) -> bool:
+        with self.session() as session:
+            row = session.get(SeenListing, row_id)
+            if row is None or row.dismissed or row.discovery_at is None:
+                return False
+            row.price_checked_at = utcnow()
+            row.market_value = value
+            row.value_source = source or None
+            row.value_bucket = "raw" if value else None
+            row.condition_value = condition_value if value else None
+            row.sold_3m = sold_3m if value else None
+            check = (cross_check or {}) if value else {}
+            row.pc_value = check.get("pc_value")
+            row.sales_value = check.get("sales_value")
+            row.sales_count = check.get("sales_count")
+            row.graded_value = check.get("graded_value")
+            row.pc_url = check.get("pc_url")
+            row.savings_pct = (value - row.total_price) / value * 100 if value and row.total_price is not None else None
+            row.matched_target = None
+            session.commit()
+            return True
 
     @staticmethod
     def _apply_match(row: SeenListing, match: Match | None) -> None:
@@ -219,18 +328,20 @@ class Store:
         Used after valuations change so old cap-based matches get market numbers (or drop
         out). Alerts/actions already taken are left untouched.
         """
-        from datetime import datetime as _dt
-
         stats = {"checked": 0, "matched": 0, "unmatched": 0, "changed": 0}
         with self.session() as session:
             for row in session.query(SeenListing).all():
+                if row.discovery_at is not None:
+                    continue
                 listing = Listing(
                     source=row.source, listing_id=row.listing_id, title=row.title or "", price=row.price,
                     currency=row.currency or "", url=row.url or "", listing_type=row.listing_type or "bin",
                     shipping=row.shipping, end_time=_aware(row.end_time), location=row.location or "",
+                    condition=row.condition or "",
                 )
                 before = (row.matched_target, row.market_value, row.lane, row.irregular)
-                match = evaluate_fn(listing)
+                match = evaluate_fn(listing) if not row.dismissed else None
+                row.total_price = listing.total_price
                 self._apply_match(row, match)
                 stats["checked"] += 1
                 stats["matched" if match else "unmatched"] += 1
@@ -238,6 +349,25 @@ class Store:
                     stats["changed"] += 1
             session.commit()
         return stats
+
+    def dismiss_listing(self, row_id: int) -> bool:
+        """Hide a listing the user called unrelated. It stays in the seen set."""
+        with self.session() as session:
+            row = session.get(SeenListing, row_id)
+            if row is None or row.dismissed:
+                return False
+            row.dismissed = True
+            row.action = "dismissed"
+            row.action_detail = "removed as unrelated"
+            row.action_at = utcnow()
+            pending = session.query(ScheduledBid).filter_by(
+                source=row.source, listing_id=row.listing_id, status="pending"
+            ).all()
+            for bid in pending:
+                bid.status = "cancelled"
+                bid.updated = utcnow()
+            session.commit()
+            return True
 
     def mark_action(self, listing: Listing, action: str, detail: str = "", notified: bool | None = None) -> None:
         with self.session() as session:
@@ -255,19 +385,30 @@ class Store:
 
     def recent_deals(self, limit: int = 30, lane: str | None = None, source: str | None = None) -> list[SeenListing]:
         with self.session() as session:
-            query = session.query(SeenListing).filter(SeenListing.matched_target.isnot(None))
+            query = self._deals_query(session)
             if lane:
                 query = query.filter(SeenListing.lane == lane)
             if source:
                 query = query.filter(SeenListing.source == source)
-            return query.order_by(SeenListing.first_seen.desc()).limit(limit).all()
+            return query.order_by(SeenListing.last_seen.desc()).limit(limit).all()
 
-    def recent_listings(self, limit: int = 100, source: str | None = None) -> list[SeenListing]:
+    @staticmethod
+    def _deals_query(session):
+        return session.query(SeenListing).filter(
+            SeenListing.matched_target.isnot(None), SeenListing.dismissed.isnot(True),
+            SeenListing.last_seen >= utcnow() - timedelta(hours=24),
+        )
+
+    def recent_listings(self, limit: int = 100, source: str | None = None,
+                        offset: int = 0, search: str = "") -> list[SeenListing]:
         with self.session() as session:
-            query = session.query(SeenListing)
+            stmt = session.query(SeenListing).filter(SeenListing.dismissed.isnot(True))
             if source:
-                query = query.filter(SeenListing.source == source)
-            return query.order_by(SeenListing.first_seen.desc()).limit(limit).all()
+                stmt = stmt.filter(SeenListing.source == source)
+            if search:
+                stmt = stmt.filter(SeenListing.title.ilike(f"%{search}%"))
+            return stmt.order_by(SeenListing.last_seen.desc().nullslast(), SeenListing.first_seen.desc(),
+                                 SeenListing.id.desc()).offset(offset).limit(limit).all()
 
     # ── valuations ───────────────────────────────────────────────────────
     def save_valuation(self, valuation) -> None:
@@ -308,12 +449,18 @@ class Store:
                     name=item["name"], set_name=item.get("set_name"), rarity=item.get("rarity"),
                     number=item.get("number"), value_usd=item.get("value_usd"), change_usd=item.get("change_usd"),
                     change_pct=item.get("change_pct"), quantity=int(item.get("quantity") or 1),
-                    graded=bool(item.get("graded")), synced_at=now,
+                    graded=bool(item.get("graded")), grade=item.get("grade"), synced_at=now,
+                    condition=item.get("condition"), finish=item.get("finish"),
+                    market_value_usd=item.get("market_value_usd"), market_source=item.get("market_source"),
+                    market_bucket=item.get("market_bucket"),
                 ))
+            valued = [i for i in items if i.get("market_value_usd")]
             snapshot = CollectionSnapshot(
                 synced_at=now, source_url=source_url, owner=owner,
                 total_value_usd=total_value_usd if total_value_usd is not None
                 else sum((i.get("value_usd") or 0) * int(i.get("quantity") or 1) for i in items),
+                market_value_usd=round(sum(i["market_value_usd"] * int(i.get("quantity") or 1) for i in valued), 2) if valued else None,
+                unvalued_items=len(items) - len(valued),
                 total_cards=sum(int(i.get("quantity") or 1) for i in items),
                 total_graded=total_graded if total_graded is not None else sum(1 for i in items if i.get("graded")),
             )
@@ -323,7 +470,8 @@ class Store:
 
     def collection(self) -> tuple[list[CollectionItem], CollectionSnapshot | None]:
         with self.session() as session:
-            items = session.query(CollectionItem).order_by(CollectionItem.value_usd.desc()).all()
+            items = session.query(CollectionItem).order_by(
+                CollectionItem.market_value_usd.desc().nullslast(), CollectionItem.value_usd.desc()).all()
             latest = session.query(CollectionSnapshot).order_by(CollectionSnapshot.synced_at.desc()).first()
             return items, latest
 
@@ -331,14 +479,55 @@ class Store:
         with self.session() as session:
             return session.query(CollectionSnapshot).order_by(CollectionSnapshot.synced_at.desc()).limit(limit).all()
 
+    # ── user-imported set price history ──────────────────────────────────
+    def import_set_prices(self, entries: list[dict]) -> int:
+        with self.session() as session:
+            existing = {(
+                row.source.casefold(), row.set_name.casefold(), row.metric.casefold(),
+                row.unit, row.observed_on,
+            ): row for row in session.query(SetPriceObservation).all()}
+            for entry in entries:
+                key = (entry["source"].casefold(), entry["set_name"].casefold(),
+                       entry["metric"].casefold(), entry["unit"], entry["observed_on"])
+                row = existing.get(key)
+                if row is None:
+                    row = SetPriceObservation(**entry)
+                    session.add(row)
+                    existing[key] = row
+                else:
+                    row.value = entry["value"]
+            session.commit()
+        return len(entries)
+
+    def set_trends(self) -> list[dict]:
+        with self.session() as session:
+            rows = session.query(SetPriceObservation).order_by(SetPriceObservation.observed_on).all()
+            grouped: dict[tuple, list[SetPriceObservation]] = {}
+            for row in rows:
+                key = (row.source.casefold(), row.set_name.casefold(), row.metric.casefold(), row.unit)
+                grouped.setdefault(key, []).append(row)
+            trends = []
+            for observations in grouped.values():
+                first, latest = observations[0], observations[-1]
+                trends.append({
+                    "source": latest.source, "set_name": latest.set_name, "metric": latest.metric,
+                    "unit": latest.unit, "observations": len(observations),
+                    "first_date": first.observed_on.isoformat(), "first_value": first.value,
+                    "latest_date": latest.observed_on.isoformat(), "latest_value": latest.value,
+                    "change_pct": round((latest.value / first.value - 1) * 100, 1) if len(observations) > 1 else None,
+                })
+            return sorted(trends, key=lambda row: (row["set_name"].casefold(), row["source"].casefold(), row["metric"].casefold()))
+
     # ── scan history ─────────────────────────────────────────────────────
     def record_scan(self, started: datetime, finished: datetime, sources: list[str], live: bool,
                     scanned: int, new_listings: int, deals: int, regrade_deals: int,
-                    bids_scheduled: int, errors: list[str]) -> ScanRun:
+                    bids_scheduled: int, errors: list[str], kind: str = "watchlist",
+                    budget: float | None = None, currency: str | None = None) -> ScanRun:
         import json
 
         with self.session() as session:
             run = ScanRun(
+                kind=kind, budget=budget, currency=currency,
                 started=started, finished=finished,
                 duration_seconds=(finished - started).total_seconds(),
                 sources=",".join(sources), live=live, scanned=scanned, new_listings=new_listings,
@@ -353,6 +542,44 @@ class Store:
         with self.session() as session:
             return session.query(ScanRun).order_by(ScanRun.started.desc()).limit(limit).all()
 
+    def discovery_results(self):
+        with self.session() as session:
+            latest = session.query(ScanRun).filter_by(kind="broad").order_by(ScanRun.started.desc()).first()
+            rows = (session.query(SeenListing)
+                    .filter(SeenListing.discovery_at.isnot(None), SeenListing.dismissed.isnot(True))
+                    .order_by(SeenListing.discovery_at.desc(), SeenListing.id.desc()).all()) if latest else []
+            return [row for row in rows if _current(row)], latest
+
+    def set_saved(self, row_id: int, saved: bool):
+        """Save or unsave a listing. Saved listings survive Remove and Clear all."""
+        with self.session() as session:
+            row = session.get(SeenListing, row_id)
+            if row is None:
+                return None
+            row.saved_at = (row.saved_at or utcnow()) if saved else None
+            session.commit()
+            session.refresh(row)
+            session.expunge(row)
+            return row
+
+    def saved_listings(self):
+        with self.session() as session:
+            return (session.query(SeenListing).filter(SeenListing.saved_at.isnot(None))
+                    .order_by(SeenListing.saved_at.desc(), SeenListing.id.desc()).all())
+
+    def clear_discovery_finds(self) -> int:
+        """Dismiss all unsaved discovery finds so the next scan starts fresh. Returns count removed."""
+        with self.session() as session:
+            now = utcnow()
+            count = (session.query(SeenListing)
+                     .filter(SeenListing.discovery_at.isnot(None), SeenListing.dismissed.isnot(True),
+                             SeenListing.saved_at.is_(None))
+                     .update({SeenListing.dismissed: True, SeenListing.action: "cleared",
+                              SeenListing.action_detail: "cleared all finds", SeenListing.action_at: now},
+                             synchronize_session=False))
+            session.commit()
+            return count
+
     def summary(self) -> dict:
         """Headline numbers for the dashboard."""
         from datetime import timedelta
@@ -361,14 +588,12 @@ class Store:
 
         day_ago = utcnow() - timedelta(hours=24)
         with self.session() as session:
-            deals_q = session.query(SeenListing).filter(SeenListing.matched_target.isnot(None))
+            deals_q = self._deals_query(session)
             by_source = dict(
-                session.query(SeenListing.source, func.count(SeenListing.id))
-                .filter(SeenListing.matched_target.isnot(None)).group_by(SeenListing.source).all()
+                deals_q.with_entities(SeenListing.source, func.count(SeenListing.id)).group_by(SeenListing.source).all()
             )
             by_target = dict(
-                session.query(SeenListing.matched_target, func.count(SeenListing.id))
-                .filter(SeenListing.matched_target.isnot(None)).group_by(SeenListing.matched_target).all()
+                deals_q.with_entities(SeenListing.matched_target, func.count(SeenListing.id)).group_by(SeenListing.matched_target).all()
             )
             bid_status = dict(
                 session.query(ScheduledBid.status, func.count(ScheduledBid.id)).group_by(ScheduledBid.status).all()
@@ -390,7 +615,7 @@ class Store:
                 "bids_by_status": bid_status,
                 "scans_total": session.query(func.count(ScanRun.id)).scalar() or 0,
                 "last_scan": {
-                    "started": last_scan.started.isoformat() if last_scan and last_scan.started else None,
+                    "started": _aware(last_scan.started).isoformat() if last_scan and last_scan.started else None,
                     "duration_seconds": last_scan.duration_seconds if last_scan else None,
                     "scanned": last_scan.scanned if last_scan else 0,
                     "deals": last_scan.deals if last_scan else 0,

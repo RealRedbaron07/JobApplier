@@ -15,19 +15,21 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 import statistics
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from html import unescape
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, unquote, urlparse
 
 import requests
 
-from cardsnipe.matcher import PRICE_BUCKETS as BUCKETS, bucket_for_grade, detect_grade, parse_price
+from cardsnipe.matcher import (PRICE_BUCKETS as BUCKETS, detect_grade, identity_matches, normalize_number,
+                              parse_price, same_number, trusted_value_bucket)
 from cardsnipe.settings import SnipeSettings
-from cardsnipe.watchlist import Target
+from cardsnipe.watchlist import DEFAULT_GLOBAL_EXCLUDE, Target
 
 logger = logging.getLogger("cardsnipe.pricing")
 
@@ -35,19 +37,13 @@ UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36")
 
 SOURCES = ("tcgplayer", "pricecharting", "ebay_sold")
+VALUATION_VERSION = 2
 
 
-def normalize_number(number: str | None) -> str:
-    """'074/073' -> '74/73', '21' -> '21', '#194/203' -> '194/203'."""
-    if not number:
-        return ""
-    parts = re.findall(r"[A-Za-z]*\d+[A-Za-z]*", number)
-    cleaned = []
-    for part in parts:
-        digits = re.sub(r"\D", "", part)
-        letters = re.sub(r"\d", "", part).upper()
-        cleaned.append(f"{letters}{int(digits)}" if digits else letters)
-    return "/".join(cleaned)
+def variant_words(card_name: str) -> str:
+    """'Umbreon (Cosmos Holo)' -> 'cosmos holo'; numeric disambiguators like '(21)' are ignored."""
+    found = [m.strip() for m in re.findall(r"\(([^)]*)\)", card_name or "") if re.search(r"[A-Za-z]", m)]
+    return " ".join(found).lower()
 
 
 @dataclass
@@ -69,10 +65,21 @@ class Valuation:
     fetched_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     notes: list[str] = field(default_factory=list)
     card_url: str = ""
+    market_query: str = ""
 
     def value_usd(self, bucket: str) -> tuple[float, str] | None:
-        """Cheapest source figure for the bucket -> (usd, source)."""
-        candidates = [p for p in self.prices if p.bucket == bucket and p.price_usd and p.price_usd > 0]
+        """Cheapest *trusted* figure for the bucket -> (usd, source).
+
+        Raw is TCGPlayer's product market reference, without a verified condition filter. PriceCharting "ungraded" and
+        eBay sold-raw mix HP/MP/damaged, and Collectr's raw number is not used at all.
+        Graded buckets use PriceCharting and eBay sold. Collectr graded sales are a
+        low-trust reference and never set the value.
+        """
+        allowed = {"tcgplayer"} if bucket == "raw" else {"pricecharting", "ebay_sold"}
+        candidates = [
+            p for p in self.prices
+            if p.bucket == bucket and p.source in allowed and math.isfinite(p.price_usd) and p.price_usd > 0
+        ]
         if not candidates:
             return None
         best = min(candidates, key=lambda p: p.price_usd)
@@ -87,13 +94,14 @@ class Valuation:
 
     @property
     def has_data(self) -> bool:
-        return any(p.price_usd for p in self.prices)
+        return any(math.isfinite(p.price_usd) and p.price_usd > 0 for p in self.prices)
 
     def to_dict(self) -> dict:
         return {
+            "schema_version": VALUATION_VERSION,
             "target_name": self.target_name, "currency": self.currency, "fx": self.fx,
             "floor_usd": self.floor_usd, "fetched_at": self.fetched_at.isoformat(timespec="seconds"),
-            "notes": self.notes, "card_url": self.card_url,
+            "notes": self.notes, "card_url": self.card_url, "market_query": self.market_query,
             "prices": [p.__dict__ for p in self.prices],
             "values": {
                 b: {"value": v[0], "source": v[1], "usd": self.value_usd(b)[0]}
@@ -104,12 +112,16 @@ class Valuation:
     @classmethod
     def from_dict(cls, data: dict) -> "Valuation":
         fetched = data.get("fetched_at")
+        fetched_at = datetime.fromisoformat(fetched) if fetched else datetime.now(timezone.utc)
+        if fetched_at.tzinfo is None:
+            fetched_at = fetched_at.replace(tzinfo=timezone.utc)
         return cls(
             target_name=data["target_name"], currency=data["currency"], fx=float(data["fx"]),
             prices=[SourcePrice(**p) for p in data.get("prices", [])],
             floor_usd=data.get("floor_usd"),
-            fetched_at=datetime.fromisoformat(fetched) if fetched else datetime.now(timezone.utc),
+            fetched_at=fetched_at,
             notes=list(data.get("notes", [])), card_url=data.get("card_url", ""),
+            market_query=data.get("market_query", ""),
         )
 
 
@@ -128,11 +140,16 @@ def usd_rate(currency: str, fallback: float, session: requests.Session | None = 
         return cached[0]
     try:
         resp = (session or requests).get("https://open.er-api.com/v6/latest/USD", timeout=10)
+        resp.raise_for_status()
         rate = float(resp.json()["rates"][currency])
+        if not math.isfinite(rate) or rate <= 0:
+            raise ValueError("Invalid exchange rate")
         _fx_cache[currency] = (rate, time.time())
         return rate
     except Exception as exc:
         logger.warning("FX lookup failed (%s); using fallback %.3f", exc, fallback)
+        if not math.isfinite(fallback) or fallback <= 0:
+            raise ValueError("No valid USD exchange rate is available") from exc
         return fallback
 
 
@@ -156,37 +173,51 @@ class TcgPlayer:
             "context": {"cart": {}, "shippingCountry": "US"},
             "settings": {"useFuzzySearch": True, "didYouMean": {}}, "sort": {},
         }
-        resp = self.session.post(f"{self.SEARCH_URL}?q={quote_plus(query)}&isList=false", json=body, timeout=15)
+        url = f"{self.SEARCH_URL}?q={quote_plus(query)}&isList=false"
+        resp = self.session.post(url, json=body, timeout=15)
+        if resp.status_code >= 500:
+            time.sleep(1.0)
+            resp = self.session.post(url, json=body, timeout=15)
         resp.raise_for_status()
         results = resp.json().get("results") or []
         return (results[0].get("results") or []) if results else []
 
     @staticmethod
-    def pick(results: list[dict], number: str, name_hint: str = "") -> dict | None:
+    def pick(results: list[dict], number: str, name_hint: str = "", set_name: str = "") -> dict | None:
         want = normalize_number(number)
-        hint = (name_hint or "").lower()
+        target = Target(name="lookup", keywords=[], card_name=name_hint, set_name=set_name, number=number)
+        matches = []
         for row in results:
             have = normalize_number((row.get("customAttributes") or {}).get("number"))
-            if want and have == want and (not hint or hint.split()[0] in (row.get("productName") or "").lower()):
-                return row
-        if not want and hint:
-            for row in results:
-                if hint in (row.get("productName") or "").lower():
-                    return row
-        return None
+            if want and not same_number(have, want):
+                continue
+            product_set = row.get("setName") or ""
+            aliases = {"SM Base Set": "Sun & Moon", "SWSH01: Sword & Shield Base Set": "Sword & Shield"}
+            product_set = aliases.get(product_set, product_set)
+            if set_name and (not product_set or not all(
+                w in re.findall(r"[a-z0-9]+", product_set.lower()) for w in re.findall(r"[a-z0-9]+", set_name.lower())
+            )):
+                continue
+            if identity_matches(f"{row.get('productName') or ''} {have} {product_set}", target):
+                matches.append(row)
+        return matches[0] if len(matches) == 1 else None
 
     def lookup(self, target: Target) -> list[SourcePrice] | None:
         """Raw market price (and lowest listed as floor) for the card."""
         query = target.market_query
-        rows = self.search(query)
-        row = self.pick(rows, target.number, target.card_name or target.keywords[0])
+        hint = target.card_name or target.keywords[0]
+        row = self.pick(self.search(query), target.number, hint, target.set_name)
+        if row is None and target.card_name and target.set_name and target.number:
+            # Set names differ between sites ("Sun & Moon" vs "SM Base Set"): retry on name + number only.
+            row = self.pick(self.search(f"{target.card_name} {target.number}"), target.number, hint, target.set_name)
         if row is None:
             logger.info("tcgplayer: no match for %r (%s)", query, target.number)
             return None
         url = f"https://www.tcgplayer.com/product/{int(row['productId'])}"
         prices = []
         if row.get("marketPrice"):
-            prices.append(SourcePrice("tcgplayer", "raw", float(row["marketPrice"]), "market price", url))
+            prices.append(SourcePrice("tcgplayer", "raw", float(row["marketPrice"]),
+                                      "product market reference; condition not verified", url))
         lowest = row.get("lowestPrice")
         if lowest:
             prices.append(SourcePrice("tcgplayer", "floor", float(lowest), "lowest listed (any condition)", url))
@@ -197,9 +228,9 @@ class TcgPlayer:
 
 class PriceCharting:
     SEARCH_URL = "https://www.pricecharting.com/search-products"
-    # td ids -> grade buckets for Pokémon pages (columns: Ungraded, 7, 8, 9, 9.5, PSA 10)
+    # Ungraded mixes every raw condition, so it is reference only (raw_any), not the NM value.
     COLUMNS = {
-        "used_price": "raw", "complete_price": "7", "new_price": "8",
+        "used_price": "raw_any", "complete_price": "7", "new_price": "8",
         "graded_price": "9", "box_only_price": "9.5", "manual_only_price": "10",
     }
 
@@ -240,34 +271,38 @@ class PriceCharting:
         return rows
 
     @staticmethod
-    def choose(rows: list[dict], target: Target) -> dict | None:
+    def choose(rows: list[dict], target: Target, allow_variant: bool = False) -> dict | None:
         """Pick the result matching name words, number and set; avoid [variant] rows unless asked for."""
         name = re.sub(r"\(.*?\)", " ", target.card_name or target.search_query).lower()
         name_words = [w for w in re.findall(r"[a-z0-9]+", name) if len(w) > 1]
         digits = re.findall(r"\d+", target.number or "")
         number = str(int(digits[0])) if digits else ""
         set_words = [w for w in re.findall(r"[a-z0-9]+", (target.set_name or "").lower()) if w not in {"the", "of", "and"}]
-        wants_variant = "[" in (target.card_name or "") or any(w in name for w in ("1st edition", "shadowless"))
+        wants_variant = allow_variant or "[" in (target.card_name or "") or any(w in name for w in ("1st edition", "shadowless"))
 
         def score(row: dict) -> int:
             title, set_name = row["title"].lower(), row["set"].lower()
+            if not identity_matches(f"{row['title']} {row['set']}", target):
+                return -1
             if number and not re.search(rf"#\s*{number}\b", title):
                 return -1
-            if not all(w in title for w in name_words):
+            if not all(re.search(rf"\b{re.escape(w)}\b", title) for w in name_words):
                 return -1
             if set_words and not all(w in set_name for w in set_words):
                 return -1
             points = 10
             if "[" in title and not wants_variant:
-                points -= 5
+                return -1
             for lang in ("japanese", "korean", "chinese", "german", "french", "italian", "spanish", "portuguese"):
                 if lang in set_name and lang not in set_words:
-                    points -= 6
+                    return -1
             if "base set 2" in set_name and "2" not in set_words:
-                points -= 6
+                return -1
             return points
 
         ranked = sorted(((score(r), r) for r in rows), key=lambda x: -x[0])
+        if len(ranked) > 1 and ranked[0][0] == ranked[1][0]:
+            return None
         return ranked[0][1] if ranked and ranked[0][0] > 0 else None
 
     @classmethod
@@ -288,11 +323,23 @@ class PriceCharting:
         return unescape(m.group(1)).strip() if m else ""
 
     def lookup(self, target: Target) -> list[SourcePrice] | None:
-        query = self.query_for(target)
+        variant = variant_words(target.card_name)
+        if variant:
+            # "Umbreon (Cosmos Holo)" is a different product from the plain print on PriceCharting
+            # ("Umbreon [Cosmos Holo] #59"). Try the variant first; only accept a page that names it.
+            found = self._lookup_query(f"{self.query_for(target)} {variant}", target, require_words=variant)
+            if found:
+                return found
+        return self._lookup_query(self.query_for(target), target)
+
+    def _lookup_query(self, query: str, target: Target, require_words: str = "") -> list[SourcePrice] | None:
         html, url = self.fetch(query)
         if "search-products" in url:
             # Several candidates: pick the right printing and open its page.
-            chosen = self.choose(self.parse_results(html), target)
+            rows = self.parse_results(html)
+            if require_words:
+                rows = [r for r in rows if all(w in r["title"].lower() for w in require_words.split())]
+            chosen = self.choose(rows, target, allow_variant=bool(require_words))
             if not chosen:
                 logger.info("pricecharting: no unambiguous match for %r", query)
                 return None
@@ -300,6 +347,14 @@ class PriceCharting:
             html = self.fetch_url(url)
         elif target.number and not self.slug_matches_number(url, target.number):
             logger.info("pricecharting: landed on %s, number mismatch for %s", url, target.number)
+            return None
+        path = urlparse(url).path.split("/")
+        set_name = unquote(path[-2]).replace("-", " ") if len(path) >= 3 else ""
+        if not self.choose([{"title": self.product_name(html), "set": set_name, "url": url}], target,
+                           allow_variant=bool(require_words)):
+            logger.info("pricecharting: product identity mismatch for %r at %s", target.market_query, url)
+            return None
+        if require_words and not all(w in self.product_name(html).lower() for w in require_words.split()):
             return None
         return self.parse(html, url)
 
@@ -310,7 +365,7 @@ class PriceCharting:
         slug_numbers = re.findall(r"\d+", slug)
         want = re.findall(r"\d+", number)
         if not slug_numbers or not want:
-            return True  # nothing to compare against; trust the search
+            return False
         return int(slug_numbers[-1]) == int(want[0])
 
 
@@ -325,6 +380,7 @@ class EbaySold:
 
     def lookup(self, target: Target, limit: int = 60) -> list[SourcePrice] | None:
         from cardsnipe.ebay import EbayWeb
+        from cardsnipe.matcher import _keyword_present, _term_present, normalize
 
         url = (f"https://www.{self.domain}/sch/i.html?_nkw={quote_plus(target.search_query)}"
                f"&LH_Sold=1&LH_Complete=1&_sop=13&_ipg={limit}")
@@ -336,15 +392,30 @@ class EbaySold:
         by_bucket: dict[str, list[float]] = {}
         for row in rows:
             lines = [ln.strip() for ln in row["text"].split("\n") if ln.strip()]
-            title_line = next((ln for ln in lines if not ln.lower().startswith(("sold", "c $", "us $", "$"))), "")
-            price_line = next((ln for ln in lines if re.search(r"(C\s?\$|US\s?\$|\$)\s?\d", ln)), "")
+            title_line = row.get("title") or next((ln for ln in lines if not ln.lower().startswith(
+                ("sold", "c $", "us $", "$", "new listing", "sponsored", "opens in a new"))), "")
+            price_line = row.get("price") or next((ln for ln in lines if re.search(r"(C\s?\$|US\s?\$|\$)\s?\d", ln)), "")
             price = parse_price(price_line)
             if not price or not title_line:
                 continue
-            haystack = title_line.lower()
-            if not all(any(alt.strip() in haystack for alt in k.split("|")) for k in target.keywords):
+            if "best offer accepted" in row["text"].lower() or re.search(r"\bto\b", price_line, re.I):
                 continue
-            by_bucket.setdefault(bucket_for_grade(detect_grade(title_line)), []).append(price / self.fx)
+            if not any(re.match(r"sold\b", ln, re.I) for ln in lines):
+                continue
+            haystack = normalize(title_line)
+            if (not all(_keyword_present(k, haystack) for k in target.keywords)
+                    or not identity_matches(title_line, target)
+                    or any(_term_present(k, haystack, True) for k in [*DEFAULT_GLOBAL_EXCLUDE, *target.exclude, "lot", "bundle"])):
+                continue
+            bucket = trusted_value_bucket(detect_grade(title_line))
+            if bucket is None:
+                continue
+            if bucket == "raw":
+                bucket = "raw_any"
+            currency = EbayWeb.price_currency(price_line, self.currency)
+            if currency not in {"USD", self.currency}:
+                continue
+            by_bucket.setdefault(bucket, []).append(price if currency == "USD" else price / self.fx)
         prices = []
         for bucket, values in by_bucket.items():
             if len(values) >= 2:
@@ -371,26 +442,30 @@ class PriceService:
     def fx(self) -> float:
         return usd_rate(self.settings.ebay_currency, self.settings.usd_rate_fallback, self.session)
 
-    def valuation(self, target: Target, force: bool = False) -> Valuation | None:
+    def valuation(self, target: Target, force: bool = False, cached_only: bool = False) -> Valuation | None:
         if not target.use_market:
             return None
         ttl = timedelta(hours=self.settings.price_ttl_hours)
         cached = self._memo.get(target.name)
         if cached is None and not force:
             stored = self.store.load_valuation(target.name)
-            if stored:
+            if stored and stored.get("schema_version") == VALUATION_VERSION:
                 cached = Valuation.from_dict(stored)
+        if cached and (cached.market_query != target.market_query or cached.currency != self.settings.ebay_currency):
+            cached = None
         if cached and not force and datetime.now(timezone.utc) - cached.fetched_at < ttl:
             self._memo[target.name] = cached
             return cached
-        fresh = self.refresh(target)
-        if fresh is None and cached:
-            return cached
-        return fresh
+        if cached_only:
+            return None
+        return self.refresh(target)
 
     def refresh(self, target: Target) -> Valuation | None:
         fx = self.fx
-        val = Valuation(target_name=target.name, currency=self.settings.ebay_currency, fx=fx)
+        val = Valuation(target_name=target.name, currency=self.settings.ebay_currency, fx=fx, market_query=target.market_query)
+        cached_fx = _fx_cache.get(self.settings.ebay_currency)
+        if self.settings.ebay_currency != "USD" and (not cached_fx or time.time() - cached_fx[1] >= 12 * 3600):
+            val.notes.append("FX unavailable: conversion uses the configured estimate, not a verified live rate")
         for name, fn in (("tcgplayer", self.tcg.lookup), ("pricecharting", self.pc.lookup)):
             try:
                 prices = fn(target)

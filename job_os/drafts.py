@@ -11,7 +11,7 @@ def generate_application_answers(job: Dict[str, Any], profile: Dict[str, Any] | 
     profile = profile or load_profile()
     company = job.get("company") or "your company"
     role = job.get("title") or "this role"
-    project = job.get("suggested_project") or "JobApplier"
+    project = job.get("suggested_project") or "MalpariBot"
     education = (profile.get("education") or [{}])[0]
     institution = education.get("institution") or "my university"
     degree = education.get("degree") or "Computer Science"
@@ -31,7 +31,7 @@ def generate_application_answers(job: Dict[str, Any], profile: Dict[str, Any] | 
         "work_authorization": str(profile.get("work_authorization") or "Please confirm work authorization before using this draft."),
         "relocation": profile.get("relocation", "Please confirm relocation preferences before using this draft."),
         "new_opportunities": "I'm looking for an opportunity to apply my coursework and recent project experience in a professional team, take on meaningful technical work, and grow through feedback and mentorship.",
-        "star_example": "Situation: On the Allymon fintech project, user, loan, and investor-qualification workflows needed QA validation. Task: I needed to compare the intended behavior with what the local application actually did. Action: I set up and debugged the application, exercised the relevant database, authentication, and admin flows, and documented expected versus actual behavior. Result: I produced concrete QA findings for team review. Confirm the exact interview question and keep only details you personally completed before using this draft.",
+        "star_example": "Situation: On the Riipen Advance Ontario fintech app, the marketplace, portfolio, and wallet screens still showed mock data, and the borrower and admin workflows needed validation. Task: I needed to connect real API responses and confirm the flows worked end to end. Action: I replaced the mock data with API responses, then tested the borrower and admin workflows over about 60 hours. Result: I documented the APIs, bugs, and smoke tests in a 348-line handoff for the team. Confirm the exact interview question and keep only details you personally completed before using this draft.",
         "project_bridge": f"For this application, emphasize {project} only using the factual bullets in the tailoring plan.",
     }
 

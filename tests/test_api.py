@@ -26,6 +26,15 @@ def _create(client):
     return response.get_json()["job"]
 
 
+def test_unrelated_job_can_be_deleted(dashboard_client):
+    client, session_factory, _ = dashboard_client
+    job = _create(client)
+    assert client.delete(f"/api/jobs/{job['id']}").status_code == 200
+    assert client.get(f"/api/jobs/{job['id']}").status_code == 404
+    with session_factory() as session:
+        assert session.get(Job, job["id"]) is None
+
+
 def test_dashboard_shell_renders_supported_workflows(dashboard_client):
     client, _, _ = dashboard_client
     response = client.get("/")
@@ -35,6 +44,30 @@ def test_dashboard_shell_renders_supported_workflows(dashboard_client):
         assert label in html
     assert "Create reviewed handoff" in html
     assert "Nothing is auto-submitted" in html
+
+
+def test_dashboards_poll_live_and_job_links_open_outward(dashboard_client):
+    client, _, _ = dashboard_client
+    main = client.get("/static/js/main.js")
+    assert main.status_code == 200
+    jobs = main.get_data(as_text=True)
+    assert "JOB_POLL_MS = 20000" in jobs
+    assert "document.hidden" in jobs
+    assert "skipTracker" in jobs
+    assert "detailFormDirty" in jobs
+    assert 'target="_blank"' in jobs and 'rel="noopener noreferrer"' in jobs
+    assert "jobTitleLink" in jobs and "jobOpenLink" in jobs
+
+    snipe = client.get("/static/js/snipe.js")
+    assert snipe.status_code == 200
+    cards = snipe.get_data(as_text=True)
+    assert "SNIPE_POLL_MS = 30000" in cards
+    assert "LIVE_VIEWS = ['collection', 'overview', 'deals', 'listings']" in cards
+    assert "window.addEventListener('focus', pollSnipe)" in cards
+    assert "document.hidden" in cards
+    assert "refreshWouldWipe" in cards
+    page = client.get("/snipe")
+    assert page.status_code == 200 and b"snipe.js" in page.data
 
 
 def test_end_to_end_package_is_draft_only(dashboard_client):
@@ -321,3 +354,40 @@ def test_json_restore_rechecks_draft_claims_and_review_status(dashboard_client):
         draft = session.query(TailoredDraft).one()
         assert draft.review_status == "draft"
         assert json.loads(draft.safety_report)["passed"] is False
+
+
+def test_fill_application_requires_reviewed_package_and_never_marks_applied(dashboard_client, monkeypatch):
+    client, session_factory, _ = dashboard_client
+    calls = []
+
+    def fake_fill(url, resume_pdf, profile, answers, refill_current_page=False):
+        calls.append({"url": url, "resume": resume_pdf, "answers": answers})
+        return {"ats": "generic", "page": url, "resume_uploaded": True, "resume_file": Path(resume_pdf).name,
+                "filled": ["Email → x"], "needs_you": [], "skipped_sensitive": [], "stopped_before_submit": True,
+                "next_step": "Submit yourself."}
+
+    import dashboard.app as dashboard_app
+    monkeypatch.setattr(dashboard_app.apply_assist, "fill_application", fake_fill)
+    job = _create(client)
+    assert client.post(f"/api/jobs/{job['id']}/fill", json={"confirm_reviewed": True}).status_code == 403
+    client.put("/api/profile", json={"automation_level": 4})
+    prepared = client.post(f"/api/jobs/{job['id']}/prepare", json={}).get_json()
+    assert prepared["tailoring"]["tailored_resume"]["pages"] == 1
+    assert client.get(f"/api/jobs/{job['id']}/resume.pdf").status_code == 200
+    assert client.post(f"/api/jobs/{job['id']}/fill", json={"confirm_reviewed": True}).status_code == 409
+    assert client.patch(
+        f"/api/drafts/{prepared['draft_id']}",
+        json={"content": {"tailoring": prepared["tailoring"], "answers": prepared["answers"]}, "review_status": "reviewed"},
+    ).status_code == 200
+    assert client.post(f"/api/jobs/{job['id']}/fill", json={}).status_code == 409
+    filled = client.post(f"/api/jobs/{job['id']}/fill", json={"confirm_reviewed": True})
+    assert filled.status_code == 200
+    body = filled.get_json()
+    assert body["stopped_before_submit"] is True
+    assert calls[0]["resume"].endswith("Mustafa_Alp_ARI_Resume.pdf")
+    # The unedited cover letter still has a placeholder, so it is held back and flagged.
+    assert "cover_letter" not in calls[0]["answers"]
+    assert any("Cover letter" in item for item in body["needs_you"])
+    with session_factory() as session:
+        assert session.get(Job, job["id"]).applied is False
+        assert session.query(ApplicationRecord).count() == 0

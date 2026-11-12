@@ -4,25 +4,27 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from datetime import datetime, timezone
 from ipaddress import ip_address
 from pathlib import Path
 from urllib.parse import urlparse
 
-from flask import Flask, Response, jsonify, render_template, request
+from flask import Flask, Response, jsonify, render_template, request, send_file
 from sqlalchemy import asc, desc, or_
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from config import Config
-from database.models import ApplicationRecord, Contact, FollowUp, Job, Session, TailoredDraft
+from database.models import ApplicationRecord, Contact, FollowUp, Job, SavedLink, Session, TailoredDraft
 from job_os.analytics import summarize_jobs
 from job_os.drafts import generate_application_answers, recruiter_message
 from job_os.io import export_csv, export_json, parse_csv, parse_json_backup
 from job_os.parser import parse_iso_date, parse_job_description
 from job_os.profile import load_profile, save_profile
+from job_os import apply_assist, resume_builder
 from job_os.scoring import score_job
 from job_os.tailoring import PROFILE_PRIORITIES, create_tailoring_plan, save_latex_draft, validate_draft
 from job_os.workflow import STATUSES, can_transition, suggested_follow_up
@@ -33,6 +35,15 @@ from dashboard.snipe_views import snipe_bp  # noqa: E402 - needs ROOT on sys.pat
 app = Flask(__name__)
 app.config.update(JSON_SORT_KEYS=False, MAX_CONTENT_LENGTH=4 * 1024 * 1024)
 app.register_blueprint(snipe_bp)
+
+
+@app.url_defaults
+def static_cache_bust(endpoint, values):
+    """Version static files by modification time so browsers never run stale CSS/JS."""
+    if endpoint == "static" and "filename" in values:
+        path = os.path.join(app.static_folder, values["filename"])
+        if os.path.isfile(path):
+            values["v"] = int(os.stat(path).st_mtime)
 
 
 @app.before_request
@@ -51,6 +62,20 @@ def local_request_boundary():
             parsed = urlparse(origin)
             if parsed.scheme not in {"http", "https"} or parsed.netloc != request.host:
                 return jsonify({"error": "Cross-origin changes to local JobApplier data are blocked."}), 403
+    if request.endpoint == "boards_refresh" and not Config.CAREER_BOARD_CHECKS_ENABLED:
+        return jsonify({"error": "Career board checks are disabled."}), 403
+    external_action = request.endpoint in {
+        "snipe.snipe_valuations_refresh",
+        "snipe.snipe_collection_sync", "snipe.snipe_collection_revalue",
+    } or (request.endpoint == "snipe.snipe_scan" and request.method == "POST")
+    browser_action = request.endpoint == "snipe.snipe_facebook_login" or (
+        request.endpoint == "snipe.snipe_facebook_login_action" and request.view_args.get("action") == "finish"
+    )
+    if browser_action and not (Config.BROWSER_SCANS_ENABLED or Config.EXTERNAL_ACCESS_ENABLED):
+        return jsonify({"error": "Browser access is disabled", "local_only": True}), 403
+    if external_action and not Config.EXTERNAL_ACCESS_ENABLED:
+        return jsonify({"error": "External APIs and price-provider fetching are disabled. Use the browser-only broad scanner for listings.",
+                        "local_only": not Config.BROWSER_SCANS_ENABLED}), 403
 
 
 def _is_loopback_peer(value: str | None) -> bool:
@@ -71,6 +96,8 @@ def privacy_headers(response):
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "no-referrer")
     response.headers.setdefault("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
+    if response.mimetype == "text/html":
+        response.headers.setdefault("Cache-Control", "no-cache")
     if request.path.startswith("/api/"):
         response.headers.setdefault("Cache-Control", "no-store")
     return response
@@ -164,7 +191,7 @@ def _optional_float(value) -> float | None:
 def _claim_relevant_content(value):
     """Remove analysis metadata that describes gaps/warnings rather than candidate claims."""
     if isinstance(value, dict):
-        metadata = {"base_resume_warning", "keyword_gaps", "keyword_gap_rule", "safety_report", "risks", "missing_skills"}
+        metadata = {"base_resume_warning", "keyword_gaps", "keyword_gap_rule", "safety_report", "risks", "missing_skills", "gaps_not_claimed"}
         return {key: _claim_relevant_content(item) for key, item in value.items() if key not in metadata}
     if isinstance(value, list):
         return [_claim_relevant_content(item) for item in value]
@@ -298,7 +325,10 @@ def index():
 
 @app.get("/api/health")
 def health():
-    return jsonify({"status": "ok", "local_first": True, "auto_submit": False, "automation_level": _automation_level()})
+    return jsonify({"status": "ok", "local_first": True, "local_only": not (Config.EXTERNAL_ACCESS_ENABLED or Config.BROWSER_SCANS_ENABLED),
+                    "external_access_enabled": Config.EXTERNAL_ACCESS_ENABLED, "auto_submit": False,
+                    "browser_scans_enabled": Config.BROWSER_SCANS_ENABLED,
+                    "automation_level": _automation_level()})
 
 
 @app.route("/api/profile", methods=["GET", "PUT"])
@@ -314,6 +344,109 @@ def profile_settings():
         profile = save_profile(payload)
         return jsonify({"message": "Profile saved locally", "profile": profile})
     return jsonify(load_profile())
+
+
+@app.get("/api/boards")
+def boards_list():
+    from job_os.boards import default_path, load_boards
+
+    return jsonify({"boards": load_boards(default_path())})
+
+
+@app.post("/api/boards")
+def boards_add():
+    from job_os.boards import BoardError, add_board, default_path
+
+    payload = request.get_json(silent=True) or {}
+    try:
+        board = add_board(default_path(), str(payload.get("url") or ""), str(payload.get("name") or ""))
+    except BoardError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"message": f"Added {board.name} ({board.kind})", "board": {"name": board.name, "url": board.url, "kind": board.kind}})
+
+
+@app.delete("/api/boards")
+def boards_remove():
+    from job_os.boards import default_path, remove_board
+
+    url = (request.args.get("url") or (request.get_json(silent=True) or {}).get("url") or "").strip()
+    if not url:
+        return jsonify({"error": "url is required"}), 400
+    if not remove_board(default_path(), url):
+        return jsonify({"error": "No board with that URL"}), 404
+    return jsonify({"message": "Board removed"})
+
+
+@app.post("/api/boards/refresh")
+def boards_refresh():
+    """Pull the newest relevant postings from saved company boards. Never submits an application."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    import requests
+
+    from job_os.boards import (MAX_AGE_DAYS, board_from_dict, default_path, fetch_postings, is_recent,
+                               is_relevant, load_boards, workday_detail)
+
+    payload = request.get_json(silent=True) or {}
+    try:
+        max_age = max(1, min(60, int(payload.get("max_age_days") or MAX_AGE_DAYS)))
+    except (TypeError, ValueError):
+        return jsonify({"error": "max_age_days must be a number of days."}), 400
+    boards = [board_from_dict(raw) for raw in load_boards(default_path())]
+    http = requests.Session()
+    http.headers["User-Agent"] = "JobApplier/1.0 (local career-board reader)"
+
+    def pull(board):
+        try:
+            return board, fetch_postings(board, http), None
+        except Exception as exc:  # one bad board must not stop the others
+            return board, [], f"{board.name}: {str(exc).splitlines()[0][:160]}"
+
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        results = list(pool.map(pull, boards))
+    errors = [error for _, _, error in results if error]
+    candidates = []
+    for board, postings, _ in results:
+        for post in postings:
+            if post.job_url and is_relevant(post.title) and is_recent(post.posted_date, max_age):
+                candidates.append((board, post))
+    candidates.sort(key=lambda item: item[1].posted_date or "", reverse=True)
+    unique = {}
+    for board, post in candidates:
+        unique.setdefault(post.job_url, (board, post))
+    candidates = list(unique.values())
+
+    added, skipped = [], 0
+    session = Session()
+    try:
+        profile = load_profile()
+        known = {url for (url,) in session.query(Job.job_url).filter(Job.job_url.in_([p.job_url for _, p in candidates])).all()}
+        fresh = [(board, post) for board, post in candidates if post.job_url not in known][:60]
+        skipped = len(candidates) - len(fresh)
+        for board, post in fresh:
+            if board.kind == "workday" and post.platform == "workday":
+                try:
+                    workday_detail(board, post, http)
+                except Exception:
+                    pass  # keep the list entry; the description can be pasted later
+            if not is_recent(post.posted_date, max_age):
+                continue
+            parsed = parse_job_description(post.description, {
+                "title": post.title, "company": post.company, "location": post.location,
+                "job_url": post.job_url, "source": "company_site", "platform": post.platform,
+                "posting_date": post.posted_date or "",
+            })
+            session.add(_new_job(parsed, profile))
+            added.append(f"{post.company}: {post.title}" + (f" ({post.posted_date})" if post.posted_date else ""))
+        session.commit()
+    finally:
+        session.close()
+    return jsonify({
+        "added": len(added), "skipped": skipped, "errors": errors, "titles": added[:12], "boards": len(boards),
+        "max_age_days": max_age,
+        "message": f"Added {len(added)} new postings from the last {max_age} days across {len(boards)} boards"
+                   + (f" · {skipped} already tracked" if skipped else "") + (f" · {len(errors)} board errors" if errors else ""),
+    })
 
 
 @app.post("/api/jobs/parse")
@@ -406,9 +539,13 @@ def job_detail(job_id: int):
         if not job:
             return jsonify({"error": "Job not found"}), 404
         if request.method == "DELETE":
-            job.application_status = "archived"
+            session.query(ApplicationRecord).filter_by(job_id=job.id).delete()
+            session.query(TailoredDraft).filter_by(job_id=job.id).delete()
+            session.query(FollowUp).filter_by(job_id=job.id).delete()
+            session.query(SavedLink).filter_by(job_id=job.id).delete()
+            session.delete(job)
             session.commit()
-            return jsonify({"message": "Job archived"})
+            return jsonify({"message": "Job removed"})
         if request.method == "PATCH":
             payload = request.get_json(silent=True) or {}
             if not isinstance(payload, dict):
@@ -519,10 +656,11 @@ def tailor_job(job_id: int):
         plan = create_tailoring_plan(job_data, scoring, profile, selected)
         path = save_latex_draft(job.id, plan.pop("latex"))
         plan["latex_path"] = path
+        plan["tailored_resume"] = _build_resume_pdf(job, job_data, profile)
         draft = TailoredDraft(job_id=job.id, draft_type="resume_tailoring", resume_profile=plan["resume_profile"], content=json.dumps(plan), file_path=path, review_status="draft", safety_report=json.dumps(plan["safety_report"]))
         session.add(draft)
         job.resume_profile = plan["resume_profile"]
-        job.tailored_resume_path = path
+        job.tailored_resume_path = plan["tailored_resume"].get("pdf_path") or path
         if can_transition(job.application_status, "resume_tailored"):
             job.application_status = "resume_tailored"
         session.commit()
@@ -568,6 +706,8 @@ def prepare_package(job_id: int):
         scoring = _json_load(job.match_explanation, score_job(job_data, profile))
         plan = create_tailoring_plan(job_data, scoring, profile, job.resume_profile)
         latex_path = save_latex_draft(job.id, plan.pop("latex"))
+        plan["latex_path"] = latex_path
+        plan["tailored_resume"] = _build_resume_pdf(job, job_data, profile)
         answers = generate_application_answers(job_data, profile)
         answer_safety = validate_draft("\n".join(answers.values()), profile)
         combined_safety = {
@@ -577,11 +717,11 @@ def prepare_package(job_id: int):
         }
         package_draft = TailoredDraft(job_id=job.id, draft_type="application_package", resume_profile=plan["resume_profile"], content=json.dumps({"tailoring": plan, "answers": answers}), file_path=latex_path, review_status="draft", safety_report=json.dumps(combined_safety))
         session.add(package_draft)
-        job.tailored_resume_path = latex_path
+        job.tailored_resume_path = plan["tailored_resume"].get("pdf_path") or latex_path
         job.application_status = "resume_tailored" if can_transition(job.application_status, "resume_tailored") else job.application_status
-        job.next_action = "Review the LaTeX draft and answers, complete the checklist, then submit manually on the official portal."
+        job.next_action = "Review the tailored resume PDF and answers, save the package as reviewed, then use Fill application and submit yourself."
         session.commit()
-        return jsonify({"message": "Application package prepared; nothing was submitted", "draft_id": package_draft.id, "latex_path": latex_path, "tailoring": plan, "answers": answers, "safety_report": combined_safety, "checklist": ["Verify company and role details", "Review every resume claim", "Resolve safety warnings", "Confirm work authorization answer", "Check one-page PDF output", "Submit manually on the official portal", "Return and mark the job applied"]})
+        return jsonify({"message": "Application package prepared; nothing was submitted", "draft_id": package_draft.id, "latex_path": latex_path, "tailoring": plan, "answers": answers, "safety_report": combined_safety, "checklist": ["Verify company and role details", "Open the tailored resume PDF and check it", "Edit the cover letter: replace the placeholder sentence with a real fact about the company", "Resolve safety warnings", "Save the package as reviewed", "Fill application, check every field, submit yourself", "Return and mark the job applied"]})
     finally:
         session.close()
 
@@ -600,17 +740,9 @@ def application_handoff(job_id: int):
         job = session.get(Job, job_id)
         if not job:
             return jsonify({"error": "Job not found"}), 404
-        application_url = _external_url(job.job_url, "Application URL")
-        if not application_url:
-            return jsonify({"error": "Add the employer's official application URL before creating a handoff."}), 409
-        package = session.query(TailoredDraft).filter_by(job_id=job.id, draft_type="application_package").order_by(desc(TailoredDraft.created_date)).first()
-        if not package:
-            return jsonify({"error": "Prepare and review an application package first."}), 409
-        if package.review_status != "reviewed":
-            return jsonify({"error": "Save the latest application package as reviewed before creating a handoff."}), 409
-        safety_report = _json_load(package.safety_report, {})
-        if not safety_report.get("passed"):
-            return jsonify({"error": "Resolve the package safety warnings before handoff.", "safety_report": safety_report}), 409
+        application_url, package, blocked = _reviewed_package(session, job)
+        if blocked:
+            return blocked
         job.next_action = "Open the reviewed handoff link, complete every portal field yourself, submit manually, then return and mark applied."
         session.commit()
         return jsonify({
@@ -624,6 +756,99 @@ def application_handoff(job_id: int):
                 "Return to JobApplier and explicitly mark applied",
             ],
         })
+    finally:
+        session.close()
+
+
+def _reviewed_package(session, job: Job):
+    """The latest application package, only if it is reviewed and passed the claim check."""
+    application_url = _external_url(job.job_url, "Application URL")
+    if not application_url:
+        return None, None, (jsonify({"error": "Add the employer's official application URL first."}), 409)
+    package = session.query(TailoredDraft).filter_by(job_id=job.id, draft_type="application_package").order_by(desc(TailoredDraft.created_date)).first()
+    if not package:
+        return None, None, (jsonify({"error": "Prepare and review an application package first."}), 409)
+    if package.review_status != "reviewed":
+        return None, None, (jsonify({"error": "Save the latest application package as reviewed first."}), 409)
+    safety_report = _json_load(package.safety_report, {})
+    if not safety_report.get("passed"):
+        return None, None, (jsonify({"error": "Resolve the package safety warnings first.", "safety_report": safety_report}), 409)
+    return application_url, package, None
+
+
+def _build_resume_pdf(job: Job, job_data: dict, profile: dict) -> dict:
+    """Render the per-job resume PDF; a missing Chrome is reported, not fatal."""
+    try:
+        built = resume_builder.build_tailored_resume(job.id, job_data, profile)
+    except Exception as exc:  # noqa: BLE001 - Chrome/driver problems surface in the UI
+        return {"error": f"Could not render the tailored resume PDF: {exc}"}
+    return {"pdf_path": built["pdf_path"], "pages": built["pages"], "report": built["report"],
+            "download_url": f"/api/jobs/{job.id}/resume.pdf"}
+
+
+def _job_resume_pdf(job: Job) -> Path | None:
+    root = Path(Config.DRAFTS_DIR).resolve()
+    candidate = Path(job.tailored_resume_path or "").resolve()
+    if candidate.suffix.lower() == ".pdf" and candidate.is_file() and root in candidate.parents:
+        return candidate
+    return None
+
+
+# Answer drafts that still carry an instruction to the user are not pasted into forms.
+_PLACEHOLDER = ("Before using this", "before using this", "Confirm the exact", "Please confirm")
+
+
+@app.get("/api/jobs/<int:job_id>/resume.pdf")
+def tailored_resume_pdf(job_id: int):
+    session = Session()
+    try:
+        job = session.get(Job, job_id)
+        path = _job_resume_pdf(job) if job else None
+        if not path:
+            return jsonify({"error": "No tailored resume PDF yet. Tailor or prepare the package first."}), 404
+        return send_file(path, mimetype="application/pdf", download_name=path.name)
+    finally:
+        session.close()
+
+
+@app.post("/api/jobs/<int:job_id>/fill")
+def fill_application(job_id: int):
+    """Level 4: fill the official form in a visible Chrome window and stop before Submit."""
+    blocked = _level_error(4)
+    if blocked:
+        return blocked
+    payload = request.get_json(silent=True) or {}
+    if payload.get("confirm_reviewed") is not True:
+        return jsonify({"error": "Confirm that you reviewed the prepared package before filling the application."}), 409
+    session = Session()
+    try:
+        job = session.get(Job, job_id)
+        if not job:
+            return jsonify({"error": "Job not found"}), 404
+        application_url, package, blocked = _reviewed_package(session, job)
+        if blocked:
+            return blocked
+        profile = load_profile()
+        resume_pdf = _job_resume_pdf(job)
+        if not resume_pdf:
+            built = _build_resume_pdf(job, _job_dict(job, True), profile)
+            if built.get("error"):
+                return jsonify({"error": built["error"]}), 502
+            job.tailored_resume_path = built["pdf_path"]
+            resume_pdf = Path(built["pdf_path"])
+        content = _json_load(package.content, {})
+        answers = {key: value for key, value in (content.get("answers") or {}).items()
+                   if isinstance(value, str) and not any(marker in value for marker in _PLACEHOLDER)}
+        try:
+            report = apply_assist.fill_application(application_url, str(resume_pdf), profile, answers,
+                                                   refill_current_page=bool(payload.get("refill")))
+        except Exception as exc:  # noqa: BLE001 - browser failures are shown to the user
+            return jsonify({"error": f"Could not fill the application: {exc}"}), 502
+        if (content.get("answers") or {}).get("cover_letter") and "cover_letter" not in answers:
+            report["needs_you"].append("Cover letter: the draft still has a placeholder, so it was not pasted. Edit it in the package first.")
+        job.next_action = "Finish the orange fields in the JobApplier Chrome window, press Submit yourself, then mark the job applied."
+        session.commit()
+        return jsonify({"message": "Application filled up to the Submit step; nothing was submitted", **report})
     finally:
         session.close()
 
