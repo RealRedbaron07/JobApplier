@@ -13,7 +13,8 @@ EXCLUDE = re.compile(r"\b(?:sealed|booster|etb|box|pack|lot|bundle|jumbo|oversiz
 OTHER_SLAB = re.compile(r"\b(?:ags|pca|gma|hga|mnt|ace)\s*-?\s*(?:gem[- ]?mt|gem\s+mint|mint\+?|graded|grade)?\s*-?\s*"
                         r"(?:10|9\.5|9|8\.5|8|7)\b|\bgem[- ]?mt\b|\bmint\s*\+", re.I)
 # Japanese set codes and rarities (SV2a, s8b, SM12a, AR / SAR / CHR); English uses IR / SIR.
-JAPANESE = re.compile(r"\b(?:japan(?:ese)?|jpn|jp|sv\d{1,2}[a-z]|s\d{1,2}[a-z]|sm\d{1,2}[a-z+]|s-p|sv-p|sar|chr|csr)\b", re.I)
+JAPANESE = re.compile(r"\b(?:japan(?:ese)?|jpn|jp|sv\d{1,2}[a-z]|s\d{1,2}[a-z]|sm\d{1,2}[a-z+]|m\d{1,2}[a-z]|s-p|sv-p|sar|chr|csr|ssr|"
+                      r"art rare|shiny treasure|blue shock|pokemiku|hatsune miku)\b", re.I)
 # One listing selling several slabs or grades ("PSA 7 & 8 & 9", "Psa7. &8. &9", "PSA 7-9").
 MULTI_GRADE = re.compile(r"\b(?:psa|bgs|cgc|tag|sgc)\s*-?\s*\d{1,2}(?:\.5)?\s*[.,]?\s*(?:&|and|or|/|-|,)\s*(?:psa|bgs|cgc)?\s*"
                          r"\d{1,2}(?:\.5)?\b(?!\s*/)", re.I)

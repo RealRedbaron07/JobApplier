@@ -438,7 +438,24 @@ def test_search_plan_targets_priceable_cards_not_sealed_or_bulk():
 def test_rare_cards_are_price_checked_before_bulk_commons():
     titles = ["Baltoy 144/264 Common Fusion Strike NM", "Charizard GX 9/68 Holo Hidden Fates", "Togekiss 085/197 Rare"]
     prices = {titles[0]: 15, titles[1]: 17, titles[2]: 19}
-    assert discovery.pick_candidates(titles, str, prices.get) == [titles[1], titles[2], titles[0]]
+    # Modern commons are skipped; vintage commons are still worth a look.
+    assert discovery.pick_candidates(titles, str, prices.get) == [titles[1], titles[2]]
+    assert discovery.pick_candidates(["Bulbasaur 44/102 Common Base Set"], str) == ["Bulbasaur 44/102 Common Base Set"]
+
+
+def test_marketplace_listings_are_priced_before_ebay():
+    from types import SimpleNamespace
+    ebay = SimpleNamespace(title="Charizard GX 9/68 Holo Hidden Fates", source="ebay", total_price=90)
+    local = SimpleNamespace(title="Gengar 14/132 Gym Challenge Holo", source="facebook", total_price=60)
+    assert discovery.pick_candidates([ebay, local], lambda i: i.title, lambda i: i.total_price) == [local, ebay]
+
+
+def test_other_games_sealed_and_supplies_are_not_candidates():
+    for title in ("Fallout mtg mysterious stranger foil card", "One Piece TCG – Lilith OP13-113 Alternate Art",
+                  "Pokemon 30th Ultra Premium Collection (Day)", "Pokémon 30th UPC Pair", "Mario Lemieux 1985-86 O-Pee-Chee Rookie",
+                  "EVORETRO Semi-Rigid Card Holders", "1999 Topps Pokémon Mewtwo Strikes Back #8"):
+        assert not discovery.is_discovery_candidate(listing("facebook", title=title, price=20)), title
+    assert discovery.is_discovery_candidate(listing("facebook", title="Sabrina's Gengar 14/132 Gym Challenge Holo", price=123))
 
 
 def test_price_checks_take_auctions_about_to_end_first_and_skip_later_ones():
@@ -549,3 +566,20 @@ def test_titles_without_a_number_need_one_card_matching_name_and_set():
     assert bargains.pick_product([gyarados], "XY Breakpoint Gyarados EX #99") is None
     assert bargains.pick_product([magneton], "Magneton Holo card") is None  # no set named
     assert bargains.pick_product([magneton, {**magneton, "number": "#26/102"}], "Base Set Magneton") is None
+
+
+def test_ebay_server_error_is_retried_later_in_the_same_scan(browser_scan, monkeypatch):
+    settings, store, _ = browser_scan
+    attempts = []
+
+    def search(self, url, *args):
+        attempts.append(url)
+        if "psa+9" in url and attempts.count(url) == 1:
+            raise RuntimeError("eBay server error persisted after one retry. This search was not completed.")
+        return [listing(item=str(len(attempts)))]
+
+    monkeypatch.setattr(discovery.EbayWeb, "search_page", search)
+    report = discovery.DiscoveryScanner(settings, store).scan("ebay")
+    psa9 = [index for index, url in enumerate(attempts) if "psa+9" in url]
+    assert len(psa9) == 2 and psa9[1] == 3  # retried after the next two searches
+    assert report["errors"] == []

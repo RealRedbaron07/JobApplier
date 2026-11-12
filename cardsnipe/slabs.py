@@ -14,11 +14,14 @@ import re
 
 from cardsnipe.bargains import identifiable, JAPANESE, MULTI_GRADE, NUMBER, OTHER_SLAB, VARIANT
 from cardsnipe.deals import assess
-from cardsnipe.matcher import GRADE_RE, detect_clean_hints, detect_condition_issue, detect_grade, detect_tag_score
+from cardsnipe.matcher import GRADE_RE, UNGRADED_RE, detect_clean_hints, detect_condition_issue, detect_grade, detect_tag_score
 
-# Grade ranges worth checking per grading company. 10s are excluded: they are
-# priced as 10s, never below raw.
-GRADE_RANGES = {"PSA": (7.0, 9.0), "BGS": (8.0, 9.5), "CGC": (7.0, 9.5), "TAG": (7.0, 9.5), "SGC": (7.0, 9.5)}
+# Grade ranges worth checking per grading company. Mid grades get a crack check
+# against raw; 10s are judged only against recent sales of that company's 10.
+GRADE_RANGES = {"PSA": (7.0, 10.0), "BGS": (8.0, 10.0), "CGC": (7.0, 10.0), "TAG": (7.0, 10.0), "SGC": (7.0, 10.0)}
+# 10s with their own price rows (BGS Black Label, CGC Pristine) are left out: a plain 10 price would be wrong.
+SPECIAL_TEN = re.compile(r"\b(?:black\s*label|pristine)\b", re.I)
+GEM_WORDS = re.compile(r"\bgem[- ]?(?:mt|mint)\b", re.I)
 
 LANGUAGE_OR_PRODUCT = re.compile(
     r"\b(?:sealed|booster|etb|box|pack|lot|bundle|jumbo|oversized|proxy|fake|metal|reprint|custom|"
@@ -41,7 +44,14 @@ def slab_grade(title: str):
 
 def slab_eligible(title: str) -> bool:
     title = title or ""
-    return (slab_grade(title) is not None and identifiable(raw_title(title))
+    grade = slab_grade(title)
+    if UNGRADED_RE.search(title):  # "PSA 10 ready", "not PSA": a raw card, not a slab
+        return False
+    if grade and grade[1] >= 10:
+        if SPECIAL_TEN.search(title):
+            return False
+        title = GEM_WORDS.sub(" ", title)  # "PSA 10 GEM MT" is the normal label of a 10, not another grader
+    return (grade is not None and identifiable(raw_title(title))
             and not LANGUAGE_OR_PRODUCT.search(title) and not JAPANESE.search(title)
             and not MULTI_GRADE.search(title) and not OTHER_SLAB.search(title)
             and not VARIANT.search(title) and not detect_condition_issue(title))
@@ -50,6 +60,7 @@ def slab_eligible(title: str) -> bool:
 def raw_title(title: str) -> str:
     """The seller title with grading words removed, so raw-card matching can run on it."""
     text = GRADE_RE.sub(" ", title or "")
+    text = GEM_WORDS.sub(" ", text)
     text = SLAB_WORDS.sub(" ", text)
     text = COMPANY_WORDS.sub(" ", text)
     text = re.sub(r"\(\s*\d{3,4}\s*\)|\b\d{3,4}\s*/\s*1000\b", " ", text)  # TAG point scores

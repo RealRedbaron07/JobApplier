@@ -114,17 +114,26 @@ def assess(*, title: str, source: str, listing_type: str, price: float | None, s
         company, grade = slab
         damage, clean, nm_upside = [], [], None
         cracked = round(value * crack_multiplier(grade, title), 2)
-        graded = graded_value if graded_value and company in GRADED_PRICE_COMPANIES else None
+        gem = grade >= 10
+        # A 10's price row belongs to its own company, so any grader's 10 can be judged against it.
+        graded = graded_value if graded_value and (gem or company in GRADED_PRICE_COMPANIES) else None
         graded_pct = cost / graded * 100 if graded else None
         if graded and graded_pct <= GOOD_PCT and graded - cost >= MIN_PROFIT:
             # Under the price this grade sells for: a deal as a slab, no cracking needed.
             lane, resale, basis, pct = "slab", graded, "graded", graded_pct
             tier = "strong" if pct <= STRONG_PCT else "good"
             limit = max_buy(resale, source, shipping)
+        elif gem and graded:
+            # Over the 10's own price: show how far over, measured against that price, not raw.
+            resale, basis, lane, pct, tier = graded, "graded", None, graded_pct, None
+            limit = max_buy(resale, source, shipping)
         else:
             resale, basis, lane = cracked, "slab", None
             # Cracking only pays when the raw card is worth more than the slab sells for.
-            if (cost <= resale * CRACK_PCT / 100 and resale - cost >= MIN_PROFIT
+            if gem:
+                lane = None  # a 10 is never worth cracking; without a 10 price it gets no verdict
+                flags.append(f"no recent {company} 10 price found; compared with the raw card only")
+            elif (cost <= resale * CRACK_PCT / 100 and resale - cost >= MIN_PROFIT
                     and not (graded and graded >= resale)):
                 lane = "crack"
             elif (REGRADE_UPSIDE.get(company) is not None and grade >= REGRADE_UPSIDE[company]
@@ -135,7 +144,7 @@ def assess(*, title: str, source: str, listing_type: str, price: float | None, s
             if resale < value:
                 flags.append(f"cracked {company} {grade:g} valued at {resale / value:.0%} of raw NM")
             limit = max_buy(resale, source, shipping, CRACK_PCT)
-        if graded_value and company not in GRADED_PRICE_COMPANIES:
+        if graded_value and not gem and company not in GRADED_PRICE_COMPANIES:
             flags.append(f"PriceCharting grade {grade:g} price (mostly PSA): {graded_value:,.2f}")
     else:
         resale, basis = condition_value(value, claim, checked_condition_value)

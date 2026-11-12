@@ -25,9 +25,22 @@ SALES_DAYS = 90
 MIN_SALES = 3
 # PriceCharting grade rows that a slab grade maps onto. Its "Grade N" prices mix graders but are mostly PSA.
 GRADE_LABELS = {7.0: "Grade 7", 8.0: "Grade 8", 9.0: "Grade 9", 9.5: "Grade 9.5"}
-# Sold-listing tab on the product page for each grade row.
+# Sold-listing tab on the product page for each grade row. The 10 rows are per grading company.
 GRADE_SALES_CLASS = {"Grade 7": "completed-auctions-cib", "Grade 8": "completed-auctions-new",
-                     "Grade 9": "completed-auctions-graded", "Grade 9.5": "completed-auctions-box-only"}
+                     "Grade 9": "completed-auctions-graded", "Grade 9.5": "completed-auctions-box-only",
+                     "PSA 10": "completed-auctions-manual-only", "CGC 10": "completed-auctions-grade-seventeen",
+                     "BGS 10": "completed-auctions-loose-and-box", "SGC 10": "completed-auctions-grade-eighteen",
+                     "TAG 10": "completed-auctions-grade-twenty-one"}
+
+
+def grade_label(grade: float | None, company: str = "") -> str | None:
+    """PriceCharting's price-guide row for a grade: "Grade 9", or "PSA 10" for a company's 10."""
+    if grade is None:
+        return None
+    if grade >= 10:
+        label = f"{(company or '').upper()} 10"
+        return label if label in GRADE_SALES_CLASS else None
+    return GRADE_LABELS.get(grade)
 _GRADERS = ("psa", "bgs", "cgc", "sgc", "tag", "ace", "ags", "beckett")
 # Bracketed PriceCharting variants that are never the plain copy ("[Reverse Holo]", "[1st Edition]", artist decks).
 _PLAIN_BRACKETS = {"", "holo"}
@@ -192,7 +205,7 @@ def pricecharting_lookup(browser, product, card_number, grade: float | None = No
         return None
     guide = parse_guide(page.get("guide"))
     median, count = recent_sales(page.get("sales"))
-    label = GRADE_LABELS.get(grade) if grade is not None else None
+    label = grade_label(grade, company)
     graded = guide.get(label) if label else None
     grade_median, grade_count = graded_sales((page.get("gradeSales") or {}).get(label), company) if label else (None, 0)
     if grade_median:

@@ -141,3 +141,27 @@ def test_deal_score_rewards_discount_profit_and_checked_values():
     # A current bid is not the final price, so an auction's discount is capped.
     assert deal_score(45, 200, auction=True, checked=True) < deal_score(45, 200, checked=True)
     assert deal_score(60, 50, basis="NM", damaged=True) == deal_score(60, 50, basis="NM") - 20
+
+
+def test_gem_ten_is_judged_against_its_own_grade_price():
+    from cardsnipe.deals import assess
+    base = dict(title="PSA 10 Rayquaza V 194/203", source="facebook", listing_type="bin", shipping=0,
+                value=350.0, slab=("PSA", 10.0))
+    deal = assess(**base, price=600, total_price=600, graded_value=950.0)
+    assert deal["lane"] == "slab" and deal["tier"] == "strong" and deal["basis"] == "graded"
+    over = assess(**base, price=1000, total_price=1000, graded_value=950.0)
+    assert over["tier"] is None and over["basis"] == "graded" and round(over["pct_of_value"]) == 105
+    # Without a 10 price there is no verdict, and it is never a crack.
+    no_price = assess(**base, price=200, total_price=200)
+    assert no_price["lane"] is None and no_price["tier"] is None
+    # CGC's 10 row is CGC's own, so it counts too (mid-grade rows are mostly PSA and do not).
+    cgc = assess(**{**base, "title": "CGC 10 Rayquaza V 194/203", "slab": ("CGC", 10.0)}, price=300, total_price=300,
+                 graded_value=540.0)
+    assert cgc["lane"] == "slab"
+
+
+def test_pricecharting_labels_tens_per_company():
+    from cardsnipe.pricecharting import grade_label
+    assert grade_label(9.0, "PSA") == "Grade 9"
+    assert grade_label(10.0, "PSA") == "PSA 10" and grade_label(10.0, "cgc") == "CGC 10"
+    assert grade_label(10.0, "ACE") is None and grade_label(None) is None

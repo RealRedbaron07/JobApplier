@@ -122,23 +122,34 @@ VALUABLE = re.compile(r"\b(?:holo|foil|ex|gx|v|vmax|vstar|break|prime|lv\.?\s?x|
                       r"illustration rare|special illustration|sir|ir|ultra rare|hyper rare|amazing rare|"
                       r"wotc|vintage|neo|base set|jungle|fossil|team rocket|gym)\b", re.I)
 LOW_RARITY = re.compile(r"\b(?:common|uncommon|energy)\b", re.I)
+# Old sets where a common or uncommon can still be worth real money.
+VINTAGE = re.compile(r"\b(?:wotc|vintage|base set|jungle|fossil|team rocket|gym (?:heroes|challenge)|neo|"
+                     r"skyridge|aquapolis|expedition|e-?series|19\d\d|200[0-3])\b", re.I)
 
 
-def check_priority(title, price=None):
-    """Lower sorts first: rare-looking cards before plain ones, pricier listings first within each."""
+def is_bulk_rarity(title):
+    """A modern common/uncommon: worth cents, so it can never clear the $5 profit floor. Not worth a check."""
     title = title or ""
-    tier = 2 if LOW_RARITY.search(title) and not VALUABLE.search(title) else 0 if VALUABLE.search(title) else 1
-    return tier, -(price or 0)
+    return bool(LOW_RARITY.search(title)) and not VINTAGE.search(title)
+
+
+def check_priority(title, price=None, source=""):
+    """Lower sorts first: Marketplace before eBay (local sellers underprice; eBay buy-now sellers
+    rarely do), then rare-looking cards before plain ones, pricier listings first within each."""
+    title = title or ""
+    tier = 0 if VALUABLE.search(title) else 1
+    return (0 if source == "facebook" else 1), tier, -(price or 0)
 
 
 def pick_candidates(items, title_of, price_of=None):
     """Up to PRICE_CHECKS_PER_RUN raw singles plus SLAB_CHECKS_PER_RUN slabs, most promising first.
 
-    Plain commons and uncommons are checked last: a $0.20 card listed at $15 shipped used to use up
-    the whole budget before any holo or slab was priced.
+    Modern commons and uncommons are skipped: a $0.20 card listed at $15 shipped used to use up
+    the whole budget before any holo or slab was priced. Marketplace listings go first.
     """
+    items = [item for item in items if not is_bulk_rarity(title_of(item))]
     if price_of is not None:
-        items = sorted(items, key=lambda item: check_priority(title_of(item), price_of(item)))
+        items = sorted(items, key=lambda item: check_priority(title_of(item), price_of(item), getattr(item, "source", "")))
     raw = [item for item in items if eligible(title_of(item))][:PRICE_CHECKS_PER_RUN]
     slabs = [item for item in items if slab_eligible(title_of(item))][:SLAB_CHECKS_PER_RUN]
     picked = []
@@ -240,7 +251,18 @@ def is_lot_listing(title: str) -> bool:
     return bool(LOT_RE.search(title))
 
 
+# Other card games, sports cards, sealed product and supplies show up in Pokémon searches.
+NOT_A_SINGLE = re.compile(
+    r"\b(?:mtg|magic the gathering|fallout|mythic|surge foil|one piece|optcg|op\d{2}(?:-\d{3})?|eb\d{2}(?:-\d{3})?|"
+    r"st\d{2}-\d{3}|shanks|riftbound|lorcana|"
+    r"yu-?gi-?oh|digimon|dragon ball|topps|o-pee-chee|upper deck|panini|nhl|nba|nfl|mlb|rookie|"
+    r"upc|ultra premium collection|elite trainer|etb|booster|blister|tins?|figures?|plush|toy|"
+    r"card holders?|top ?loaders?|sleeves?|binder|case|display)\b", re.I)
+
+
 def is_discovery_candidate(listing) -> bool:
+    if NOT_A_SINGLE.search(listing.title or ""):
+        return False
     # Marketplace $0/$1 offers commonly advertise variable per-card prices.
     if is_lot_listing(listing.title):
         return False
@@ -342,8 +364,12 @@ class DiscoveryScanner:
             except Exception as exc:
                 errors.append(f"price check: {str(exc).splitlines()[0]}")
 
+        retried = set()
         try:
-            for index, (name, mode, query) in enumerate(plan):
+            index = -1
+            while index + 1 < len(plan):
+                index += 1
+                name, mode, query = plan[index]
                 if name in unavailable:
                     continue
                 if self.stop.is_set() or time.monotonic() >= deadline:
@@ -376,7 +402,15 @@ class DiscoveryScanner:
                         if route not in entry["routes"]:
                             entry["routes"].append(route)
                 except Exception as exc:
-                    errors.append(f"{name} {query!r} ({mode}): {str(exc).splitlines()[0]}")
+                    message = str(exc).splitlines()[0]
+                    if name == "ebay" and message.startswith("eBay server error") and (mode, query) not in retried:
+                        # eBay often refuses the first searches of a cold browser and serves the same
+                        # search fine a few minutes later: run it again after the next two searches.
+                        retried.add((mode, query))
+                        plan.insert(min(len(plan), index + 3), (name, mode, query))
+                        self.progress(message=f"eBay refused {query!r}; it will be retried later in this scan")
+                        continue
+                    errors.append(f"{name} {query!r} ({mode}): {message}")
                     failures[name] = failures.get(name, 0) + 1
                     # Stop account/verification blocks immediately; tolerate one transient query failure.
                     if isinstance(exc, SourceUnavailable) or failures[name] >= 2:
@@ -460,7 +494,7 @@ def price_saved_singles(settings, store, stop=None, progress=None, only=None):
                   and row.currency == "CAD"
                   and row.total_price is not None and row.price > 1 and priceable(row.title)]
     # Never-checked first, then priced finds that still lack the sales cross-check (deals first).
-    candidates.sort(key=lambda row: (row.price_checked_at is not None, check_priority(row.title, row.total_price),
+    candidates.sort(key=lambda row: (row.price_checked_at is not None, check_priority(row.title, row.total_price, row.source),
                                      row.source != "facebook"))
     candidates = order_checks(candidates, lambda row: row.title)
     if not candidates:
