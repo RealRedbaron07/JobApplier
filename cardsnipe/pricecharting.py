@@ -48,7 +48,16 @@ _PLAIN_BRACKETS = {"", "holo"}
 _SET_NOISE = {"pokemon", "and", "the", "tcg", "ex"}
 _FOREIGN = re.compile(r"\b(?:japanese|chinese|korean|german|french|spanish|italian|portuguese)\b", re.I)
 _SALE_EXCLUDE = re.compile(r"\b(?:psa|bgs|cgc|sgc|tag|ace|ags|graded|slab|lot|bundle|proxy|custom|japanese|jpn|"
-                           r"reverse|1st|first edition|shadowless|staff|stamp(?:ed)?|prize pack|sealed)\b", re.I)
+                           r"shadowless|staff|stamp(?:ed)?|prize pack|sealed)\b", re.I)
+_OTHER_PRINT_SALE = re.compile(r"\b(?:reverse|rev holo|1st|first edition)\b", re.I)
+# PriceCharting brackets for the 1st Edition and Reverse Holo prints.
+_PRINT_BRACKETS = {"1st": {"1st edition", "1st edition holo"}, "reverse": {"reverse holo"}}
+
+
+def print_kind(printing):
+    """"1st", "reverse" or None from a TCGplayer print name ("1st Edition Holofoil")."""
+    printing = (printing or "").lower()
+    return "1st" if printing.startswith("1st edition") else "reverse" if printing.startswith("reverse") else None
 
 
 def _set_words(name: str) -> set[str]:
@@ -77,17 +86,18 @@ def pick_row(rows, product, card_number):
     name = set(_name_words(product.get("name")))
     tcg_set = _set_words(product.get("set", ""))
     holo = "holo" in (product.get("printing") or "").lower()
+    allowed = _PRINT_BRACKETS.get(print_kind(product.get("printing")), _PLAIN_BRACKETS)
     matches = []
     for row in rows:
         title, bracket, number = _split_title(row.get("title", ""))
-        if _number_key(number) != numerator or bracket not in _PLAIN_BRACKETS:
+        if _number_key(number) != numerator or bracket not in allowed:
             continue
         if _FOREIGN.search(row.get("set", "")) or not name or not name <= set(_words(title)):
             continue
         if not tcg_set or _set_words(row.get("set", "")) != tcg_set:
             continue
         matches.append((bracket, row))
-    if len(matches) > 1:
+    if len(matches) > 1 and allowed is _PLAIN_BRACKETS:
         # Same card with and without a [Holo] row (e.g. Ruby & Sapphire rares): follow TCGplayer's print.
         matches = [m for m in matches if (m[0] == "holo") == holo]
     return matches[0][1] if len(matches) == 1 else None
@@ -108,7 +118,7 @@ def parse_guide(pairs):
     return guide
 
 
-def recent_sales(rows, today: date | None = None, days: int = SALES_DAYS):
+def recent_sales(rows, today: date | None = None, days: int = SALES_DAYS, kind: str | None = None):
     """(median, count) of recent ungraded sales, skipping graded, lot, foreign and other-print titles.
 
     rows: [["2026-11-04", "Charizard EX 100/106 Flashfire", "$300.00"], ...]
@@ -123,6 +133,11 @@ def recent_sales(rows, today: date | None = None, days: int = SALES_DAYS):
             continue
         value = parse_money(price)
         if when < cutoff or not value or _SALE_EXCLUDE.search(title or ""):
+            continue
+        # A plain page skips sales of other prints; a 1st Edition / Reverse page keeps only that print.
+        other = _OTHER_PRINT_SALE.search(title or "")
+        if (kind is None and other) or (kind == "1st" and not re.search(r"\b(?:1st|first)\b", title or "", re.I)) \
+                or (kind == "reverse" and not re.search(r"\brev(?:erse)?\b", title or "", re.I)):
             continue
         prices.append(value)
     if len(prices) < MIN_SALES:
@@ -204,7 +219,7 @@ def pricecharting_lookup(browser, product, card_number, grade: float | None = No
                     product, card_number):
         return None
     guide = parse_guide(page.get("guide"))
-    median, count = recent_sales(page.get("sales"))
+    median, count = recent_sales(page.get("sales"), kind=print_kind(product.get("printing")))
     label = grade_label(grade, company)
     graded = guide.get(label) if label else None
     grade_median, grade_count = graded_sales((page.get("gradeSales") or {}).get(label), company) if label else (None, 0)

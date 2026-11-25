@@ -997,3 +997,32 @@ def test_marketplace_turkish_empty_search_is_not_a_source_failure(monkeypatch):
     monkeypatch.setattr(facebook, "is_logged_in", lambda: True)
     monkeypatch.setattr("cardsnipe.facebook.time.sleep", lambda seconds: None)
     assert facebook.find(CHARIZARD) == []
+
+
+def test_marketplace_loads_more_than_first_batch_and_deduplicates(monkeypatch):
+    from cardsnipe.facebook import EXTRACT_JS, FacebookMarketplace
+
+    class Browser:
+        batch = 0
+
+        def get(self, url):
+            pass
+
+        def js(self, script):
+            if script == EXTRACT_JS:
+                return [{"id": str(i), "href": "https://www.facebook.com/marketplace/item/" + str(i),
+                         "text": "CA$20\nCharizard ex 125/094\nToronto, ON"}
+                        for i in range((self.batch + 1) * 24)]
+            if "scrollTo" in script:
+                self.batch += 1
+            return True
+
+        def wait_until(self, predicate, **kwargs):
+            return bool(predicate())
+
+    browser = Browser()
+    facebook = FacebookMarketplace(_settings(), browser)
+    monkeypatch.setattr(facebook, "_require_login", lambda: None)
+    rows = facebook.find(CHARIZARD, all_dates=True)
+    assert len(rows) == len({row.listing_id for row in rows}) == 96
+    assert browser.batch == 4

@@ -257,7 +257,8 @@ NOT_A_SINGLE = re.compile(
     r"st\d{2}-\d{3}|shanks|riftbound|lorcana|"
     r"yu-?gi-?oh|digimon|dragon ball|topps|o-pee-chee|upper deck|panini|nhl|nba|nfl|mlb|rookie|"
     r"upc|ultra premium collection|elite trainer|etb|booster|blister|tins?|figures?|plush|toy|"
-    r"card holders?|top ?loaders?|sleeves?|binder|case|display)\b", re.I)
+    r"card holders?|top ?loaders?|sleeves?|binder|case|display|video games?|"
+    r"nintendo switch|playstation|ps[345]|xbox)\b", re.I)
 
 
 def is_discovery_candidate(listing) -> bool:
@@ -305,7 +306,9 @@ class DiscoveryScanner:
         started = datetime.now(timezone.utc)
         deadline = time.monotonic() + MAX_RUN_SECONDS
         browser = Browser(self.settings)
-        ebay, facebook = EbayWeb(self.settings, browser), FacebookMarketplace(self.settings, browser)
+        # eBay needs a separate session; the old shared Facebook profile returns eBay error pages.
+        ebay_browser = Browser(replace(self.settings, chrome_profile_dir=self.settings.chrome_profile_dir + "_ebay"))
+        ebay, facebook = EbayWeb(self.settings, ebay_browser), FacebookMarketplace(self.settings, browser)
         found, unavailable, errors, failures, active = {}, set(), [], {}, set()
         scanned = pages = new = saved = priced = bargains = 0
         stopped = False
@@ -387,7 +390,8 @@ class DiscoveryScanner:
                         url = browser_search_links(target, self.settings, mode=mode)["ebay"]
                         listings = ebay.search_page(url, "auction" if mode == "auction" else "all", RESULTS_PER_SEARCH)
                     else:
-                        listings = facebook.find(target, all_dates=True)[:RESULTS_PER_SEARCH]
+                        listings = [item for item in facebook.find(target, all_dates=True)
+                                    if is_discovery_candidate(item)][:RESULTS_PER_SEARCH]
                     listings = listings[:RESULTS_PER_SEARCH]
                     failures[name] = 0
                     scanned += len(listings)
@@ -424,6 +428,7 @@ class DiscoveryScanner:
             flush()
         finally:
             browser.quit()
+            ebay_browser.quit()
             self.store.record_scan(started=started, finished=datetime.now(timezone.utc),
                                    sources=sorted({name for name, _, _ in plan}), live=False,
                                    scanned=scanned, new_listings=new, deals=bargains, regrade_deals=0,

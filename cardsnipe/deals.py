@@ -46,6 +46,8 @@ GRADED_PRICE_COMPANIES = {"PSA"}
 AUCTION_WINDOW_MINUTES = 60
 # Recent sales this far under TCGplayer get a warning: the TCGplayer price is not what the card sells for.
 SALES_GAP_PCT = 25.0
+# TCGplayer Near Mint above this multiple of the recent sales median is treated as a doubtful match.
+SUSPECT_RATIO = 2.0
 
 _SKIP_HINTS = {"mint", "gem", "crack", "regrade", "re-grade", "resub"}
 
@@ -148,6 +150,10 @@ def assess(*, title: str, source: str, listing_type: str, price: float | None, s
             flags.append(f"PriceCharting grade {grade:g} price (mostly PSA): {graded_value:,.2f}")
     else:
         resale, basis = condition_value(value, claim, checked_condition_value)
+        # TCGplayer at more than twice what the card sells for: probably another print or a thin market.
+        suspect = bool(sales_value and sales_value * SUSPECT_RATIO < value)
+        if suspect:
+            flags.append(f"TCGplayer Near Mint is {value / sales_value:.1f}x recent sales: check the print; no Near Mint upside shown")
         if sales_value and sales_value < resale:
             if sales_value < resale * (1 - SALES_GAP_PCT / 100):
                 flags.append(f"recent sales median is {1 - sales_value / resale:.0%} under TCGplayer")
@@ -158,8 +164,8 @@ def assess(*, title: str, source: str, listing_type: str, price: float | None, s
         if resale - cost >= MIN_PROFIT:
             tier = "strong" if pct <= STRONG_PCT else "good" if pct <= GOOD_PCT else None
         lane = "single" if tier else None
-        nm_upside = round(value - cost, 2) if claim != "NM" else None
-        if (not tier and claim != "NM" and clean and not damage and claim not in ("HP", "DMG")
+        nm_upside = round(value - cost, 2) if claim != "NM" and not suspect else None
+        if (not tier and not suspect and claim != "NM" and clean and not damage and claim not in ("HP", "DMG")
                 and value - cost >= MIN_PROFIT and cost <= value * GOOD_PCT / 100):
             lane = "condition"
             flags.append("condition play: only worth it if the photos show Near Mint")

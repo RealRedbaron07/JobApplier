@@ -5,7 +5,8 @@ def test_only_clear_single_cards_get_browser_price_checks():
     assert eligible("Pokemon Lugia VSTAR 139/195 Silver Tempest")
     assert eligible("Lugia VSTAR Silver Tempest")  # no number: only priced if name and set pick one card
     for title in ("Any Pokémon card", "PSA 10 Lugia VSTAR 139/195 Silver Tempest",
-                  "Lugia VSTAR 139/195 Japanese Silver Tempest", "Lugia VSTAR 139/195 reverse holo Silver Tempest",
+                  "Lugia VSTAR 139/195 Japanese Silver Tempest", "Lugia VSTAR 139/195 cosmos holo Silver Tempest",
+                  "Lugia VSTAR 139/195 1st edition reverse holo Silver Tempest",
                   "Lugia VSTAR 139/195 211/195 Silver Tempest", "Lugia VSTAR 139/195 jumbo Silver Tempest",
                   ):
         assert not eligible(title)
@@ -70,3 +71,31 @@ def test_condition_price_is_read_for_the_plain_print():
     assert condition_market_price(text, "Lightly Played", "Reverse Holofoil") is None
     assert sold_last_3_months(text) == 111
     assert plain_printing({"1st Edition Holofoil": 120.0, "Unlimited Holofoil": 40.0}) == ("Unlimited Holofoil", 40.0)
+
+
+def test_first_edition_and_reverse_holo_are_priced_as_their_own_print():
+    from cardsnipe.bargains import title_printing, wanted_print
+
+    assert eligible("Lugia VSTAR 139/195 reverse holo Silver Tempest")
+    assert eligible("Gengar 5/62 Fossil 1st Edition Holo")
+    assert wanted_print("Snivy 11/149 Rev Holo Boundaries Crossed") == "reverse"
+    assert wanted_print("Gengar 5/62 Fossil 1st Ed Holo") == "1st" and wanted_print("Gengar 5/62 Fossil Holo") is None
+    prices = {"Unlimited Holofoil": 140.0, "1st Edition Holofoil": 610.0}
+    assert title_printing(prices, "Gengar 5/62 Fossil 1st Edition Holo") == ("1st Edition Holofoil", 610.0)
+    assert title_printing(prices, "Gengar 5/62 Fossil Holo") == ("Unlimited Holofoil", 140.0)
+    # A print the product page does not list is never priced as another print.
+    assert title_printing({"Holofoil": 3.0}, "Snivy 11/149 Reverse Holo") == (None, None)
+
+
+def test_japanese_e_card_and_vs_series_are_not_priced_as_english():
+    for title in ("Raichu 081/128 1ED Pokemon Card E", "Pokemon Card Game Card-e Blastoise 108/128 Holo",
+                  "Karin's Magmar Pokemon Card VS 088/141", "Excellent Ninetales Card E Pokemon Card Wind From The Sea 022/087"):
+        assert not eligible(title), title
+    assert eligible("Blastoise 2/165 Expedition Holo")
+
+
+def test_name_search_leaves_print_words_out():
+    from cardsnipe.bargains import name_query
+
+    assert name_query("1st Edition Fossil Gengar Holographic Pokemon Card") == "Fossil Gengar"
+    assert name_query("Rayquaza Delta Species Reverse Holo") == "Rayquaza Delta Species"

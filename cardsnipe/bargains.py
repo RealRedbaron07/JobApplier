@@ -14,7 +14,10 @@ OTHER_SLAB = re.compile(r"\b(?:ags|pca|gma|hga|mnt|ace)\s*-?\s*(?:gem[- ]?mt|gem
                         r"(?:10|9\.5|9|8\.5|8|7)\b|\bgem[- ]?mt\b|\bmint\s*\+", re.I)
 # Japanese set codes and rarities (SV2a, s8b, SM12a, AR / SAR / CHR); English uses IR / SIR.
 JAPANESE = re.compile(r"\b(?:japan(?:ese)?|jpn|jp|sv\d{1,2}[a-z]|s\d{1,2}[a-z]|sm\d{1,2}[a-z+]|m\d{1,2}[a-z]|s-p|sv-p|sar|chr|csr|ssr|"
-                      r"art rare|shiny treasure|blue shock|pokemiku|hatsune miku)\b", re.I)
+                      r"art rare|shiny treasure|blue shock|pokemiku|hatsune miku|"
+                      # Japanese e-Card and VS series: "Card E", "Card-e", "1ED", "VS 081/141", e-series set names.
+                      r"card[- ]e(?![- ]?reader)|1ed|vs series|vs \d{3}/141|\d{3}/141 vs|wind from the sea|split earth|"
+                      r"mysterious mountains|rifted earth|base expansion pack|e-?series [1-5])\b", re.I)
 # One listing selling several slabs or grades ("PSA 7 & 8 & 9", "Psa7. &8. &9", "PSA 7-9").
 MULTI_GRADE = re.compile(r"\b(?:psa|bgs|cgc|tag|sgc)\s*-?\s*\d{1,2}(?:\.5)?\s*[.,]?\s*(?:&|and|or|/|-|,)\s*(?:psa|bgs|cgc)?\s*"
                          r"\d{1,2}(?:\.5)?\b(?!\s*/)", re.I)
@@ -55,9 +58,29 @@ def identifiable(title):
     return count == 1 or (count == 0 and len(name_query(title).split()) >= 2)
 
 
+# Prints TCGplayer prices on the same product page: priced as that print instead of skipped.
+FIRST_EDITION = re.compile(r"\b(?:1st|first)\s*ed(?:ition|\.)?\b", re.I)
+REVERSE = re.compile(r"\b(?:reverse|rev\.?)\s*(?:holo\w*|foil)\b", re.I)
+PRINT_NAMES = {"1st": ("1st Edition Holofoil", "1st Edition", "1st Edition Normal"), "reverse": ("Reverse Holofoil",)}
+
+
+def wanted_print(title):
+    """"1st", "reverse" or None (plain print) for the print a seller title names; "" when it names both."""
+    first, reverse = bool(FIRST_EDITION.search(title or "")), bool(REVERSE.search(title or ""))
+    if first and reverse:
+        return ""
+    return "1st" if first else "reverse" if reverse else None
+
+
+def _other_variant(title):
+    """A variant word other than the 1st Edition / Reverse Holo prints that can be priced."""
+    stripped = REVERSE.sub(" ", FIRST_EDITION.sub(" ", title or ""))
+    return bool(VARIANT.search(stripped))
+
+
 def eligible(title):
-    return (identifiable(title) and not EXCLUDE.search(title or "") and not VARIANT.search(title or "")
-            and not detect_grade(title) and not not_a_plain_listing(title))
+    return (identifiable(title) and not EXCLUDE.search(title or "") and wanted_print(title) != ""
+            and not _other_variant(title) and not detect_grade(title) and not not_a_plain_listing(title))
 
 
 def _number_key(number):
@@ -145,7 +168,9 @@ def search_query(title):
 # Seller words TCGplayer's search does not help with: left in, they push the real card off the results.
 SEARCH_NOISE = re.compile(r"\b(?:pok[eé]mon|tcg|cards?|holo\w*|foil|rare|wotc|wizards|of|the|coast|vintage|nintendo|"
                           r"english|unlimited|nm|lp|mp|hp|dmg|mint|near|light(?:ly)?|moderately|heavily|played|"
-                          r"damaged|scratched|poor|excellent|condition|uk|(?:19|20)\d\d)\b\+?", re.I)
+                          r"damaged|scratched|poor|excellent|condition|uk|(?:19|20)\d\d|"
+                          # Print words: the print is chosen on the product page, and in a search they pull in sealed 1st Edition packs.
+                          r"1st|first|edition|ed|reverse|rev|holographic|shadowless|unlimited)\b\+?", re.I)
 
 
 def name_query(title):
@@ -192,6 +217,17 @@ def plain_printing(prices):
     return next(iter(plain.items())) if len(plain) == 1 else (None, None)
 
 
+def title_printing(prices, title):
+    """(print name, price) for the print the title names: plain, 1st Edition or Reverse Holo."""
+    wanted = wanted_print(title)
+    if not wanted:
+        return plain_printing(prices)
+    for name in PRINT_NAMES[wanted]:
+        if prices.get(name, 0) > 0:
+            return name, prices[name]
+    return None, None
+
+
 def plain_printing_price(prices):
     """Price of the plain print; None when only special prints are listed."""
     return plain_printing(prices)[1]
@@ -229,7 +265,7 @@ def _search_products(browser, query):
 
 
 def tcgplayer_market(browser, title, claim=None):
-    """Plain-print Near Mint market price (USD) for the card in `title`.
+    """Near Mint market price (USD) for the card in `title`, for the print it names (plain, 1st Edition, Reverse Holo).
 
     When the seller states a played condition (claim "LP", "MP", "HP" or "DMG"), the same
     product page is also read for that condition's market price ("condition_price").
@@ -248,9 +284,9 @@ def tcgplayer_market(browser, title, claim=None):
         raise RuntimeError("TCGplayer product page was unreadable; this card was not checked")
     # The comparison block ("Unlimited Holofoil: $..") loads after the rest of the page; the default
     # selected print can be 1st Edition, so wait for a plain print's price before giving up.
-    browser.wait_until(lambda: plain_printing(printing_prices(browser.page_text()))[1], 8)
+    browser.wait_until(lambda: title_printing(printing_prices(browser.page_text()), title)[1], 8)
     text = browser.page_text()
-    printing, price = plain_printing(printing_prices(text))
+    printing, price = title_printing(printing_prices(text), title)
     if not price:
         return None
     result = {**product, "price": price, "printing": printing, "sold_3m": sold_last_3_months(text),

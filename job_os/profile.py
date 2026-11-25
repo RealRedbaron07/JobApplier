@@ -176,6 +176,7 @@ _sync_facts_from_resume(DEFAULT_PROFILE)
 def load_profile(path: str | None = None) -> Dict[str, Any]:
     """Load a private local override, falling back to the truthful built-in profile."""
     profile = copy.deepcopy(DEFAULT_PROFILE)
+    profile["automation_level"] = Config.AUTOMATION_LEVEL  # .env sets the level unless the saved profile does
     profile_path = Path(path or Config.PROFILE_PATH)
     if profile_path.exists():
         try:

@@ -165,3 +165,12 @@ def test_pricecharting_labels_tens_per_company():
     assert grade_label(9.0, "PSA") == "Grade 9"
     assert grade_label(10.0, "PSA") == "PSA 10" and grade_label(10.0, "cgc") == "CGC 10"
     assert grade_label(10.0, "ACE") is None and grade_label(None) is None
+
+
+def test_tcgplayer_far_above_sales_gets_no_near_mint_upside():
+    from cardsnipe.deals import assess
+
+    verdict = assess(title="Pokemon M Rayquaza EX 105/108 (HP)", source="facebook", listing_type="bin", price=170,
+                     shipping=None, total_price=170, value=1039.48, sales_value=354.29)
+    assert verdict["nm_upside"] is None and verdict["lane"] != "condition"
+    assert any("recent sales" in flag and "check the print" in flag for flag in verdict["flags"])

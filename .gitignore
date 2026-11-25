@@ -66,6 +66,7 @@ chromedriver.exe
 *.crx
 chrome_profile/
 chrome_profile_cardsnipe/
+chrome_profile_cardsnipe_ebay/
 data/cardsnipe_screens/
 
 # Temporary files

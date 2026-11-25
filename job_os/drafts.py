@@ -2,13 +2,60 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Dict
 
 from .profile import load_profile
 
 
+_NOT_ABOUT_COMPANY = re.compile(
+    r"\b(you will|you'll|you have|you are|you're|your|we're looking|we are looking|looking for|requirements?|"
+    r"qualifications?|responsibilit|must|should|nice to have|bonus|benefits?|salary|pay range|compensation|"
+    r"equal opportunity|accommodat|disabilit|applicants?|candidates?|apply|visa|sponsor|background check|"
+    r"years of experience|degree in|experience (?:with|in|using)|proficien|privacy|cookies?)\b", re.I)
+_ABOUT_COMPANY = re.compile(r"\b(we|our|mission|founded|helps?|build(?:s|ing)?|platform|customers?|products?|team)\b", re.I)
+
+
+def company_fact(job: Dict[str, Any]) -> str:
+    """One sentence from the posting itself that says what the company or team does.
+
+    Quoting the employer's own words keeps the answer specific without inventing
+    anything. Returns "" when no suitable sentence exists.
+    """
+    from .tailoring import validate_draft
+
+    company = (job.get("company") or "").strip()
+    text = re.sub(r"\s+", " ", str(job.get("description") or ""))
+    best, best_score = "", 0
+    for sentence in re.split(r"(?<=[.!?])\s+(?=[A-Z\"“])", text)[:40]:
+        sentence = sentence.strip(" -•*•")
+        if not 50 <= len(sentence) <= 260 or _NOT_ABOUT_COMPANY.search(sentence) or "http" in sentence:
+            continue
+        score = (3 if company and company.lower() in sentence.lower() else 0) + len(_ABOUT_COMPANY.findall(sentence))
+        if score > best_score:
+            best, best_score = sentence, score
+    if best_score < 2 or not validate_draft(best)["passed"]:
+        return ""
+    return best.rstrip(".!") + "."
+
+
 def generate_application_answers(job: Dict[str, Any], profile: Dict[str, Any] | None = None) -> Dict[str, str]:
     profile = profile or load_profile()
+    answers = _base_answers(job, profile)
+    fact = company_fact(job)
+    if fact:
+        company = job.get("company") or "your company"
+        role = job.get("title") or "this role"
+        quoted = f"One line in the posting stood out to me: “{fact}”"
+        answers["cover_letter"] = answers["cover_letter"].replace(
+            f"Before using this draft, I will add one verified sentence about {company}'s product, team, or mission from an official source.",
+            f"{quoted} I would really like to help with that kind of work.")
+        answers["why_company"] = (f"I'm interested in {company} because this {role} opportunity connects practical technology work "
+                                  f"with a real team and product. {quoted} I would really like to help with that kind of work.")
+    return answers
+
+
+def _base_answers(job: Dict[str, Any], profile: Dict[str, Any]) -> Dict[str, str]:
     company = job.get("company") or "your company"
     role = job.get("title") or "this role"
     project = job.get("suggested_project") or "MalpariBot"
@@ -16,7 +63,7 @@ def generate_application_answers(job: Dict[str, Any], profile: Dict[str, Any] | 
     institution = education.get("institution") or "my university"
     degree = education.get("degree") or "Computer Science"
     minor = education.get("minor")
-    study = f"{degree} student at {institution}" + (f" with a {minor} minor" if minor else "")
+    study = f"{degree} student at {institution}" + (f" with {'an' if minor[:1].lower() in 'aeiou' else 'a'} {minor} minor" if minor else "")
     known_skills = profile.get("skills", [])
     highlighted = [skill for skill in ("Next.js", "TypeScript", "Express.js", "MySQL", "React Native", "Git") if skill in known_skills]
     tools = ", ".join(highlighted)

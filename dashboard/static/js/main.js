@@ -57,7 +57,7 @@ function toast(message, error = false) {
 function setAutomationLevel(level) {
   const badge = document.getElementById('automation-level-badge');
   if (badge) badge.textContent = `Automation level ${level} / 4`;
-  const requirements = {'preview-job':1, 'generate-tailor':2, 'generate-answers':2, 'prepare-package':3, 'guided-handoff':4, 'fill-application':4};
+  const requirements = {'preview-job':1, 'generate-tailor':2, 'generate-answers':2, 'prepare-package':3, 'guided-handoff':4, 'fill-application':4, 'autofill-job':4, 'autofill-next':4};
   Object.entries(requirements).forEach(([id, required]) => {
     const control = document.getElementById(id);
     if (!control) return;
@@ -190,7 +190,7 @@ async function openJob(id, options = {}) {
     dialog.dataset.jobId = String(id);
     document.getElementById('job-detail').innerHTML = `<div class="detail-head"><p class="eyebrow">${esc(label(job.fit_category))} · ${job.match_score}/100</p><h2 id="job-dialog-title">${jobTitleLink(job)}</h2><p>${esc(job.company)} · ${esc(job.location)} · ${esc(label(job.work_mode))}</p><p class="detail-meta">${esc(job.source)} · ${esc(label(job.job_type))} · Posted ${fmtDate(job.posted_date)} · Deadline ${fmtDate(job.deadline)} · ${esc(salary)}</p></div>
       ${job.safety_flags.map(flag => `<div class="warning-flag"><strong>${esc(flag.code)}</strong> — ${esc(flag.message)}</div>`).join('')}
-      <div class="detail-actions"><button class="button" data-prepare="${job.id}">Prepare package</button><button class="button secondary" data-tailor="${job.id}">Resume suggestions</button><button class="button secondary" data-answers="${job.id}">Draft answers</button><button class="button secondary" data-handoff="${job.id}" ${Number(state.profile?.automation_level ?? 3) < 4 ? 'disabled title="Requires automation level 4"' : ''}>Reviewed handoff</button><button class="button secondary" data-fill="${job.id}" ${Number(state.profile?.automation_level ?? 3) < 4 ? 'disabled title="Requires automation level 4"' : 'title="Fills the official form in a Chrome window and stops before Submit"'}>Fill application</button>${job.tailored_resume_path && job.tailored_resume_path.endsWith('.pdf') ? `<a class="button secondary" href="/api/jobs/${job.id}/resume.pdf" target="_blank" rel="noopener">Tailored resume PDF</a>` : ''}${job.job_url ? `<a class="button dark" href="${esc(job.job_url)}" target="_blank" rel="noopener noreferrer">Open official application ↗</a>`:''}<button class="button secondary" data-remove-job="${job.id}">Remove unrelated</button></div>
+      <div class="detail-actions"><button class="button dark" data-autofill="${job.id}" ${Number(state.profile?.automation_level ?? 3) < 4 ? 'disabled title="Requires automation level 4"' : 'title="Tailor the resume and fill the official form; you press Submit"'}>Tailor &amp; fill</button><button class="button" data-prepare="${job.id}">Prepare package</button><button class="button secondary" data-tailor="${job.id}">Resume suggestions</button><button class="button secondary" data-answers="${job.id}">Draft answers</button><button class="button secondary" data-handoff="${job.id}" ${Number(state.profile?.automation_level ?? 3) < 4 ? 'disabled title="Requires automation level 4"' : ''}>Reviewed handoff</button><button class="button secondary" data-fill="${job.id}" ${Number(state.profile?.automation_level ?? 3) < 4 ? 'disabled title="Requires automation level 4"' : 'title="Fills the official form in a Chrome window and stops before Submit"'}>Fill application</button>${job.tailored_resume_path && job.tailored_resume_path.endsWith('.pdf') ? `<a class="button secondary" href="/api/jobs/${job.id}/resume.pdf" target="_blank" rel="noopener">Tailored resume PDF</a>` : ''}${job.job_url ? `<a class="button dark" href="${esc(job.job_url)}" target="_blank" rel="noopener noreferrer">Open official application ↗</a>`:''}<button class="button secondary" data-remove-job="${job.id}">Remove unrelated</button></div>
       <div class="detail-columns"><div class="detail-card"><h4>Why it fits</h4><ul class="compact-list">${(explanation.why_it_fits || []).map(x => `<li>${esc(x)}</li>`).join('')}</ul><h4>Matched skills</h4><p>${(explanation.matched_skills || []).map(x => `<span class="pill">${esc(x)}</span>`).join(' ') || 'None detected'}</p></div><div class="detail-card"><h4>Risks & missing skills</h4><ul class="compact-list">${(explanation.risks || []).map(x => `<li>${esc(x)}</li>`).join('')}</ul><p><strong>Resume:</strong> ${esc(job.resume_profile)}</p><p><strong>Project:</strong> ${esc(job.suggested_project)}</p></div></div>
       <div class="detail-card next-card"><h4>Suggested next action</h4><p>${esc(job.next_action)}</p></div>
       <div class="detail-columns"><div class="detail-card"><h4>Application checklist</h4><ul class="compact-list"><li>Verify eligibility, dates, and location</li><li>Review every generated claim</li><li>Prepare: ${esc((job.required_documents || []).join(', ') || 'resume')}</li><li>Submit manually on the official portal</li><li>Return and explicitly mark applied</li></ul><p><strong>Start:</strong> ${esc(job.start_date || 'Unspecified')} · <strong>Term:</strong> ${esc(job.term_length || 'Unspecified')}</p><h4>Score breakdown</h4>${Object.entries(job.score_breakdown || {}).map(([name,item]) => `<div class="score-line"><span>${esc(label(name))}</span><b>${item.points}/${item.max}</b></div>`).join('')}</div><div class="detail-card"><form id="detail-tracker-form"><label>Private notes<textarea name="notes" rows="4">${esc(job.notes)}</textarea></label><label>Follow-up date<input name="follow_up_date" type="datetime-local" value="${job.follow_up_date ? esc(job.follow_up_date.slice(0,16)) : ''}"></label><label>Recruiter/contact<input name="contact_name" value="${esc(job.contact_name || '')}"></label><label>Resume version used<input name="resume_version_used" value="${esc(job.resume_version_used || job.tailored_resume_path || '')}"></label><label>Cover-letter version used<input name="cover_letter_version_used" value="${esc(job.cover_letter_version_used || '')}"></label><label>Portal/login note<input name="login_portal" value="${esc(job.login_portal || '')}"></label><button class="button secondary small" type="submit">Save tracker details</button></form></div></div>
@@ -204,6 +204,7 @@ async function openJob(id, options = {}) {
     document.querySelector('[data-answers]')?.addEventListener('click', () => runDraftAction(id, 'answers'));
     document.querySelector('[data-handoff]')?.addEventListener('click', () => createHandoff(id));
     document.querySelector('[data-fill]')?.addEventListener('click', () => fillApplication(id));
+    document.querySelector('[data-autofill]')?.addEventListener('click', () => autofillJob(id));
     document.querySelector('#job-detail [data-remove-job]')?.addEventListener('click', () => removeJob(id));
     document.getElementById('detail-tracker-form')?.addEventListener('submit', async event => {
       event.preventDefault();
@@ -361,6 +362,42 @@ async function fillApplication(jobId, refill = false) {
   } catch (error) { toast(error.message, true); }
 }
 
+function filledReport(data, jobId) {
+  const list = items => (items || []).length ? `<ul class="compact-list">${items.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : '<p>None.</p>';
+  const resume = data.resume_report || {};
+  return `<div class="result-section"><p class="eyebrow">TAILORED + FILLED UP TO SUBMIT · ${esc(data.ats || '')}</p><h3>${esc(data.company || '')} ${esc(data.title || '')}</h3>
+      <p>${data.resume_uploaded ? `<span class="success-flag">Attached tailored resume (${esc(data.resume_pages || 1)} page)</span>` : '<span class="warning-flag">Resume not attached; upload it yourself</span>'}
+      ${(resume.job_focus || []).length ? ` Focus: ${esc(resume.job_focus.join(', '))}.` : ''}${(resume.gaps_not_claimed || []).length ? ` Not claimed: ${esc(resume.gaps_not_claimed.join(', '))}.` : ''}</p>
+      <div class="form-actions"><a class="button secondary" href="/api/jobs/${jobId}/resume.pdf" target="_blank" rel="noopener">Tailored resume PDF</a></div>
+      <h4>Needs you (orange)</h4>${list(data.needs_you)}<h4>Filled (green)</h4>${list(data.filled)}${(data.skipped_sensitive || []).length ? `<h4>Left for you on purpose</h4>${list(data.skipped_sensitive)}` : ''}</div>`;
+}
+
+async function autofillJob(jobId) {
+  if (!jobId) return toast('Choose a tracked job first', true);
+  toast('Tailoring the resume and filling the application…');
+  try {
+    const data = await api(`/api/jobs/${jobId}/autofill`, {method:'POST', body:'{}'});
+    document.getElementById('tailor-job').value = String(jobId);
+    document.getElementById('tailor-result').innerHTML = filledReport(data, jobId) +
+      `<div class="form-actions"><button class="button secondary" id="refill-page">Fill this page again (next step)</button></div><div class="warning-note">JobApplier never presses Submit. Check every field in Chrome, submit, then mark the job applied.</div>`;
+    document.getElementById('refill-page').addEventListener('click', () => fillApplication(jobId, true));
+    document.getElementById('job-dialog').open && document.getElementById('job-dialog').close();
+    switchView('tailor'); toast(data.message); await loadJobs();
+  } catch (error) { toast(error.message, true); }
+}
+
+async function autofillNext() {
+  toast('Tailoring and filling the next 3 applications, one Chrome tab each…');
+  try {
+    const data = await api('/api/jobs/autofill-next', {method:'POST', body:JSON.stringify({count:3})});
+    document.getElementById('tailor-result').innerHTML = (data.filled || []).map(item => filledReport(item, item.job_id)).join('') +
+      ((data.skipped || []).length ? `<div class="result-section"><h4>Skipped</h4><ul class="compact-list">${data.skipped.map(x => `<li>Job ${esc(x.job_id)}: ${esc(x.error)}</li>`).join('')}</ul></div>` : '') +
+      (!(data.filled || []).length && !(data.skipped || []).length ? '<div class="empty">No open Greenhouse, Lever, Ashby or Workday jobs left to fill. Add jobs with Check boards.</div>' : '') +
+      '<div class="warning-note">Each form is open in its own Chrome tab. Check every field, submit yourself, then mark each job applied.</div>';
+    switchView('tailor'); toast(data.message); await loadJobs();
+  } catch (error) { toast(error.message, true); }
+}
+
 async function runDraftAction(jobId, action) {
   if (!jobId) return toast('Choose a tracked job first', true);
   try {
@@ -389,6 +426,8 @@ document.getElementById('generate-answers').addEventListener('click', () => runD
 document.getElementById('prepare-package').addEventListener('click', () => runDraftAction(document.getElementById('tailor-job').value, 'prepare'));
 document.getElementById('guided-handoff').addEventListener('click', () => createHandoff(document.getElementById('tailor-job').value));
 document.getElementById('fill-application').addEventListener('click', () => fillApplication(document.getElementById('tailor-job').value));
+document.getElementById('autofill-job').addEventListener('click', () => autofillJob(document.getElementById('tailor-job').value));
+document.getElementById('autofill-next').addEventListener('click', autofillNext);
 document.getElementById('tailor-job').addEventListener('change', event => { const job = state.jobs.find(item => String(item.id) === event.target.value); if (job) document.getElementById('resume-profile').value = job.resume_profile; });
 
 async function loadFollowups() {

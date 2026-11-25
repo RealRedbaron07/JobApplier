@@ -36,7 +36,7 @@ def test_page_scripts_never_submit_or_press_buttons():
         assert not re.search(r"\.submit\(|requestSubmit|button[^'\"]*\.click|form\.", script)
     # Checkboxes (consent, terms) are skipped outright.
     assert "'checkbox'" in FILL_SCRIPT
-    assert "Submit yourself" in FILL_SCRIPT
+    assert "Submit yourself" in apply_assist.BANNER_SCRIPT
 
 
 def test_fill_refuses_when_stop_before_submit_is_off(monkeypatch, tmp_path):
@@ -46,3 +46,18 @@ def test_fill_refuses_when_stop_before_submit_is_off(monkeypatch, tmp_path):
     monkeypatch.setattr(Config, "STOP_BEFORE_SUBMIT", False)
     with pytest.raises(RuntimeError):
         apply_assist.fill_application("https://example.com", str(tmp_path / "r.pdf"), {})
+
+
+def test_screening_answers_come_from_profile_and_job():
+    profile = load_profile("/missing/profile.json")
+    values = field_values(profile, {"why_company": "Because", "availability": "Summer 2027"}, {"company": "Shopify"})
+    assert values["relocate"] == "Yes" and values["student"] == "Yes"
+    assert values["previously_employed"] == "No" and values["why_company"] == "Because"
+    # A company on the resume is never answered "No" for previous employment.
+    assert field_values(profile, {}, {"company": "Venture for Canada"})["previously_employed"] == ""
+    assert field_values(profile)["previously_employed"] == ""
+
+
+def test_combo_script_only_clicks_list_options():
+    assert not re.search(r"\.submit\(|requestSubmit|button[^'\"]*\.click|form\.", apply_assist.COMBO_SCRIPT)
+    assert "choice.click()" in apply_assist.COMBO_SCRIPT

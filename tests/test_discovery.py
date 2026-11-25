@@ -75,6 +75,7 @@ def browser_scan(monkeypatch):
     class Browser:
         def __init__(self, settings):
             self.closed = False
+            self.settings = settings
             opened.append(self)
             assert not settings.ebay_api_enabled and not settings.live
             assert not settings.fb_auto_message and not settings.notify_macos and not settings.webhook_url
@@ -116,7 +117,8 @@ def test_broad_scan_is_bounded_and_imports_without_targets_prices_or_condition_f
     assert all(row.market_value is None and row.matched_target is None for row in rows)
     assert any(row.condition == "Lightly Played" and row.shipping is None for row in rows)
     assert all("coupon" in row.promotion for row in rows)
-    assert len(opened) == 1 and opened[0].closed
+    assert len(opened) == 2 and all(browser.closed for browser in opened)
+    assert opened[1].settings.chrome_profile_dir == opened[0].settings.chrome_profile_dir + "_ebay"
 
 
 def test_broad_scan_deduplicates_and_preserves_routes_without_fake_discount_math(browser_scan, monkeypatch):
@@ -453,7 +455,8 @@ def test_marketplace_listings_are_priced_before_ebay():
 def test_other_games_sealed_and_supplies_are_not_candidates():
     for title in ("Fallout mtg mysterious stranger foil card", "One Piece TCG – Lilith OP13-113 Alternate Art",
                   "Pokemon 30th Ultra Premium Collection (Day)", "Pokémon 30th UPC Pair", "Mario Lemieux 1985-86 O-Pee-Chee Rookie",
-                  "EVORETRO Semi-Rigid Card Holders", "1999 Topps Pokémon Mewtwo Strikes Back #8"):
+                  "EVORETRO Semi-Rigid Card Holders", "1999 Topps Pokémon Mewtwo Strikes Back #8",
+                  "Nintendo Switch 2 The Legend of Zelda", "PS5 video game"):
         assert not discovery.is_discovery_candidate(listing("facebook", title=title, price=20)), title
     assert discovery.is_discovery_candidate(listing("facebook", title="Sabrina's Gengar 14/132 Gym Challenge Holo", price=123))
 

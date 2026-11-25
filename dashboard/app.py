@@ -690,6 +690,34 @@ def draft_answers(job_id: int):
         session.close()
 
 
+PACKAGE_CHECKLIST = ["Verify company and role details", "Open the tailored resume PDF and check it",
+                     "Check the cover letter and answers", "Resolve safety warnings", "Save the package as reviewed",
+                     "Fill application, check every field, submit yourself", "Return and mark the job applied"]
+
+
+def _new_package(session, job: Job, profile: dict) -> dict:
+    """Tailor the resume PDF, draft answers, run the claim check, and store the package."""
+    job_data = _job_dict(job, True)
+    scoring = _json_load(job.match_explanation, score_job(job_data, profile))
+    plan = create_tailoring_plan(job_data, scoring, profile, job.resume_profile)
+    latex_path = save_latex_draft(job.id, plan.pop("latex"))
+    plan["latex_path"] = latex_path
+    plan["tailored_resume"] = _build_resume_pdf(job, job_data, profile)
+    answers = generate_application_answers(job_data, profile)
+    answer_safety = validate_draft("\n".join(answers.values()), profile)
+    combined_safety = {
+        "passed": bool(plan["safety_report"]["passed"] and answer_safety["passed"]),
+        "violations": plan["safety_report"]["violations"] + answer_safety["violations"],
+        "requires_human_review": True,
+    }
+    package_draft = TailoredDraft(job_id=job.id, draft_type="application_package", resume_profile=plan["resume_profile"], content=json.dumps({"tailoring": plan, "answers": answers}), file_path=latex_path, review_status="draft", safety_report=json.dumps(combined_safety))
+    session.add(package_draft)
+    job.tailored_resume_path = plan["tailored_resume"].get("pdf_path") or latex_path
+    job.application_status = "resume_tailored" if can_transition(job.application_status, "resume_tailored") else job.application_status
+    session.flush()
+    return {"draft": package_draft, "plan": plan, "answers": answers, "safety": combined_safety, "latex_path": latex_path}
+
+
 @app.post("/api/jobs/<int:job_id>/prepare")
 def prepare_package(job_id: int):
     """Prepare materials only. This endpoint never opens or submits an application."""
@@ -701,27 +729,103 @@ def prepare_package(job_id: int):
         job = session.get(Job, job_id)
         if not job:
             return jsonify({"error": "Job not found"}), 404
-        profile = load_profile()
-        job_data = _job_dict(job, True)
-        scoring = _json_load(job.match_explanation, score_job(job_data, profile))
-        plan = create_tailoring_plan(job_data, scoring, profile, job.resume_profile)
-        latex_path = save_latex_draft(job.id, plan.pop("latex"))
-        plan["latex_path"] = latex_path
-        plan["tailored_resume"] = _build_resume_pdf(job, job_data, profile)
-        answers = generate_application_answers(job_data, profile)
-        answer_safety = validate_draft("\n".join(answers.values()), profile)
-        combined_safety = {
-            "passed": bool(plan["safety_report"]["passed"] and answer_safety["passed"]),
-            "violations": plan["safety_report"]["violations"] + answer_safety["violations"],
-            "requires_human_review": True,
-        }
-        package_draft = TailoredDraft(job_id=job.id, draft_type="application_package", resume_profile=plan["resume_profile"], content=json.dumps({"tailoring": plan, "answers": answers}), file_path=latex_path, review_status="draft", safety_report=json.dumps(combined_safety))
-        session.add(package_draft)
-        job.tailored_resume_path = plan["tailored_resume"].get("pdf_path") or latex_path
-        job.application_status = "resume_tailored" if can_transition(job.application_status, "resume_tailored") else job.application_status
+        built = _new_package(session, job, load_profile())
         job.next_action = "Review the tailored resume PDF and answers, save the package as reviewed, then use Fill application and submit yourself."
         session.commit()
-        return jsonify({"message": "Application package prepared; nothing was submitted", "draft_id": package_draft.id, "latex_path": latex_path, "tailoring": plan, "answers": answers, "safety_report": combined_safety, "checklist": ["Verify company and role details", "Open the tailored resume PDF and check it", "Edit the cover letter: replace the placeholder sentence with a real fact about the company", "Resolve safety warnings", "Save the package as reviewed", "Fill application, check every field, submit yourself", "Return and mark the job applied"]})
+        return jsonify({"message": "Application package prepared; nothing was submitted", "draft_id": built["draft"].id, "latex_path": built["latex_path"], "tailoring": built["plan"], "answers": built["answers"], "safety_report": built["safety"], "checklist": PACKAGE_CHECKLIST})
+    finally:
+        session.close()
+
+
+def _usable_answers(content: dict) -> dict:
+    return {key: value for key, value in (content.get("answers") or {}).items()
+            if isinstance(value, str) and not any(marker in value for marker in _PLACEHOLDER)}
+
+
+def _autofill_one(session, job: Job, profile: dict, new_tab: bool) -> dict:
+    """Tailor a fresh package, accept it if the claim check passes, and fill the form up to Submit."""
+    application_url = _external_url(job.job_url, "Application URL")
+    if not application_url:
+        return {"job_id": job.id, "error": "No official application URL saved for this job."}
+    built = _new_package(session, job, profile)
+    resume = built["plan"]["tailored_resume"]
+    if resume.get("error"):
+        return {"job_id": job.id, "error": resume["error"]}
+    if not built["safety"]["passed"]:
+        return {"job_id": job.id, "error": "The claim check flagged the drafted package; open it and fix the warnings first.",
+                "safety_report": built["safety"], "draft_id": built["draft"].id}
+    built["draft"].review_status = "reviewed"  # you still review every field in the browser before Submit
+    answers = _usable_answers({"answers": built["answers"]})
+    report = apply_assist.fill_application(application_url, resume["pdf_path"], profile, answers,
+                                           job=_job_dict(job, True), new_tab=new_tab)
+    if built["answers"].get("cover_letter") and "cover_letter" not in answers:
+        report["needs_you"].append("Cover letter: no company sentence was found in the posting, so the draft was not pasted.")
+    job.next_action = "Finish the orange fields in the JobApplier Chrome window, press Submit yourself, then mark the job applied."
+    return {"job_id": job.id, "company": job.company, "title": job.title, "draft_id": built["draft"].id,
+            "resume_pages": resume.get("pages"), "resume_report": resume.get("report"), **report}
+
+
+@app.post("/api/jobs/<int:job_id>/autofill")
+def autofill_application(job_id: int):
+    """One click: tailor the resume, draft answers, and fill the official form. Submit stays yours."""
+    blocked = _level_error(4)
+    if blocked:
+        return blocked
+    session = Session()
+    try:
+        job = session.get(Job, job_id)
+        if not job:
+            return jsonify({"error": "Job not found"}), 404
+        try:
+            result = _autofill_one(session, job, load_profile(), new_tab=False)
+        except Exception as exc:  # noqa: BLE001 - browser failures are shown to the user
+            session.commit()
+            return jsonify({"error": f"Could not fill the application: {exc}"}), 502
+        session.commit()
+        if result.get("error"):
+            return jsonify(result), 409
+        return jsonify({"message": "Resume tailored and application filled up to Submit; nothing was submitted", **result})
+    finally:
+        session.close()
+
+
+AUTOFILL_STATUSES = ("discovered", "interested", "resume_tailored")
+
+
+@app.post("/api/jobs/autofill-next")
+def autofill_next():
+    """Tailor and fill the next few best-scoring open jobs, one Chrome tab each. Nothing is submitted."""
+    blocked = _level_error(4)
+    if blocked:
+        return blocked
+    payload = request.get_json(silent=True) or {}
+    try:
+        count = min(5, max(1, int(payload.get("count", 3))))
+    except (TypeError, ValueError):
+        count = 3
+    session = Session()
+    try:
+        profile = load_profile()
+        jobs = (session.query(Job).filter(Job.job_url.isnot(None), Job.job_url != "")
+                .filter((Job.application_status.is_(None)) | (Job.application_status.in_(AUTOFILL_STATUSES)))
+                .order_by(desc(Job.match_score).nullslast()).limit(200).all())
+        filled, skipped = [], []
+        for job in jobs:
+            if len(filled) >= count:
+                break
+            if apply_assist.detect_ats(job.job_url) == "generic" and not payload.get("include_generic"):
+                continue  # aggregator links (LinkedIn etc.) are not application forms
+            already = session.query(TailoredDraft).filter_by(job_id=job.id, draft_type="application_package", review_status="reviewed").first()
+            if already and not payload.get("include_reviewed"):
+                continue
+            try:
+                result = _autofill_one(session, job, profile, new_tab=True)
+            except Exception as exc:  # noqa: BLE001
+                result = {"job_id": job.id, "error": f"Could not fill: {exc}"}
+            session.commit()
+            (skipped if result.get("error") else filled).append(result)
+        return jsonify({"message": f"Filled {len(filled)} application(s) in Chrome tabs; nothing was submitted",
+                        "filled": filled, "skipped": skipped})
     finally:
         session.close()
 
@@ -837,11 +941,10 @@ def fill_application(job_id: int):
             job.tailored_resume_path = built["pdf_path"]
             resume_pdf = Path(built["pdf_path"])
         content = _json_load(package.content, {})
-        answers = {key: value for key, value in (content.get("answers") or {}).items()
-                   if isinstance(value, str) and not any(marker in value for marker in _PLACEHOLDER)}
+        answers = _usable_answers(content)
         try:
             report = apply_assist.fill_application(application_url, str(resume_pdf), profile, answers,
-                                                   refill_current_page=bool(payload.get("refill")))
+                                                   refill_current_page=bool(payload.get("refill")), job=_job_dict(job, True))
         except Exception as exc:  # noqa: BLE001 - browser failures are shown to the user
             return jsonify({"error": f"Could not fill the application: {exc}"}), 502
         if (content.get("answers") or {}).get("cover_letter") and "cover_letter" not in answers:

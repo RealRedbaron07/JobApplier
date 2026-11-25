@@ -4,7 +4,7 @@ import io
 import json
 from pathlib import Path
 
-from database.models import ApplicationRecord, FollowUp, Job
+from database.models import ApplicationRecord, FollowUp, Job, TailoredDraft
 
 
 JOB = {
@@ -360,7 +360,7 @@ def test_fill_application_requires_reviewed_package_and_never_marks_applied(dash
     client, session_factory, _ = dashboard_client
     calls = []
 
-    def fake_fill(url, resume_pdf, profile, answers, refill_current_page=False):
+    def fake_fill(url, resume_pdf, profile, answers, refill_current_page=False, **kwargs):
         calls.append({"url": url, "resume": resume_pdf, "answers": answers})
         return {"ats": "generic", "page": url, "resume_uploaded": True, "resume_file": Path(resume_pdf).name,
                 "filled": ["Email → x"], "needs_you": [], "skipped_sensitive": [], "stopped_before_submit": True,
@@ -391,3 +391,53 @@ def test_fill_application_requires_reviewed_package_and_never_marks_applied(dash
     with session_factory() as session:
         assert session.get(Job, job["id"]).applied is False
         assert session.query(ApplicationRecord).count() == 0
+
+
+def test_autofill_tailors_accepts_package_and_fills_without_submitting(dashboard_client, monkeypatch):
+    client, session_factory, _ = dashboard_client
+    calls = []
+
+    def fake_fill(url, resume_pdf, profile, answers, refill_current_page=False, job=None, new_tab=False):
+        calls.append({"url": url, "resume": resume_pdf, "answers": answers, "job": job, "new_tab": new_tab})
+        return {"ats": "greenhouse", "page": url, "resume_uploaded": True, "filled": ["Email → x"], "needs_you": [],
+                "skipped_sensitive": [], "stopped_before_submit": True, "next_step": "Submit yourself."}
+
+    import dashboard.app as dashboard_app
+    monkeypatch.setattr(dashboard_app.apply_assist, "fill_application", fake_fill)
+    job = client.post("/api/jobs", json={**JOB, "company": "Wealthsimple",
+                                         "job_url": "https://job-boards.greenhouse.io/wealthsimple/jobs/123",
+                                         "description": JOB["description"] + "\nWealthsimple is on a mission to help everyone achieve financial freedom by building products our customers love."}).get_json()["job"]
+    assert client.post(f"/api/jobs/{job['id']}/autofill").status_code == 403
+    client.put("/api/profile", json={"automation_level": 4})
+    response = client.post(f"/api/jobs/{job['id']}/autofill")
+    assert response.status_code == 200, response.get_json()
+    body = response.get_json()
+    assert body["stopped_before_submit"] is True and body["resume_pages"] == 1
+    assert calls[0]["resume"].endswith(".pdf") and calls[0]["job"]["company"] == "Wealthsimple"
+    # The posting gave a company sentence, so the cover letter has no placeholder and is pasted.
+    assert "financial freedom" in calls[0]["answers"]["cover_letter"]
+    with session_factory() as session:
+        assert session.get(Job, job["id"]).applied is False
+        assert session.query(TailoredDraft).filter_by(job_id=job["id"], review_status="reviewed").count() == 1
+        assert session.query(ApplicationRecord).count() == 0
+
+
+def test_autofill_next_fills_best_ats_jobs_in_tabs_and_skips_aggregators(dashboard_client, monkeypatch):
+    client, _, _ = dashboard_client
+    calls = []
+
+    def fake_fill(url, resume_pdf, profile, answers, refill_current_page=False, job=None, new_tab=False):
+        calls.append((url, new_tab))
+        return {"ats": "lever", "page": url, "filled": [], "needs_you": [], "skipped_sensitive": [], "stopped_before_submit": True}
+
+    import dashboard.app as dashboard_app
+    monkeypatch.setattr(dashboard_app.apply_assist, "fill_application", fake_fill)
+    client.put("/api/profile", json={"automation_level": 4})
+    client.post("/api/jobs", json={**JOB, "job_url": "https://www.linkedin.com/jobs/view/1"})
+    client.post("/api/jobs", json={**JOB, "title": "QA Intern", "job_url": "https://jobs.lever.co/acme/0f5b4c1e-1111-2222-3333-444455556666"})
+    client.post("/api/jobs", json={**JOB, "title": "Dev Intern", "job_url": "https://jobs.ashbyhq.com/acme/0f5b4c1e-1111-2222-3333-444455556677"})
+    body = client.post("/api/jobs/autofill-next", json={"count": 5}).get_json()
+    assert len(body["filled"]) == 2 and all(tab for _, tab in calls)
+    assert not any("linkedin" in url for url, _ in calls)
+    # A second run skips jobs that already have an accepted package.
+    assert client.post("/api/jobs/autofill-next", json={"count": 5}).get_json()["filled"] == []

@@ -148,9 +148,19 @@ class FacebookMarketplace:
                     or _no_results(self.browser.page_text()),
             timeout=10,
         )
-        self.browser.js("window.scrollTo(0, 1200);")
-        time.sleep(0.8)
-        rows = self.browser.js(EXTRACT_JS) or []
+        found = {}
+        for _ in range(4):
+            rows = self.browser.js(EXTRACT_JS) or []
+            before = len(found)
+            found.update((row["id"], row) for row in rows)
+            if len(found) >= 180:
+                break
+            self.browser.js("window.scrollTo(0, document.body.scrollHeight);")
+            grew = self.browser.wait_until(
+                lambda: len(self.browser.js(EXTRACT_JS) or []) > len(rows), timeout=3)
+            if not grew and len(found) == before:
+                break
+        rows = list(found.values())
         if not rows:
             self._require_login()
             body = self.browser.page_text()

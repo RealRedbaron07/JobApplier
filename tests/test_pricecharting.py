@@ -101,3 +101,21 @@ def test_graded_value_uses_the_median_of_the_same_graders_sales():
             ["2026-05-01", "Dialga G 7/127 Platinum PSA 9", "$99.00"]]
     assert graded_sales(rows, "PSA", today=date(2026, 11, 9)) == (594.64, 6)
     assert graded_sales(rows, "CGC", today=date(2026, 11, 9)) == (None, 1)
+
+
+def test_first_edition_and_reverse_pages_use_their_own_rows_and_sales():
+    from datetime import date
+    from cardsnipe.pricecharting import pick_row, recent_sales
+
+    rows = [{"title": "Gengar [Holo] #5", "set": "Pokemon Fossil", "url": "plain"},
+            {"title": "Gengar [1st Edition] #5", "set": "Pokemon Fossil", "url": "first"}]
+    product = {"name": "Gengar", "set": "Fossil", "printing": "1st Edition Holofoil"}
+    assert pick_row(rows, product, "5/62")["url"] == "first"
+    assert pick_row(rows, {**product, "printing": "Unlimited Holofoil"}, "5/62")["url"] == "plain"
+    sales = [["2026-11-01", "Gengar 5/62 Fossil 1st Edition Holo", "$600.00"],
+             ["2026-11-02", "1st Edition Gengar Fossil", "$620.00"],
+             ["2026-11-03", "Gengar Fossil 1st ed holo", "$580.00"],
+             ["2026-11-04", "Gengar 5/62 Fossil Holo", "$140.00"]]
+    today = date(2026, 11, 20)
+    assert recent_sales(sales, today, kind="1st") == (600.0, 3)
+    assert recent_sales(sales, today) == (None, 1)
