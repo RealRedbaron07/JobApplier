@@ -58,6 +58,22 @@ def test_screening_answers_come_from_profile_and_job():
     assert field_values(profile)["previously_employed"] == ""
 
 
-def test_combo_script_only_clicks_list_options():
-    assert not re.search(r"\.submit\(|requestSubmit|button[^'\"]*\.click|form\.", apply_assist.COMBO_SCRIPT)
-    assert "choice.click()" in apply_assist.COMBO_SCRIPT
+def test_dropdown_step_only_reads_options():
+    assert not re.search(r"\.submit\(|requestSubmit|\.click\(", apply_assist.COMBO_OPTIONS_SCRIPT)
+    assert "[role=option]" in apply_assist.COMBO_OPTIONS_SCRIPT
+
+
+def test_current_company_comes_from_the_job_marked_present():
+    values = field_values(load_profile("/missing/profile.json"))
+    assert values["current_company"] == "M4 & Aging Lab, York University"
+    assert values["current_title"] == "Research Assistant"
+
+
+def test_embedded_form_is_followed_only_by_host_and_only_without_a_form_of_its_own():
+    # A Google sign-in helper iframe carries "greenhouse.io" in its query string; it must not be followed.
+    assert "new URL(frame.src" in apply_assist.IFRAME_SCRIPT and ".hostname" in apply_assist.IFRAME_SCRIPT
+    assert "own >= 3" in apply_assist.IFRAME_SCRIPT
+
+
+def test_hidden_validation_inputs_are_not_visible_to_the_filler():
+    assert "opacity" in FILL_SCRIPT and "r.width > 2" in FILL_SCRIPT
