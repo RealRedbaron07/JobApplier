@@ -12,6 +12,10 @@ from cardsnipe.settings import SnipeSettings
 logger = logging.getLogger("cardsnipe.browser")
 
 
+class SourceUnavailable(RuntimeError):
+    """An account or source needs user action before any target can be searched."""
+
+
 class Browser:
     """Lazy Selenium Chrome session. All calls are serialized through one lock."""
 
@@ -45,8 +49,15 @@ class Browser:
         return driver
 
     def get(self, url: str) -> None:
+        from selenium.common.exceptions import InvalidSessionIdException, NoSuchWindowException
+
         with self.lock:
-            self.driver.get(url)
+            try:
+                self.driver.get(url)
+            except (InvalidSessionIdException, NoSuchWindowException):
+                logger.warning("Chrome session closed; restarting it for this read-only navigation")
+                self.quit()
+                self.driver.get(url)
 
     def js(self, script: str, *args):
         with self.lock:
@@ -55,6 +66,10 @@ class Browser:
     def current_url(self) -> str:
         with self.lock:
             return self.driver.current_url
+
+    def has_cookie(self, name: str) -> bool:
+        with self.lock:
+            return bool((self.driver.get_cookie(name) or {}).get("value"))
 
     def page_text(self) -> str:
         try:

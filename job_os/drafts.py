@@ -2,21 +2,68 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Dict
 
 from .profile import load_profile
 
 
+_NOT_ABOUT_COMPANY = re.compile(
+    r"\b(you will|you'll|you have|you are|you're|your|we're looking|we are looking|looking for|requirements?|"
+    r"qualifications?|responsibilit|must|should|nice to have|bonus|benefits?|salary|pay range|compensation|"
+    r"equal opportunity|accommodat|disabilit|applicants?|candidates?|apply|visa|sponsor|background check|"
+    r"years of experience|degree in|experience (?:with|in|using)|proficien|privacy|cookies?)\b", re.I)
+_ABOUT_COMPANY = re.compile(r"\b(we|our|mission|founded|helps?|build(?:s|ing)?|platform|customers?|products?|team)\b", re.I)
+
+
+def company_fact(job: Dict[str, Any]) -> str:
+    """One sentence from the posting itself that says what the company or team does.
+
+    Quoting the employer's own words keeps the answer specific without inventing
+    anything. Returns "" when no suitable sentence exists.
+    """
+    from .tailoring import validate_draft
+
+    company = (job.get("company") or "").strip()
+    text = re.sub(r"\s+", " ", str(job.get("description") or ""))
+    best, best_score = "", 0
+    for sentence in re.split(r"(?<=[.!?])\s+(?=[A-Z\"“])", text)[:40]:
+        sentence = sentence.strip(" -•*•")
+        if not 50 <= len(sentence) <= 260 or _NOT_ABOUT_COMPANY.search(sentence) or "http" in sentence:
+            continue
+        score = (3 if company and company.lower() in sentence.lower() else 0) + len(_ABOUT_COMPANY.findall(sentence))
+        if score > best_score:
+            best, best_score = sentence, score
+    if best_score < 2 or not validate_draft(best)["passed"]:
+        return ""
+    return best.rstrip(".!") + "."
+
+
 def generate_application_answers(job: Dict[str, Any], profile: Dict[str, Any] | None = None) -> Dict[str, str]:
     profile = profile or load_profile()
+    answers = _base_answers(job, profile)
+    fact = company_fact(job)
+    if fact:
+        company = job.get("company") or "your company"
+        role = job.get("title") or "this role"
+        quoted = f"One line in the posting stood out to me: “{fact}”"
+        answers["cover_letter"] = answers["cover_letter"].replace(
+            f"Before using this draft, I will add one verified sentence about {company}'s product, team, or mission from an official source.",
+            f"{quoted} I would really like to help with that kind of work.")
+        answers["why_company"] = (f"I'm interested in {company} because this {role} opportunity connects practical technology work "
+                                  f"with a real team and product. {quoted} I would really like to help with that kind of work.")
+    return answers
+
+
+def _base_answers(job: Dict[str, Any], profile: Dict[str, Any]) -> Dict[str, str]:
     company = job.get("company") or "your company"
     role = job.get("title") or "this role"
-    project = job.get("suggested_project") or "JobApplier"
+    project = job.get("suggested_project") or "MalpariBot"
     education = (profile.get("education") or [{}])[0]
     institution = education.get("institution") or "my university"
     degree = education.get("degree") or "Computer Science"
     minor = education.get("minor")
-    study = f"{degree} student at {institution}" + (f" with a {minor} minor" if minor else "")
+    study = f"{degree} student at {institution}" + (f" with {'an' if minor[:1].lower() in 'aeiou' else 'a'} {minor} minor" if minor else "")
     known_skills = profile.get("skills", [])
     highlighted = [skill for skill in ("Next.js", "TypeScript", "Express.js", "MySQL", "React Native", "Git") if skill in known_skills]
     tools = ", ".join(highlighted)
@@ -31,7 +78,7 @@ def generate_application_answers(job: Dict[str, Any], profile: Dict[str, Any] | 
         "work_authorization": str(profile.get("work_authorization") or "Please confirm work authorization before using this draft."),
         "relocation": profile.get("relocation", "Please confirm relocation preferences before using this draft."),
         "new_opportunities": "I'm looking for an opportunity to apply my coursework and recent project experience in a professional team, take on meaningful technical work, and grow through feedback and mentorship.",
-        "star_example": "Situation: On the Allymon fintech project, user, loan, and investor-qualification workflows needed QA validation. Task: I needed to compare the intended behavior with what the local application actually did. Action: I set up and debugged the application, exercised the relevant database, authentication, and admin flows, and documented expected versus actual behavior. Result: I produced concrete QA findings for team review. Confirm the exact interview question and keep only details you personally completed before using this draft.",
+        "star_example": "Situation: On the Riipen Advance Ontario fintech app, the marketplace, portfolio, and wallet screens still showed mock data, and the borrower and admin workflows needed validation. Task: I needed to connect real API responses and confirm the flows worked end to end. Action: I replaced the mock data with API responses, then tested the borrower and admin workflows over about 60 hours. Result: I documented the APIs, bugs, and smoke tests in a 348-line handoff for the team. Confirm the exact interview question and keep only details you personally completed before using this draft.",
         "project_bridge": f"For this application, emphasize {project} only using the factual bullets in the tailoring plan.",
     }
 

@@ -26,6 +26,9 @@ SKILL_ALIASES = {
     "Gemini API": ["gemini api"], "ElevenLabs API": ["elevenlabs api"],
     "Yahoo Finance API": ["yahoo finance api"], "Gmail API": ["gmail api"],
     "Raspberry Pi": ["raspberry pi"], "Arduino": ["arduino"],
+    "FastAPI": ["fastapi"], "PyTorch": ["pytorch"], "LightGBM": ["lightgbm"],
+    "WordPress": ["wordpress"], "Elementor": ["elementor"], "WebSockets": ["websocket"],
+    "Machine Learning": ["machine learning"], "Vercel": ["vercel"], "SonarCloud": ["sonarcloud"],
 }
 
 

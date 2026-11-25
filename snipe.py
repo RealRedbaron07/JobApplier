@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 
 from cardsnipe.notify import Notifier
 from cardsnipe.pricing import PriceService, describe
-from cardsnipe.runner import SnipeRunner
+from cardsnipe.runner import SnipeRunner, scanner_session
 from cardsnipe.settings import SnipeSettings
 from cardsnipe.store import Store
 from cardsnipe.watchlist import Target, add_target, load_watchlist, remove_target
@@ -38,6 +38,7 @@ def _build_runner(settings: SnipeSettings, source_filter: str, watchlist):
     from cardsnipe.facebook import FacebookMarketplace
 
     wanted = {"ebay", "facebook"} if source_filter == "all" else {source_filter}
+    wanted = {s for s in wanted if any(t.uses_source(s) for t in watchlist.targets)}
     needs_browser = "facebook" in wanted or ("ebay" in wanted and not settings.ebay_api_enabled)
     browser = Browser(settings) if needs_browser else None
 
@@ -101,7 +102,7 @@ def cmd_watch(args, settings: SnipeSettings) -> int:
           f"[{'LIVE' if settings.live else 'dry-run'}] sources={args.source}")
     print(f"   {targets}")
     if not settings.live:
-        print("   Bids and messages are simulated. Add --live to place real bids / send messages.")
+        print("   Dry-run never places a bid or opens a bid page. Auctions are listed only.")
     try:
         runner.watch(on_report=lambda r: _print_report(r, settings))
     except KeyboardInterrupt:
@@ -214,23 +215,31 @@ def cmd_revalue(args, settings: SnipeSettings) -> int:
 
 def cmd_collection(args, settings: SnipeSettings) -> int:
     """Sync the Collectr showcase into the local DB and print it."""
-    from cardsnipe.collectr import sync_collection
+    from cardsnipe.collectr import revalue_collection, sync_collection
 
     url = args.url or settings.collectr_showcase_url
     if not url:
         print("⚠️  Set COLLECTR_SHOWCASE_URL in .env or pass --url")
         return 1
     store = Store(settings.database_url)
+    pricer = PriceService(settings, store)
     if not args.no_sync:
-        snapshot = sync_collection(store, url, settings.chrome_profile_dir)
-        print(f"✅ Synced {snapshot.total_cards} cards · portfolio US${snapshot.total_value_usd:,.2f}")
+        snapshot = sync_collection(store, url, settings.chrome_profile_dir, pricer=pricer)
+        print(f"✅ Synced {snapshot.total_cards} cards")
+    elif args.refresh:
+        revalue_collection(store, pricer, force=True)
     items, latest = store.collection()
     if latest:
-        print(f"Portfolio ({latest.owner or 'Collectr'}): US${latest.total_value_usd:,.2f} · {latest.total_cards} cards · "
-              f"synced {latest.synced_at:%m-%d %H:%M}")
+        ours = f"US${latest.market_value_usd:,.2f}" if latest.market_value_usd else "nothing priced"
+        unvalued = f" · {latest.unvalued_items} unpriced" if latest.unvalued_items else ""
+        print(f"Portfolio ({latest.owner or 'Collectr'}): ours {ours} · Collectr US${latest.total_value_usd or 0:,.2f}"
+              f"{unvalued} · {latest.total_cards} cards · synced {latest.synced_at:%m-%d %H:%M}")
+        print("  (raw cards are valued by TCGPlayer / PriceCharting / eBay sold only — Collectr raw figures are reference)")
     for item in items:
-        change = f" ({item.change_pct:+.1f}%)" if item.change_pct is not None else ""
-        print(f"  • US${item.value_usd or 0:>8.2f}{change}  {item.name} — {item.set_name} {item.number} ×{item.quantity}")
+        bucket = item.market_bucket or "raw"
+        ours = (f"US${item.market_value_usd:>8.2f} ({'PSA ' + bucket if bucket != 'raw' else 'raw'}, {item.market_source})"
+                if item.market_value_usd else "   unpriced               ")
+        print(f"  • {ours}  Collectr US${item.value_usd or 0:.2f}  {item.name} — {item.set_name} {item.number} ×{item.quantity}")
     return 0
 
 
@@ -243,6 +252,7 @@ def cmd_remove(args, settings: SnipeSettings) -> int:
 def cmd_list(args, settings: SnipeSettings) -> int:
     watchlist = load_watchlist(settings.watchlist_path)
     print(f"Watchlist: {settings.watchlist_path}")
+    print(f"Per-card budget: {_fmt(watchlist.budget)} {settings.ebay_currency} including reported shipping, before tax")
     for t in watchlist.targets:
         flag = "" if t.enabled else " (disabled)"
         bid = f" bid≤{t.max_bid:g}" if t.max_bid else ""
@@ -361,6 +371,7 @@ def build_parser() -> argparse.ArgumentParser:
     collection = sub.add_parser("collection", aliases=["c"], help="sync + show your Collectr showcase")
     collection.add_argument("--url", help="showcase URL (default COLLECTR_SHOWCASE_URL)")
     collection.add_argument("--no-sync", action="store_true", help="just print what is stored")
+    collection.add_argument("--refresh", action="store_true", help="with --no-sync: re-price the stored cards now")
     collection.set_defaults(func=cmd_collection)
     parser.set_defaults(func=cmd_watch)  # bare `python3 snipe.py` == watch
     return parser
@@ -373,7 +384,17 @@ def main(argv: list[str] | None = None) -> int:
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
     settings = SnipeSettings.from_env().with_live(args.live)
-    return args.func(args, settings)
+    try:
+        from config import Config
+        if not Config.EXTERNAL_ACCESS_ENABLED and args.func in (cmd_scan, cmd_watch, cmd_login, cmd_value, cmd_revalue, cmd_collection):
+            raise ValueError("External access is disabled. Use the local dashboard for saved data and your regular browser for manual searches.")
+        if args.func in (cmd_scan, cmd_watch):
+            with scanner_session(settings):
+                return args.func(args, settings)
+        return args.func(args, settings)
+    except ValueError as exc:
+        print(f"Card sniper: {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

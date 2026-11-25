@@ -28,7 +28,7 @@ login: ## sign in to eBay + Facebook once (saved in the sniper Chrome profile)
 snipe: ## watch for deals (dry-run: alerts only, bids/messages simulated)
 	$(SNIPE) watch
 
-live: ## watch for deals and REALLY snipe auctions / message sellers
+live: ## same watch as snipe; auctions are still not bid on
 	$(SNIPE) --live watch
 
 scan: ## one dry-run pass
@@ -46,8 +46,8 @@ list: ## show the watchlist
 value: ## market values per grade (TCGPlayer / PriceCharting / eBay sold); REFRESH=1 to refetch
 	$(SNIPE) value $(if $(NAME),"$(NAME)") $(if $(REFRESH),--refresh)
 
-collection: ## sync + show your Collectr showcase (COLLECTR_SHOWCASE_URL)
-	$(SNIPE) collection
+collection: ## sync + show your Collectr showcase, priced by our sources; REFRESH=1 re-prices without Collectr
+	$(SNIPE) collection $(if $(REFRESH),--no-sync --refresh)
 
 add: ## add a target: NAME= CARD= SET= NUM= [MAX=] [MIN=] [BID=] [KW="..."] [REGRADE=1] [GRADED=1] [BARGAIN=20]
 	@test -n "$(NAME)" || (echo 'usage: make add NAME="Moonbreon" CARD="Umbreon VMAX (Alternate Art Secret)" SET="Evolving Skies" NUM=215/203 [MAX=550] [BID=600] [KW="a b \"c|d\""] [REGRADE=1]'; exit 1)
