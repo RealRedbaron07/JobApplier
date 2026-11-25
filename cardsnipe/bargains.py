@@ -287,6 +287,17 @@ def tcgplayer_market(browser, title, claim=None):
     browser.wait_until(lambda: title_printing(printing_prices(browser.page_text()), title)[1], 8)
     text = browser.page_text()
     printing, price = title_printing(printing_prices(text), title)
+    wanted = wanted_print(title)
+    if not price and wanted:
+        # Cheaper cards have no comparison block: select the print and read its own price.
+        for name in PRINT_NAMES[wanted]:
+            browser.get(product["url"].split("?")[0] + "?" + urlencode(
+                {"Language": "English", "Condition": "Near Mint", "Printing": name}))
+            found = lambda: condition_market_price(browser.page_text(), "Near Mint", name)
+            if browser.wait_until(lambda: found() is not None, 8):
+                text = browser.page_text()
+                printing, price = name, found()
+                break
     if not price:
         return None
     result = {**product, "price": price, "printing": printing, "sold_3m": sold_last_3_months(text),

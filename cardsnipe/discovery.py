@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
 from cardsnipe.browser import Browser, SourceUnavailable
-from cardsnipe.bargains import (CROSS_CHECK, NUMBER, PRICE_VERSION, _number_key, bank_of_canada_usd_cad, eligible, needs_recheck,
+from cardsnipe.bargains import (wanted_print, CROSS_CHECK, NUMBER, PRICE_VERSION, _number_key, bank_of_canada_usd_cad, eligible, needs_recheck,
                                 tcgplayer_market)
 from cardsnipe.ebay import EbayWeb
 from cardsnipe.facebook import FacebookMarketplace
@@ -53,6 +53,8 @@ def price_listing(browser, title, condition=""):
         product = tcgplayer_market(browser, title, condition_claim(title, condition))
         label = f"TCGplayer {PRICE_VERSION}"
     if product and product.get("price"):
+        if product.get("printing") and wanted_print(raw_title(title) if slab else title):
+            label += f", {product['printing']}"  # the plain-print tag stays for stale-price detection
         if product.get("matched_by"):
             label += f", matched by {product['matched_by']}"
         number = NUMBER.search(title or "")

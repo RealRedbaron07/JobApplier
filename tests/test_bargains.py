@@ -99,3 +99,28 @@ def test_name_search_leaves_print_words_out():
 
     assert name_query("1st Edition Fossil Gengar Holographic Pokemon Card") == "Fossil Gengar"
     assert name_query("Rayquaza Delta Species Reverse Holo") == "Rayquaza Delta Species"
+
+
+def test_reverse_holo_price_is_read_from_the_selected_print_page():
+    from cardsnipe.bargains import tcgplayer_market
+
+    class Browser:
+        url = ""
+
+        def get(self, url):
+            self.url = url
+
+        def js(self, script):
+            return [{"name": "Snivy", "number": "#11/149", "price": 0.43, "set": "Boundaries Crossed",
+                     "url": "https://www.tcgplayer.com/product/89380/snivy?page=1"}] if "product-card" in script else None
+
+        def wait_until(self, predicate, timeout=0):
+            return bool(predicate())
+
+        def page_text(self):
+            if "Printing=Reverse+Holofoil" in self.url:
+                return "Price Points\nNear Mint Reverse Holofoil\nMarket Price $1.25\nMarket Price"
+            return "Price Points\nNear Mint Normal\nMarket Price $0.43\nMarket Price"
+
+    result = tcgplayer_market(Browser(), "Snivy 11/149 Reverse Holo Boundaries Crossed")
+    assert result["printing"] == "Reverse Holofoil" and result["price"] == 1.25
